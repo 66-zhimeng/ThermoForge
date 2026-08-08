@@ -31,6 +31,8 @@ acceptance:
 
 目标还应记录计算预算、最长研究时间、最大实验数和需要人工审批的动作。
 
+`candidate_inputs` 是**封闭白名单**（[DD-16](./design-decisions.md)）：建模只允许使用其中列出的变量计算 `target`，Agent 不得引入物模型中的其他变量——即使它们在统计上表现更好（防泄漏，见 [data-survey §F1](./data-survey.md) 中 `load` 与电流百分比的重标定关系）。白名单条目可以来自不同设备对象（跨设备取数），以两层命名 `object.variable` 引用，例如用 `cooling_tower.supply_temp` 预测 `chiller.input_power`。新增或移除变量属于 Research Goal 变更，须留痕并记录理由。
+
 ## 2. 状态机
 
 ```mermaid
