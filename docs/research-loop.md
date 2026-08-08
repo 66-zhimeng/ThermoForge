@@ -204,3 +204,11 @@ research/
 - 必需变量或物理参数缺失。
 - 结果需要领域专家确认或外部试验。
 
+## 相关文档
+
+- 方案背景：[设计决策记录](./design-decisions.md) — DD-07（残差混合的代价与强制配套要求）、DD-13（机器判定发布）、DD-14（指标口径建议）；[风险 R6、R7](./risks.md) — 混合建模增益与自主性价值的验证方式
+- 上一篇：[TFDC 数据契约](./data-contract.md) — 本文实验引用的 Dataset View 与数据集 revision
+- 下一篇：[模型包与部署契约](./model-package.md) — 通过验收后如何打包、注册与发布
+- 实现参考：[实现细则与已知陷阱](./implementation-notes.md) §4–7 — 切分泄漏与 purge/embargo、指标公式与零分母、物理约束容差、可复现性
+- 参考：[工程约定](./conventions.md)（实验与发布错误码）、[术语表](./glossary.md)（状态机、ID 前缀、混合建模方式）、[实施路线图](./roadmap.md)
+

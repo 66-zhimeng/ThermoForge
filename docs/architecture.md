@@ -157,3 +157,11 @@ ThermoForge/
 - 发布决策必须由可机器检查的验收条件驱动。
 - 先实现单机、可复现闭环，再演进到队列、容器和分布式 Worker。
 
+## 相关文档
+
+- 方案背景：[设计决策记录](./design-decisions.md) — 本文第 4、5、8 节的技术选型对应 DD-02、DD-03、DD-06、DD-09 的备选与代价；[范围、非目标与前提](./scope.md) — 系统边界之外由谁负责
+- 上一篇：[文档总览](./README.md)
+- 下一篇：[TFDC 数据契约](./data-contract.md) — 本文第 3、4 节提到的 TFOM、Data Vault 和 Dataset View 的完整定义
+- 实现参考：[实现细则与已知陷阱](./implementation-notes.md) §10–12 — 工具接口返回信封、并发与原子写、Windows 平台注意事项、技术栈建议
+- 参考：[工程约定](./conventions.md)、[术语表](./glossary.md)（组件与角色速查）、[实施路线图](./roadmap.md)（本文架构的落地顺序）
+

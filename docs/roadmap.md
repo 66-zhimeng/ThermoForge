@@ -132,3 +132,11 @@
 
 该切片能同时验证数据契约、物模型、研究闭环、混合建模和部署签名，是一期最有价值的端到端样板。
 
+## 相关文档
+
+- 方案背景：[范围、非目标与前提](./scope.md) — 本文各阶段之外明确不做的方向与前提假设；[开放议题](./open-questions.md) — Phase 0 冻结 Schema 前必须回答的契约级问题
+- 上一篇：[模型包与部署契约](./model-package.md)
+- 回到：[文档总览](./README.md)
+- 各阶段对应的契约定义：[系统总体设计](./architecture.md)（Phase 3、5）、[TFDC 数据契约](./data-contract.md)（Phase 0、1）、[自主研究闭环](./research-loop.md)（Phase 2、3）
+- 开工前：[工程约定](./conventions.md) 对应 Phase 0 中「标准单位表、变量命名规范和错误码」这项交付；[实现细则与已知陷阱](./implementation-notes.md) §13 给出了 Phase 0–1 的测试基线
+

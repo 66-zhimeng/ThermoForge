@@ -80,7 +80,9 @@ properties:
     expression: header_return_temp - header_supply_temp
 ```
 
-如果数据同时提供供水温度、回水温度和温差，导入器应检查派生值一致性；超出容差时报告 `DATA_CONSISTENCY_ERROR`。
+如果数据同时提供供水温度、回水温度和温差，导入器应检查派生值一致性；超出容差时报告 `DATA_CONSISTENCY_ERROR`（`TFDC-604`）。
+
+> **单位提示**：上例中 `supply_return_temp_diff` 标注为 `Cel`。温度与温差的换算规则不同（前者仿射 `K = Cel + 273.15`，后者线性 `ΔK = ΔCel`），共用同一转换函数会引入 273.15 的偏移。温差的规范单位应为 `K`，详见 [工程约定 §2.2](./conventions.md)（该修订属待决策项）。
 
 ## 4. TFDC-XLSX v1.0
 
@@ -195,7 +197,7 @@ properties:
 - `data` 中只允许静态值，禁止公式和外部工作簿引用。
 - `property_code` 使用 `lower_snake_case`。
 - `variable_id` 大小写敏感。
-- `timestamp` 使用带时区的 ISO 8601 格式。
+- `timestamp` 使用带时区的 ISO 8601 格式，且单元格必须为**文本格式**。xlsx 不存储时区，被 Excel 识别为日期类型的单元格其偏移量已丢失，导入器不得对此做猜测（见 [工程约定 §3.1](./conventions.md)）。
 - 缺失值使用空单元格，不使用 `NULL`、`N/A`、`--`、`9999` 等哨兵值。
 - 单位必须与 TFOM 一致或可通过已登记的确定性规则转换。
 - 未声明的数据列、多余变量、非法对象引用和重复时间戳必须显式报告。
@@ -280,4 +282,13 @@ filter:
 - TFOM 范围违规、单位问题和派生量一致性问题。
 - 设备、变量和工况覆盖情况。
 - 原始文件指纹、契约版本和导入器版本。
+
+## 相关文档
+
+- 方案背景：[设计决策记录](./design-decisions.md) — DD-01（为何自研契约而非复用 Brick/Haystack）、DD-04（为何选 Excel）、DD-05（不可变数据 + View）；[风险 R8](./risks.md) — 契约严格度带来的落地摩擦
+- 上一篇：[系统总体设计](./architecture.md) — Data Vault、Dataset Engine 在整体架构中的位置
+- 下一篇：[自主研究闭环](./research-loop.md) — Dataset View 如何被 Experiment 引用
+- **实现前必读**：[工程约定](./conventions.md) — 本文引用但未展开的单位表、时区处理、指纹规范化和完整错误码
+- 实现参考：[实现细则与已知陷阱](./implementation-notes.md) §1–3（Excel 读取、类型落地、View 物化）
+- 参考：[模型包与部署契约](./model-package.md)（`variable_id` 在线上 API 的延续）、[术语表](./glossary.md)
 

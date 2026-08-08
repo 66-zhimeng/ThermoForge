@@ -139,3 +139,11 @@ flowchart LR
 - 模型加载和最小推理冒烟测试通过。
 - 回滚版本和兼容策略已记录。
 
+## 相关文档
+
+- 方案背景：[设计决策记录](./design-decisions.md) — DD-10（为何交付模型包）、DD-11（两层命名）；[开放议题 Q4、C4](./open-questions.md) — 是否进入闭环控制、签名是否需声明历史依赖
+- 上一篇：[自主研究闭环](./research-loop.md) — 模型包中 `research-lineage.json` 的来源
+- 下一篇：[实施路线图](./roadmap.md) — Phase 4 的交付物与验收标准
+- 实现参考：[实现细则与已知陷阱](./implementation-notes.md) §8–9 — 序列化格式选择、golden 预测集、历史窗口依赖、超范围策略与延迟测量口径
+- 参考：[工程约定](./conventions.md)（版本兼容与发布错误码）、[TFDC 数据契约](./data-contract.md)（`property_code` / `variable_id` 与 `bindings`）、[术语表](./glossary.md)
+
