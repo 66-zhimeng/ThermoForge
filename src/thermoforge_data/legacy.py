@@ -94,83 +94,115 @@ def convert_legacy_workbook(
     site_id: str = "WX",
     time_resolution: str = "900s",
 ) -> LegacyConversion:
-    """流式转换旧格式工作簿（read_only + data_only，内存恒定）。
+    """流式读取旧格式工作簿并转换（read_only + data_only）。
 
     原始工作簿只读；本函数不写入任何文件。
     """
     path = Path(path)
-    tz = ZoneInfo(LEGACY_TIMEZONE)
-    wb = load_workbook(path, read_only=True, data_only=True, keep_links=False)
+    sheets = load_workbook_model(path)
+    return convert_legacy_tables(
+        sheets, registry,
+        dataset_id=dataset_id, site_id=site_id,
+        time_resolution=time_resolution, source_name=path.name,
+    )
 
-    # 第一遍：各表列结构（r1–r4 多级表头）
+
+@dataclass
+class LegacySheet:
+    """旧格式工作簿的一张表（内存表示，预处理执行器的操作对象）。"""
+
+    name: str
+    header_rows: list[list[Any]]  # 4 行多级表头
+    data_rows: list[tuple[Any, ...]]  # 第 5 行起
+
+
+def load_workbook_model(path: str | Path) -> dict[str, LegacySheet]:
+    """把旧格式工作簿流式读入内存表模型（原始文件只读，不写盘）。"""
+    wb = load_workbook(Path(path), read_only=True, data_only=True,
+                       keep_links=False)
+    try:
+        sheets: dict[str, LegacySheet] = {}
+        for name in wb.sheetnames:
+            rows_iter = wb[name].iter_rows(values_only=True)
+            header = [list(r) for _, r in zip(range(4), rows_iter)]
+            data_rows = [tuple(r) for r in rows_iter]
+            sheets[name] = LegacySheet(name=name, header_rows=header,
+                                       data_rows=data_rows)
+        return sheets
+    finally:
+        wb.close()
+
+
+def convert_legacy_tables(
+    sheets: dict[str, LegacySheet],
+    registry: TfomRegistry,
+    *,
+    dataset_id: str = "WX_2025_HVAC",
+    site_id: str = "WX",
+    time_resolution: str = "900s",
+    source_name: str | None = None,
+) -> LegacyConversion:
+    """内存表模型 → TfdcDataset（预处理执行器与 xlsx 入口共用）。"""
+    tz = ZoneInfo(LEGACY_TIMEZONE)
+
+    # 各表列结构（r1–r4 多级表头）
     sheet_cols: dict[str, list[tuple[int, str, str, str]]] = {}
     objects: dict[str, tuple[str, str]] = {}  # instance → (model_id, class_zh)
     property_mapping: dict[str, str] = {}  # 原始属性名 → property_code
-    try:
-        for sheet in wb.sheetnames:
-            ws = wb[sheet]
-            header_rows = []
-            for row in ws.iter_rows(min_row=1, max_row=4, values_only=True):
-                header_rows.append(list(row))
-            cols, mapping = _parse_multi_header(header_rows)
-            sheet_cols[sheet] = cols
-            property_mapping.update(mapping)
-            for _, instance, model_name, _prop in cols:
-                model_id = MODEL_ID_MAP.get(model_name)
-                if model_id is None:
-                    raise ValueError(
-                        f"物模型名未在 MODEL_ID_MAP 登记: {model_name!r}（{sheet}）"
-                    )
-                class_zh = next(
-                    (str(v) for v in header_rows[0][1:] if v is not None), sheet
+    for sheet, model in sheets.items():
+        header_rows = model.header_rows
+        cols, mapping = _parse_multi_header(header_rows)
+        sheet_cols[sheet] = cols
+        property_mapping.update(mapping)
+        for _, instance, model_name, _prop in cols:
+            model_id = MODEL_ID_MAP.get(model_name)
+            if model_id is None:
+                raise ValueError(
+                    f"物模型名未在 MODEL_ID_MAP 登记: {model_name!r}（{sheet}）"
                 )
-                objects.setdefault(instance, (model_id, class_zh))
-    finally:
-        wb.close()
+            class_zh = next(
+                (str(v) for v in header_rows[0][1:] if v is not None), sheet
+            )
+            objects.setdefault(instance, (model_id, class_zh))
 
-    # 第二遍：数据（每表时间轴 + 列值）
+    # 数据（每表时间轴 + 列值）
     tz_degraded_rows = 0
     per_sheet: dict[str, tuple[list[datetime], dict[str, list[Any]]]] = {}
-    wb = load_workbook(path, read_only=True, data_only=True, keep_links=False)
-    try:
-        for sheet, cols in sheet_cols.items():
-            ws = wb[sheet]
-            ts: list[datetime] = []
-            values: dict[str, list[Any]] = {
-                f"{inst}.{prop}": [] for _, inst, _m, prop in cols
-            }
-            bool_props = {
-                f"{inst}.{prop}"
-                for _, inst, model_name, prop in cols
-                if _tfom_dtype(registry, MODEL_ID_MAP[model_name], prop) == "boolean"
-            }
-            for row in ws.iter_rows(min_row=5, values_only=True):
-                stamp = row[0]
-                if stamp is None and all(v is None for v in row[1:]):
-                    continue
-                if not isinstance(stamp, datetime):
-                    raise ValueError(
-                        f"{sheet} 时间戳不是 Excel 序列号: {stamp!r}"
-                    )
-                if stamp.tzinfo is not None:
-                    ts.append(stamp.astimezone(timezone.utc))
-                else:
-                    # naive 序列号：按显式声明的 Asia/Shanghai 解释（降级）
-                    ts.append(stamp.replace(tzinfo=tz).astimezone(timezone.utc))
-                    tz_degraded_rows += 1
-                for col_idx, instance, _m, prop in cols:
-                    vid = f"{instance}.{prop}"
-                    v = row[col_idx] if col_idx < len(row) else None
-                    if vid in bool_props and v is not None:
-                        if v == 1:
-                            v = True
-                        elif v == 0:
-                            v = False
-                        # 其他取值（如 19）原样保留 → 管线报 TFDC-404
-                    values[vid].append(v)
-            per_sheet[sheet] = (ts, values)
-    finally:
-        wb.close()
+    for sheet, cols in sheet_cols.items():
+        ts: list[datetime] = []
+        values: dict[str, list[Any]] = {
+            f"{inst}.{prop}": [] for _, inst, _m, prop in cols
+        }
+        bool_props = {
+            f"{inst}.{prop}"
+            for _, inst, model_name, prop in cols
+            if _tfom_dtype(registry, MODEL_ID_MAP[model_name], prop) == "boolean"
+        }
+        for row in sheets[sheet].data_rows:
+            stamp = row[0] if row else None
+            if stamp is None and all(v is None for v in row[1:]):
+                continue
+            if not isinstance(stamp, datetime):
+                raise ValueError(
+                    f"{sheet} 时间戳不是 Excel 序列号: {stamp!r}"
+                )
+            if stamp.tzinfo is not None:
+                ts.append(stamp.astimezone(timezone.utc))
+            else:
+                # naive 序列号：按显式声明的 Asia/Shanghai 解释（降级）
+                ts.append(stamp.replace(tzinfo=tz).astimezone(timezone.utc))
+                tz_degraded_rows += 1
+            for col_idx, instance, _m, prop in cols:
+                vid = f"{instance}.{prop}"
+                v = row[col_idx] if col_idx < len(row) else None
+                if vid in bool_props and v is not None:
+                    if v == 1:
+                        v = True
+                    elif v == 0:
+                        v = False
+                    # 其他取值（如 19）原样保留 → 管线报 TFDC-404
+                values[vid].append(v)
+        per_sheet[sheet] = (ts, values)
 
     # 并集时间轴 + 列对齐
     axis = sorted({t for ts, _ in per_sheet.values() for t in ts})
@@ -226,7 +258,7 @@ def convert_legacy_workbook(
         timezone=LEGACY_TIMEZONE,
         time_resolution=time_resolution,
         source_system="legacy_excel",
-        description=f"旧格式工作簿转换: {path.name}",
+        description=f"旧格式工作簿转换: {source_name or '<内存表模型>'}",
     )
     dataset = TfdcDataset(
         manifest=manifest,
