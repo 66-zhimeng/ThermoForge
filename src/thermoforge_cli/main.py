@@ -280,6 +280,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", help="机读 JSON")
     s.add_argument("--recent", type=int, default=5, help="最近实验条数")
     s.set_defaults(handler=None)
+
+    # ---- agent（内置研发 Agent，非工具信封）----
+    a = sub.add_parser("agent", help="内置研发 Agent（对话 REPL）")
+    a.add_argument("--model", help="覆盖模型名（> 环境变量 > 配置文件）")
+    a.add_argument("--base-url", help="覆盖 OpenAI 兼容端点")
+    a.add_argument("--api-key-env", default="TF_AGENT_API_KEY",
+                   help="API key 的环境变量名（默认 TF_AGENT_API_KEY）")
+    a.add_argument("--stream", action="store_true", help="流式输出")
+    a.add_argument("--check", action="store_true",
+                   help="只验证配置与连通性（最小请求），用于排障")
+    a.add_argument("--message", "-m", help="单轮提问（非交互，便于脚本）")
+    a.set_defaults(handler=None)
     return parser
 
 
@@ -305,6 +317,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             status = build_status(ctx, recent=args.recent)
             print(render_json(status) if args.json else render_text(status))
             return 0
+        if args.group == "agent":
+            return _run_agent(args, ctx)
         handler = getattr(args, "handler", None)
         if handler is None:
             raise CliError(f"命令未实现: {args.group} {args.command}")
@@ -317,6 +331,46 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"tf: 未预期的 CLI 错误: {type(exc).__name__}: {exc}",
               file=sys.stderr)
         return 2
+
+
+# ---------------------------------------------------------------- agent
+
+
+def _run_agent(args: argparse.Namespace, ctx: ToolContext) -> int:
+    """`tf agent`：内置研发 Agent（REPL / 单轮 / 连通性检查）。
+
+    退出码：0 正常；2 配置缺失或 --check 连通性失败（CLI 自身错误）。
+    """
+    from thermoforge_agent import AgentConfig, PiAgent, config_guidance
+    from thermoforge_agent.client import ChatClient
+    from thermoforge_agent.repl import run_repl
+
+    config = AgentConfig.load(
+        api_key_env=args.api_key_env,
+        base_url=args.base_url,
+        model=args.model,
+        stream=args.stream or None,
+    )
+    if config is None:
+        print(config_guidance(args.api_key_env), file=sys.stderr)
+        return 2
+    if args.check:
+        try:
+            result = ChatClient(config).check()
+        except Exception as exc:
+            print(f"连通性检查失败: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            print("排查：api_key 是否有效、base_url 是否可达、模型名是否存在。",
+                  file=sys.stderr)
+            return 2
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    agent = PiAgent(config, ctx)
+    if args.message:
+        print(agent.ask(args.message))
+        return 0
+    run_repl(agent)
+    return 0
 
 
 if __name__ == "__main__":

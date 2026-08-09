@@ -97,6 +97,40 @@ examples/chiller_power/report.md
 
 AI 助手通过 `pi/tools.json` 里登记的 22 个工具完成这些操作，每一步都有结构化记录。要接入你自己的 Agent（Pi Agent），看 `pi/README.md`——CLI 调用和 Python 调用两种方式任选。
 
+### 内置 Agent：`tf agent`（不依赖外部助手）
+
+仓库内置一个可对话的研发 Agent，配好密钥即可使用：
+
+```bash
+# 1. 配置密钥（二选一；密钥不会入库）
+export TF_AGENT_API_KEY=sk-...        # Moonshot/Kimi、OpenAI、DeepSeek 等均可
+# 或：cp pi/agent.example.toml pi/agent.toml，填入 api_key
+
+# 2. 验证连通性
+.venv/Scripts/tf agent --check        # 输出 {"ok": true, ...} 即就绪
+
+# 3. 开始对话
+.venv/Scripts/tf agent
+```
+
+示例对话：
+
+```text
+you> 现在有哪些数据集？质量怎么样？
+  → 调用 tf_dataset_list → ok
+  → 调用 tf_dataset_profile → ok
+agent> 当前有 2 个数据集：WX_2025_HVAC（35,040 行）……
+
+you> 把表现最好的实验发布为 plant-power 1.2.0
+  → 调用 tf_model_publish → ok
+agent> 已发布 plant-power@1.2.0，六项门禁全部通过……
+```
+
+环境变量 `TF_AGENT_BASE_URL` / `TF_AGENT_MODEL` 可切换端点与模型（任何
+OpenAI 兼容的 chat completions + function calling 端点都能用）。审批类
+动作（如预处理规则审批）不会直接执行——Agent 会向你弹确认，输入 `y`
+才以 human 身份执行并留痕。会话记录保存在 `research/agent_sessions/`。
+
 ---
 
 ## 5. 核心概念速查（看懂结果所需的最小词汇表）

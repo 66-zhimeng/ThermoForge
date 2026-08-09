@@ -1,0 +1,18 @@
+# 内置 Agent 配置模板
+#
+# 用法：cp pi/agent.example.toml pi/agent.toml，填入 api_key。
+# pi/agent.toml 已在 .gitignore 中，密钥不会提交入库。
+#
+# 密钥申请（任一 OpenAI 兼容端点均可）：
+#   Moonshot/Kimi → https://platform.moonshot.cn/console/api-keys
+#   OpenAI        → https://platform.openai.com/api-keys
+#   DeepSeek      → https://platform.deepseek.com/api_keys
+
+api_key = "sk-在这里填入你的密钥"
+base_url = "https://api.moonshot.cn/v1"
+model = "kimi-k2-0905-preview"
+
+# [tools]
+# 不暴露给模型的工具（默认排除 tf_preprocess_approve，审批走
+# tf_human_approval 元工具 + REPL 人工确认）：
+# exclude = ["tf_preprocess_approve"]
