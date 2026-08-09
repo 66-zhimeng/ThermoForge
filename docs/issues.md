@@ -45,6 +45,22 @@
 | I-28 | 与既有 BMS / 能效平台的关系 | 决策 | 项目方 | 待决策 | [Q5](./open-questions.md) |
 | I-29 | 是否复用 Brick / Haystack / 223P | 决策 | 项目方 + 设计 | 待决策 | [Q6](./open-questions.md) |
 | I-30 | 各文档中 **[草案]** 阈值的标定 | 实现 | 设计 | 待确认 | [conventions §8](./conventions.md) [implementation-notes §14](./implementation-notes.md) |
+| I-31 | `objects.parent_id` 示例引用未登记对象，成员资格无法强制 | 契约 | 设计 | 待决策 | [data-contract §4](./data-contract.md)（Phase 0 实现发现） |
+| I-32 | `content_sha256` 未明示 `timestamp` 列是否参与指纹 | 契约 | 设计 | 待决策 | [conventions §5.2](./conventions.md)（Phase 0 实现发现） |
+| I-33 | 温差别名 `Cel` 与温度规范单位同名，单位消歧依赖 `quantity_kind` 贯穿全链路 | 契约 | 设计 | 待确认 | [conventions §2.1–2.2](./conventions.md)（Phase 0 实现发现） |
+| I-34 | 契约缺少通用「记录值非法」错误码，部分校验失败暂归入近义码 | 契约 | 设计 | 待决策 | Phase 1 实现发现 |
+| I-35 | TFDC-502 授权降级后按 WARN 呈现，注册表主级别为 ERROR | 契约 | 设计 | 待决策 | Phase 1 实现发现 |
+| I-36 | 旧格式工作簿 `runtime_accum` 原始单位未确认，暂按 `s` 登记 | 数据 | 数据提供方 | 待确认 | Phase 1 实现发现 |
+| I-37 | 旧格式适配器的 0/1→布尔转换属适配层登记规则，需数据提供方确认语义 | 数据 | 数据提供方 | 待确认 | Phase 1 实现发现 |
+| I-38 | Experiment 契约 `hyperparameters` 只支持标量，physics 输入映射与单调性约束暂以字符串编码 | 契约 | 设计 | 待决策 | Phase 2 实现发现 |
+| I-39 | `environment_lock` 包条目 sha256 的取值口径未定义，实现取 `name==version` 摘要 | 契约 | 设计 | 待决策 | [conventions §5.3](./conventions.md)（Phase 2 实现发现） |
+| I-40 | `cop_below_carnot` 检查中冷凝温度以冷却水供水温度近似，端口约定需明确 | 实现 | 设计 | 待确认 | Phase 2 实现发现 |
+| I-41 | §6.2 的 `COP > 0` 与「制冷量为正时 input_power > 0」实现上是同一判定，重复计数 | 契约 | 设计 | 待决策 | [implementation-notes §6.2](./implementation-notes.md)（Phase 2 实现发现） |
+| I-42 | 模型状态机 `can_transition` 允许沿链跳级，发布留痕可被绕过 | 契约 | 设计 | 待决策 | [model-package §5](./model-package.md)（Phase 4 实现发现） |
+| I-43 | 冷加载冒烟未按 environment.lock 重建依赖，与 §8.3 有差距 | 实现 | 设计 | 待设计 | [implementation-notes §8.3](./implementation-notes.md)（Phase 4 实现发现） |
+| I-44 | 编排器「planner 无可行假设」与「连续无信息增益」共用停止码；发布工具默认超范围策略待确认 | 实现 | 设计 | 待确认 | [research-loop §9](./research-loop.md)（Phase 3 实现发现） |
+| I-45 | Q9 初始验收 CVRMSE ≤ 0.10 实测无诚实模型可达，切片已修订为 0.13 并留痕 | 阈值 | 设计 | 待确认 | [data-survey §Q9](./data-survey.md)（垂直切片实测） |
+| I-46 | 残差混合的 monotone_constraints 只约束残差项，组合模型单调性不传递 | 实现 | 设计 | 待决策 | [implementation-notes §6.3](./implementation-notes.md)（垂直切片实测） |
 
 ---
 
@@ -128,6 +144,111 @@
 | 负制冷量 | `集总负载.load` 最小 −29,247.9 | `TFDC-601` |
 | 功率与电流零值不一致 | `chiller_01.power` 9,594 个零值 vs `电流百分比` 21,630 个零值 | `TFDC-604` |
 | 表头行标签互换 | 冷冻水泵表「物模型」行装的是实例名 `chwp_01` | — |
+
+---
+
+## Phase 0 实现中发现的契约问题
+
+### I-31 `objects.parent_id` 示例引用未登记对象
+
+**背景**：Phase 0 在 `TfdcDataset` 做跨表引用校验时发现，[data-contract §4](./data-contract.md) 的示例中 `CH-01.parent_id = SYS-CHILLER`、`SYS-CHW.parent_id = DC01`，而 `SYS-CHILLER` 与 `DC01` 均未出现在 `objects` 表中。若按 TFDC-301 的口径强制 `parent_id ∈ objects`，文档自己的示例就无法通过校验。
+
+**Phase 0 的处理**：record 结构层不强制 parent_id 成员资格（仅校验格式），成环检测（TFDC-309）与成员资格留给 Phase 1 导入器的语义校验。
+
+**需要决策**：parent_id 允许引用站点 / 未登记的上层系统（则 TFDC-301 的适用范围需写明例外），还是要求所有祖先都必须登记为对象。
+
+### I-32 `content_sha256` 未明示 `timestamp` 列是否参与指纹
+
+**背景**：[conventions §5.2](./conventions.md) 规定「列按 variable_id 字典序排序、行按 timestamp 升序排序」，列摘要只提到 `variable_id` 列，未说明时间轴本身是否参与哈希。若不参与，「同一组值配到不同时间轴」会得到相同 `content_sha256`，revision 去重会把两条不同时间轴的数据误判为同一内容。
+
+**Phase 0 的处理**（`thermoforge_core.fingerprint.content_sha256`）：将 `timestamp` 作为第一列参与列摘要，dtype 记为 `timestamp`，值按 UTC 微秒 int64 小端编码。若契约另有约定，需同步修订实现与指纹回归测试。
+
+### I-33 温差别名 `Cel` 与温度规范单位同名
+
+**背景**：[conventions §2.1](./conventions.md) 中 `Cel` 既是温度的规范单位，又是温差（规范单位 `K`）的允许别名。仅凭单位字符串无法确定 `Cel` 该走仿射（+273.15）还是线性（恒等）换算，必须依赖 `quantity_kind` 消歧。
+
+**Phase 0 的处理**：`normalize_unit(unit, quantity_kind)` 接受可选的 quantity_kind；`convert_value` 在未声明 quantity_kind 时拒绝 `Cel ↔ K` 换算（报 TFDC-402），防止 273.15 偏移被静默引入。这意味着 **quantity_kind 事实上成为必填语义**，与 [conventions §8 待决策 #1](./conventions.md) 相关，建议尽快拍板为必填。
+
+---
+
+## Phase 1 实现中发现的契约问题
+
+### I-34 缺少通用「记录值非法」错误码
+
+**背景**：conventions §7 的错误码对单元格级问题覆盖良好，但以下情形没有精确归属：objects/parameters 等表的行校验失败（非引用、非命名问题）、data 表首列不是 `timestamp`、manifest 可选字段格式错误。Phase 1 导入器暂将它们归入 `TFDC-202`（MANIFEST_VALUE_INVALID）或 `TFDC-304`（标识符格式），语义上是近义借用。
+
+**建议**：新增通用码（如 `TFDC-206 RECORD_VALUE_INVALID`），或为每张表的字段级校验逐个分配码。
+
+### I-35 TFDC-502 授权降级后的级别
+
+**背景**：[conventions §3.1](./conventions.md) 允许「manifest.timezone 已声明且用户显式允许」时按该时区解释 naive 时间戳，并要求记录降级行为。注册表中 TFDC-502 主级别为 ERROR，未说明授权降级后的级别。Phase 1 的处理：授权后以 **WARN** 呈现（计数 + `degradations` 记录），未授权仍为 ERROR——与 TFDC-503 的「WARN / ERROR」双级别写法不一致，建议契约明确。
+
+### I-36 旧格式工作簿 `runtime_accum` 单位未确认
+
+**背景**：旧格式工作簿各设备的 `runtime_accum` 数值量级与 `s`/`h` 均不能互相排除。Phase 1 在 TFOM（chiller.v2 等）中暂按 `s` 登记。若实际为小时，涉及单位换算与模型输入口径，需数据提供方确认后修订物模型版本。
+
+### I-37 适配层 0/1→布尔转换需确认
+
+**背景**：旧格式工作簿的 `status_run`/`fault_alarm` 等布尔语义字段以 0/1 存储，而 TFDC `boolean` 只接受 TRUE/FALSE（conventions §4.1）。适配层（`thermoforge_data.legacy`）将 0/1 显式转为 False/True，其他取值（如 19）原样进入管线以 TFDC-404 REJECT 呈现。该转换规则已写入 lineage（`property_name_mapping` / 适配器说明），但 0/1 的语义（是否 1=运行）需数据提供方确认。
+
+**Phase 1 顺带说明**：[I-11](#p1-详情摘要) 的规范化预处理工具已落地为 `thermoforge_data.legacy`（转换 + 标准管线校验两段式）；I-15 的各项缺陷在真实工作簿导入中均以对应诊断呈现（负流量/负制冷量为 TFDC-601 REJECT，布尔 19 为 TFDC-404 REJECT，全空列为 TFDC-607 WARN），导入可完成。
+
+---
+
+## Phase 2 实现中发现的契约问题
+
+### I-38 `hyperparameters` 只支持标量，结构化超参被迫字符串编码
+
+**背景**：Experiment 契约（contracts/experiment）中 `hyperparameters` 的值类型为 `float | int | str | bool`。Phase 2 的 physics 模型需要「逻辑输入 → 数据列名」映射（`chw_flow=evap_chw_flow` 等）、hybrid 模型需要逐特征的 `monotone_constraints`，两者都是字典结构，当前只能在 `thermoforge_research._child` 中以 `"k=v;…"` / `"feat:1;…"` 字符串编码，牺牲了机器可校验性。
+
+**建议**：契约扩展为允许一层嵌套 mapping，或为 physics/hybrid 路线增加显式字段（`input_mapping`、`monotone_constraints`）。
+
+### I-39 `environment_lock` 包条目 sha256 的取值口径未定义
+
+**背景**：[conventions §5.3](./conventions.md) 规定 packages 为 `[{name, version, sha256}, ...]`，但未定义 sha256 的计算对象（wheel 文件？安装目录？）。Phase 2（`thermoforge_research.runner.current_environment_lock`）取 `sha256("name==version")` 作为锁内身份——它保证同环境同指纹、跨环境不同指纹，但**不能**发现「同版本号内容被替换」的情形；该保证实际由 uv.lock 承担。若契约意图是内容级校验，需定义口径并修订实现。
+
+### I-40 Carnot 检查的冷凝温度端口约定
+
+**背景**：`physics_checks.check_hard_constraints` 的 `cop_below_carnot` 需要蒸发/冷凝两侧温度。Experiment Runner 在视图中只有冷却水**供水**温度时以其近似冷凝温度（偏高估 Carnot 上限会放松约束还是收紧取决于端口选择），近似口径写入 `physics_report.json` 的 `note` 字段。需要契约层明确应使用哪个端口（冷凝器回水/冷却水回水），以及在端口缺失时该约束应跳过还是降级。
+
+### I-41 `COP > 0` 与「制冷量为正时 input_power > 0」重复计数
+
+**背景**：[implementation-notes §6.2](./implementation-notes.md) 把 `COP > 0` 和「制冷量为正时 `input_power > 0`」列为两条独立硬约束，但在 `Q > 0` 的适用条件下二者是同一判定（COP = Q/P）。Phase 2 实现保留两条以便与文档对照，代价是同一违规样本被两条约束同时计入（总体口径不受影响，每条单独口径虚高）。建议契约合并为一条，或为二者定义不同的适用条件。
+
+---
+
+## Phase 3/4 实现中发现的契约问题
+
+### I-42 模型状态机允许沿链跳级
+
+**背景**：`thermoforge_core.contracts.model_package.can_transition` 只判定「沿链前进」（目标序号 > 当前序号），因此 `candidate → approved` 这类跳级转换在契约层是合法的。`ModelRegistry.publish` 自身逐步走 `candidate → validated → approved → production` 并留痕，但任何直接调用 `transition()` 的写入方都可以跳过中间状态，validated/approved 的审计语义被架空。
+
+**需要决策**：状态机是否要求逐级前进（`j == i + 1`），还是保留跳级能力并把 `publish()` 定为唯一允许的多级路径。
+
+### I-43 冷加载冒烟未按 environment.lock 重建依赖
+
+**背景**：[implementation-notes §8.3](./implementation-notes.md) 要求冒烟测试在「新解释器进程、按 `environment.lock` 重建的依赖、仅挂载模型包目录」中执行。Phase 4 的 `_gate_smoke` 做到了新解释器（`python -I` 隔离模式、空临时 cwd、仅传模型包路径），但依赖仍是当前 venv 的 site-packages——没有按 `environment.lock` 重建环境（重建需要 uv 解析与安装，单机门禁内代价过高）。后果是「模型包缺失依赖声明」一类问题无法被冒烟发现，只能发现加载/行为差异。
+
+**需要设计**：是否在发布门禁之外增加可选的「完整冷环境验证」（按 lock 重建 venv 的离线流程），或在 §8.3 明确单机门禁的降级口径。
+
+### I-44 编排器停止码与发布工具的两个默认口径
+
+**背景**：Phase 3 实现中发现两处需要拍板的口径：
+
+1. research-loop §2 的「MODEL_REVIEW → STOPPED: no useful hypothesis」与 §9 的「连续若干轮无显著信息增益」在 `ResearchOrchestrator` 中共用停止码 `no_information_gain`（`detail` 字段区分成因：planner 耗尽 vs 增益停滞）。若下游要分别统计，需要独立停止码。
+2. `tf_model_publish` 自动从数据版本生成签名与约束：单位/范围取自数据变量声明，未声明范围的输入默认 `out_of_range=reject`（可通过参数覆盖）。「无工程范围的输入越界时该如何处置」属于部署策略，需领域确认。
+
+### I-45 Q9 初始验收阈值实测不可达
+
+**背景**：[data-survey §Q9](./data-survey.md) 建议初始验收 `CVRMSE ≤ 0.10、NMBE ±0.02`，依据是探查期 OLS 估计（CVRMSE≈0.12）。垂直切片（`examples/chiller_power`）完整管线实测：线性基线面 A CVRMSE=0.1216（最优诚实模型）、残差混合 0.1655、物理路线 1.1765（F6 未决，仅作参照）。**无诚实模型达到 0.10**——0.10 隐含假设了非线性模型能显著超过线性，实测不成立（树模型在时间外推面上外推能力弱）。
+
+**切片的处理**：阈值修订为 CVRMSE ≤ 0.13（最优诚实模型 + 合理余量），修订理由与三次实验 ID 在 Ledger 决策记录中留痕，依据写入 `examples/chiller_power/report.md`。待 F6 的 COP 量纲问题解决后应重新标定并收紧。
+
+### I-46 残差混合的单调性约束不传递到组合模型
+
+**背景**：`ResidualHybrid` 的 `monotone_constraints` 由 XGBoost 在**残差项**上强制，但组合输出 `Y = Y_physics + ML(X)` 的单调性还取决于物理主干：P = Q/COP 中 COP 随 PLR（即流量）变化，主干对流量不必单调。切片实测 hybrid 模型 `monotonic:chw_flow:+` 违规 17/20，尽管残差项声明了 `chw_flow:1`。
+
+**需要决策**：单调性约束的语义是「残差项单调」还是「组合输出单调」？若是后者，实现上需要对物理主干做单调性参数限制（如约束 c3 符号），或在契约中明确单调性检查的对象口径。
 
 ---
 

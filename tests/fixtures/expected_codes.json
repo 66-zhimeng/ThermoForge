@@ -1,0 +1,39 @@
+{
+  "invalid_TFDC-103_missing_sheet.xlsx": [
+    "TFDC-103"
+  ],
+  "invalid_TFDC-105_merged_cell.xlsx": [
+    "TFDC-105"
+  ],
+  "invalid_TFDC-107_duplicated_header.xlsx": [
+    "TFDC-107"
+  ],
+  "invalid_TFDC-108_formula.xlsx": [
+    "TFDC-108"
+  ],
+  "invalid_TFDC-204_bad_timezone.xlsx": [
+    "TFDC-204"
+  ],
+  "invalid_TFDC-205_bad_resolution.xlsx": [
+    "TFDC-205"
+  ],
+  "invalid_TFDC-304_malformed_variable_id.xlsx": [
+    "TFDC-304"
+  ],
+  "invalid_TFDC-305_undeclared_variable.xlsx": [
+    "TFDC-305"
+  ],
+  "invalid_TFDC-307_duplicated_variable.xlsx": [
+    "TFDC-307"
+  ],
+  "invalid_TFDC-401_unknown_unit.xlsx": [
+    "TFDC-401"
+  ],
+  "invalid_TFDC-502_naive_timestamp.xlsx": [
+    "TFDC-502"
+  ],
+  "invalid_TFDC-503_duplicated_timestamp.xlsx": [
+    "TFDC-503"
+  ],
+  "valid_minimal.xlsx": []
+}

@@ -1,0 +1,88 @@
+# 系统级冷站物模型（首个垂直切片专用，DD-12 修订版）。
+# 「运行冷机总功率」是跨对象聚合目标，单机 chiller.v2 模型无法表达；
+# 按 model-package §3 的通用签名思路，为冷站（plant）注册系统级对象模型。
+# 属性值由 examples/chiller_power/derive_plant.py 从 WX_2025_HVAC 派生，
+# 派生规则与源 revision 记录在数据集 lineage 中。
+contract: TFOM
+contract_version: "1.0"
+model_id: plant
+version: "1.0"
+properties:
+  chw_flow:
+    name_zh: 冷冻水总流量（chw_A1.f + chw_A2.f）
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 40000.0
+  chw_supply_temp:
+    name_zh: 冷冻水供水温度（两总管逐点一致，取 chw_A1）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  chw_return_temp:
+    name_zh: 冷冻水回水温度（两总管逐点一致，取 chw_A1）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  cw_supply_temp:
+    name_zh: 冷却水供水温度（两总管逐点一致，取 cw_A1）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  cw_return_temp:
+    name_zh: 冷却水回水温度（两总管逐点一致，取 cw_A1）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  ambient_t:
+    name_zh: 室外干球温度
+    unit: Cel
+    dtype: float
+    role: disturbance
+    quantity_kind: temperature
+    min_value: -40.0
+    max_value: 50.0
+  ambient_h:
+    name_zh: 室外相对湿度
+    unit: "%"
+    dtype: float
+    role: disturbance
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
+  run_count:
+    name_zh: 运行冷机台数（status_run=true 计数）
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 16.0
+  any_running:
+    name_zh: 任一冷机运行（run_count >= 1，View 过滤用）
+    unit: "1"
+    dtype: boolean
+    role: state
+    quantity_kind: dimensionless
+  total_power:
+    name_zh: 运行冷机总功率（sum of chiller.power where status_run=1）
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 8000.0

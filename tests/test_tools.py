@@ -1,0 +1,270 @@
+"""Phase 3 工具层（architecture §6、implementation-notes §11）。
+
+- 信封字段与稳定 ID（有副作用工具）；
+- sample 200 行硬上限；profile 分位数固定点位；
+- goal → hypothesis（basis 强制）→ view → experiment → run/get/compare/publish；
+- pi/tools.json 与 TOOL_REGISTRY 一致性。
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from thermoforge_research.envelope import SAMPLE_MAX_ROWS
+from thermoforge_research.runner import current_environment_lock
+from thermoforge_research.tools import (
+    TOOL_REGISTRY,
+    tf_dataset_compare,
+    tf_dataset_get,
+    tf_dataset_list,
+    tf_dataset_materialize,
+    tf_dataset_profile,
+    tf_dataset_query,
+    tf_dataset_sample,
+    tf_dataset_schema,
+    tf_experiment_get,
+    tf_experiment_plan,
+    tf_experiment_run,
+    tf_goal_create,
+    tf_hypothesis_create,
+    tf_model_compare,
+    tf_model_publish,
+    tf_research_status,
+)
+
+from phase2_helpers import FEATURES, TARGET, view_definition
+from phase34_helpers import make_ctx
+
+
+@pytest.fixture()
+def ctx_ref(tmp_path):
+    return make_ctx(tmp_path, n_steps=600)
+
+
+def _goal_doc(**overrides):
+    doc = {
+        "name": "冷水机输入功率模型",
+        "object_model": "chiller.v1",
+        "purpose": "optimization",
+        "target": TARGET,
+        "candidate_inputs": list(FEATURES),
+        "acceptance": {"cvrmse_max": 0.5},
+    }
+    doc.update(overrides)
+    return doc
+
+
+def _experiment_doc(goal_id, hypothesis_id, view_id):
+    return {
+        "goal_id": goal_id,
+        "hypothesis_id": hypothesis_id,
+        "dataset_view": view_id,
+        "model": {"category": "data", "estimator": "ridge",
+                  "hyperparameters": {"alpha": 0.5}},
+        "target": TARGET,
+        "validation": {"temporal_split": {"train": 0.70, "validate": 0.15,
+                                          "test": 0.15}},
+        "metrics": ["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE"],
+        "runtime": {"environment_lock": current_environment_lock()[0],
+                    "random_seed": 20260808},
+    }
+
+
+def _research_setup(ctx, ref):
+    goal = tf_goal_create(ctx, _goal_doc())
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "线性基线足够好")
+    plan = tf_experiment_plan(
+        ctx, _experiment_doc(goal["id"], hyp["id"], mat["id"]))
+    return goal, mat, hyp, plan
+
+
+# ---------------------------------------------------------------- 数据工具
+
+
+def test_dataset_list_get_schema(ctx_ref):
+    ctx, ref = ctx_ref
+    listing = tf_dataset_list(ctx)
+    assert listing["ok"] and listing["summary"]["count"] == 1
+    assert listing["summary"]["datasets"][0]["revisions"][0]["ref"] == ref
+
+    got = tf_dataset_get(ctx, ref)
+    assert got["ok"] and got["id"] == ref
+    assert got["summary"]["manifest"]["dataset_id"] == "TEST02_RESEARCH"
+
+    schema = tf_dataset_schema(ctx, ref)
+    props = {v["property_code"] for v in schema["summary"]["variables"]}
+    assert set(FEATURES) | {TARGET} <= props
+
+    missing = tf_dataset_get(ctx, "TEST02_RESEARCH@rev_9999")
+    assert missing["ok"] is False
+    assert missing["diagnostics"][0]["code"] == "TFV-703"
+
+
+def test_dataset_profile_fixed_quantile_points(ctx_ref):
+    ctx, ref = ctx_ref
+    env = tf_dataset_profile(ctx, ref)
+    assert env["ok"]
+    assert env["summary"]["quantile_points"] == ["min", "p01", "p25", "p50",
+                                                 "p75", "p99", "max"]
+    var = next(v for v in env["summary"]["variables"]
+               if v["variable_id"] == "CH-01.input_power")
+    dist = var["distribution"]
+    assert list(dist) == ["min", "p01", "p25", "p50", "p75", "p99", "max"]
+    assert dist["min"] <= dist["p01"] <= dist["p50"] <= dist["p99"] <= dist["max"]
+
+
+def test_dataset_query_aggregates_only(ctx_ref):
+    ctx, ref = ctx_ref
+    env = tf_dataset_query(ctx, ref, variable_ids=["CH-01.input_power"])
+    assert env["ok"]
+    stats = env["summary"]["stats"]["CH-01.input_power"]
+    assert stats["count"] == 600 and stats["missing"] == 0
+    assert stats["min"] < stats["mean"] < stats["max"]
+    bad = tf_dataset_query(ctx, ref, variable_ids=["CH-01.nope"])
+    assert bad["ok"] is False and bad["diagnostics"][0]["code"] == "TFV-802"
+
+
+def test_dataset_sample_hard_cap_200(ctx_ref):
+    ctx, ref = ctx_ref
+    env = tf_dataset_sample(ctx, ref, n=500,
+                            variable_ids=["CH-01.input_power"])
+    assert env["ok"] and env["truncated"] is True
+    assert env["summary"]["returned"] == SAMPLE_MAX_ROWS
+    assert env["summary"]["total_matched"] == 600
+    small = tf_dataset_sample(ctx, ref, n=10,
+                              variable_ids=["CH-01.input_power"])
+    assert small["summary"]["returned"] == 10
+    assert small["truncated"] is False
+
+
+def test_dataset_materialize_stable_view_id(ctx_ref):
+    ctx, ref = ctx_ref
+    env = tf_dataset_materialize(ctx, view_definition(ref))
+    assert env["ok"] and env["id"] == "VIEW-0001"
+    assert env["summary"]["view_hash"]
+    again = tf_dataset_materialize(ctx, view_definition(ref))
+    assert again["summary"]["cache_reused"] is True  # 同定义命中缓存
+    assert again["id"] == "VIEW-0002"  # 登记是新实体，物化缓存复用
+
+
+def test_dataset_compare(ctx_ref):
+    ctx, ref = ctx_ref
+    same = tf_dataset_compare(ctx, ref, ref)
+    assert same["summary"]["content_identical"] is True
+    assert same["summary"]["variables_added"] == []
+
+
+# ---------------------------------------------------------------- 研究工具
+
+
+def test_goal_create_returns_stable_id_and_validates(ctx_ref):
+    ctx, _ = ctx_ref
+    env = tf_goal_create(ctx, _goal_doc())
+    assert env["ok"] and env["id"] == "RG-0001"
+    assert env["summary"]["target"] == TARGET
+    bad = tf_goal_create(ctx, {"name": "缺字段"})
+    assert bad["ok"] is False
+
+
+def test_hypothesis_basis_enforced(ctx_ref):
+    ctx, _ = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc())
+    first = tf_hypothesis_create(ctx, goal["id"], "首个假设可无 basis")
+    assert first["ok"] and first["id"] == "H-0001"
+    second = tf_hypothesis_create(ctx, goal["id"], "无证据的后续假设")
+    assert second["ok"] is False  # research-loop §3：必须引用已有证据
+    third = tf_hypothesis_create(ctx, goal["id"], "有证据", basis=["H-0001"])
+    # basis 只接受 F-/EXP- 证据；H- 引用应被拒绝
+    assert third["ok"] is False
+    finding = ctx.ledger.create_finding("证据", actor="test")
+    fourth = tf_hypothesis_create(ctx, goal["id"], "有证据",
+                                  basis=[finding["id"]])
+    assert fourth["ok"]
+
+
+def test_experiment_plan_run_get_compare(ctx_ref):
+    ctx, ref = ctx_ref
+    goal, mat, hyp, plan = _research_setup(ctx, ref)
+    assert plan["ok"] and plan["id"] == "EXP-0001"
+
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"], ran["summary"].get("error_code")
+    assert ran["status"] == "COMPLETED"
+    surfaces = ran["summary"]["surfaces"]
+    assert surfaces["A"]["metrics"]["CVRMSE"] is not None
+    kinds = {a["kind"] for a in ran["artifacts"]}
+    assert {"experiment_report", "metrics", "model_dir"} <= kinds
+
+    got = tf_experiment_get(ctx, plan["id"])
+    assert got["ok"] and got["summary"]["status"] == "completed"
+    assert got["summary"]["surfaces"]["A"]["n_samples"] > 0
+
+    cmp_env = tf_model_compare(ctx, [plan["id"], "EXP-9999"])
+    assert cmp_env["ok"]
+    assert cmp_env["summary"]["best"] == plan["id"]
+    assert cmp_env["summary"]["skipped"] == ["EXP-9999"]
+
+
+def test_research_status_tracks_budget(ctx_ref):
+    ctx, ref = ctx_ref
+    goal, mat, hyp, plan = _research_setup(ctx, ref)
+    status = tf_research_status(ctx, goal["id"])
+    assert status["ok"]
+    assert status["summary"]["progress"]["experiments"]["total"] == 1
+    budget = status["summary"]["budget"]
+    assert budget["experiments_used"] == 1
+    assert budget["experiments_max"] is None
+
+
+def test_model_publish_end_to_end(ctx_ref):
+    """工具链闭环：实验 → 模型包 → 注册 → 门禁 → production。"""
+    ctx, ref = ctx_ref
+    goal, mat, hyp, plan = _research_setup(ctx, ref)
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"]
+
+    env = tf_model_publish(ctx, plan["id"], model_id="chiller-power",
+                           version="1.0.0")
+    assert env["ok"], env["summary"].get("error")
+    assert env["id"] == "chiller-power@1.0.0"
+    assert env["status"] == "PRODUCTION"
+    gate_names = [g["name"] for g in env["summary"]["gates"]]
+    assert "smoke" in gate_names  # 冷加载冒烟在新解释器子进程执行
+    assert env["summary"]["golden_samples"] > 0
+    # Ledger 谱系：模型实体 + 发布决策
+    models = [m for m in ctx.ledger.list_goals() if m["id"] == goal["id"]]
+    assert models  # goal 仍在
+    progress = ctx.ledger.goal_progress(goal["id"])
+    assert progress["models"]["total"] == 1
+
+
+def test_model_publish_rejected_when_acceptance_unmet(ctx_ref):
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc(
+        acceptance={"cvrmse_max": 1e-12}))  # 不可能达标
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "严苛验收")
+    plan = tf_experiment_plan(
+        ctx, _experiment_doc(goal["id"], hyp["id"], mat["id"]))
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"]
+    env = tf_model_publish(ctx, plan["id"], model_id="chiller-power",
+                           version="1.0.0", run_smoke=False)
+    assert env["ok"] is False
+    assert env["diagnostics"][0]["code"] == "TFM-1003"
+    assert env["summary"]["gates"][-1]["ok"] is False
+
+
+def test_pi_manifest_matches_registry(repo_root):
+    with open(repo_root / "pi" / "tools.json", encoding="utf-8") as fp:
+        manifest = json.load(fp)
+    names = {t["name"] for t in manifest["tools"]}
+    assert names == set(TOOL_REGISTRY)
+    for entry in manifest["tools"]:
+        module, _, func = entry["entry"].partition(":")
+        assert module == "thermoforge_research.tools"
+        assert callable(TOOL_REGISTRY[entry["name"]])
+        assert func == entry["name"]
