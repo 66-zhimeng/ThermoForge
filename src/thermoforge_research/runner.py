@@ -212,6 +212,7 @@ def run_experiment(
         "artifacts": child_result.get("artifacts", {}),
         "metrics": child_result.get("metrics"),
         "physics": child_result.get("physics"),
+        "rolling_cv": child_result.get("rolling_cv"),
         "conclusion": child_result.get("conclusion"),
         "failure_reason": error_message if status == "failed" else None,
         "next_questions": child_result.get("next_questions", []),

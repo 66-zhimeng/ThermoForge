@@ -28,14 +28,18 @@ from thermoforge_models.baseline import LinearBaseline
 from thermoforge_models.hybrid import ResidualHybrid
 from thermoforge_models.physics import ChillerPhysicsModel
 from thermoforge_research.errors import ResearchError
-from thermoforge_research.metrics import compute_metrics
+from thermoforge_research.metrics import aggregate_fold_metrics, compute_metrics
 from thermoforge_research.physics_checks import (
     check_hard_constraints,
     check_monotonicity,
     combine_reports,
 )
 from thermoforge_research.runner import current_environment_lock
-from thermoforge_research.splits import check_no_leakage, temporal_split
+from thermoforge_research.splits import (
+    check_no_leakage,
+    rolling_origin_splits,
+    temporal_split,
+)
 from thermoforge_core.timeutil import parse_time_resolution
 
 MONOTONE_GRID_POINTS = 21  # 单调性受控扰动扫描的点数（§6.3）
@@ -320,6 +324,68 @@ def run(spec_path: Path) -> dict[str, Any]:
             exp_dir / "predictions.parquet", compression="zstd", index=False
         )
 
+    # ---- 滚动原点 CV（可选增强验证，research-loop §6；逐 fold 训练+评估）
+    rolling_doc: dict[str, Any] | None = None
+    rolling_cfg = (exp["validation"].get("rolling_cv") or {})
+    if rolling_cfg.get("enabled"):
+        rolling = rolling_origin_splits(
+            ts_list, resolution_seconds,
+            initial_train_fraction=rolling_cfg.get("initial_train_fraction"),
+            initial_train_seconds=rolling_cfg.get("initial_train_seconds"),
+            horizon_seconds=float(rolling_cfg["horizon_seconds"]),
+            step_seconds=(
+                float(rolling_cfg["step_seconds"])
+                if rolling_cfg.get("step_seconds") else None
+            ),
+            mode=str(rolling_cfg.get("mode", "expanding")),
+            max_folds=int(rolling_cfg.get("max_folds", 10)),
+            purge_seconds=float(spec["purge_seconds"]),
+            embargo_seconds=float(spec["embargo_seconds"]),
+        )
+        t_end_ts = pd.Timestamp(ts_list[-1])
+        fold_reports = []
+        fold_entries: list[dict[str, Any]] = []
+        for fold in rolling.folds:
+            fb = fold.boundaries
+            ftr_lo = parse_timestamp(fb["train_range"][0])
+            ftr_hi = parse_timestamp(fb["train_range"][1])
+            fev_lo = parse_timestamp(fb["eval_range"][0])
+            fev_hi = parse_timestamp(fb["eval_range"][1])
+            # 评估窗达到数据末尾时含 t_end（与 splits 的口径一致）
+            inclusive_end = pd.Timestamp(fev_hi) >= t_end_ts
+            ftrain = df[~is_holdout & (ts_col >= ftr_lo) & (ts_col < ftr_hi)]
+            feval = df[
+                ~is_holdout & (ts_col >= fev_lo)
+                & ((ts_col <= t_end_ts) if inclusive_end else (ts_col < fev_hi))
+            ]
+            ftrain = ftrain.dropna(subset=needed)
+            feval = feval.dropna(subset=needed)
+            fold_model = _build_model(exp["model"], int(seed))
+            _fit(fold_model, ftrain,
+                 ftrain[target].to_numpy(np.float64), features)
+            y_true = feval[target].to_numpy(np.float64)
+            y_pred = np.asarray(fold_model.predict(feval), dtype=np.float64)
+            report = compute_metrics(
+                y_true.tolist(), y_pred.tolist(), exp["metrics"],
+                y_floor=y_floor,
+                object_ids=feval["object_id"].astype(str).tolist(),
+            )
+            fold_reports.append(report)
+            fold_entries.append({
+                "fold": fold.fold,
+                "boundaries": fb,
+                "n_train": len(ftrain),
+                "metrics": report.to_dict(),
+            })
+        rolling_doc = {
+            "config": rolling.config,
+            "folds": fold_entries,
+            "aggregate": aggregate_fold_metrics(fold_reports),
+            "note": "每个 fold 独立训练同一模型定义（同一种子），"
+                    "仅训练窗口不同；fold 模型不落盘",
+        }
+        _write_json(exp_dir / "rolling_cv.json", rolling_doc)
+
     # ---- 物理验证（§6）
     physics_doc: dict[str, Any] | None = None
     if (exp.get("physics_tests") or {}).get("enabled"):
@@ -381,6 +447,7 @@ def run(spec_path: Path) -> dict[str, Any]:
         "physics_report": (
             "physics_report.json" if physics_doc is not None else None
         ),
+        "rolling_cv": "rolling_cv.json" if rolling_doc is not None else None,
     }
     conclusion = {
         "summary": "实验完成",
@@ -397,6 +464,7 @@ def run(spec_path: Path) -> dict[str, Any]:
         "artifacts": artifacts,
         "metrics": metrics_doc,
         "physics": physics_doc,
+        "rolling_cv": rolling_doc,
         "conclusion": conclusion,
         "next_questions": [],
     }

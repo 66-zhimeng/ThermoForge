@@ -108,6 +108,80 @@
       "title": "PhysicsTests",
       "type": "object"
     },
+    "RollingCV": {
+      "additionalProperties": false,
+      "description": "滚动原点时序交叉验证（research-loop.md §6 的合规 CV 形态）。\n\n不配置或 `enabled=false` 时不启用（向后兼容：旧实验定义行为不变）。\nfold 边界与 temporal_split 同规则（时间边界 → 向下对齐 resolution），\nfold 语义见 `thermoforge_research.splits.rolling_origin_splits`。",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "horizon_seconds": {
+          "default": 86400.0,
+          "exclusiveMinimum": 0,
+          "title": "Horizon Seconds",
+          "type": "number"
+        },
+        "initial_train_fraction": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Train Fraction"
+        },
+        "initial_train_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Train Seconds"
+        },
+        "max_folds": {
+          "default": 10,
+          "minimum": 1,
+          "title": "Max Folds",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "expanding",
+          "enum": [
+            "expanding",
+            "sliding"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "step_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step Seconds"
+        }
+      },
+      "title": "RollingCV",
+      "type": "object"
+    },
     "Runtime": {
       "additionalProperties": false,
       "description": "运行环境声明：环境指纹与随机种子（TFX-901/902）。",
@@ -164,6 +238,9 @@
       "properties": {
         "equipment_holdout": {
           "$ref": "#/$defs/EquipmentHoldout"
+        },
+        "rolling_cv": {
+          "$ref": "#/$defs/RollingCV"
         },
         "temporal_split": {
           "$ref": "#/$defs/TemporalSplit"

@@ -184,3 +184,45 @@ def compute_metrics(
         undefined=undefined,
         per_object=per_object,
     )
+
+
+def aggregate_fold_metrics(reports: Sequence[MetricReport]) -> dict[str, Any]:
+    """跨 fold 指标聚合（滚动原点 CV）：mean / std / min / max。
+
+    - 逐 fold 报告必须来自 `compute_metrics`（同一实现，micro 默认、
+      y_floor 规则一致、NMBE 必报），本函数不做任何重算。
+    - std 为总体标准差（ddof=0），纯算术、无随机源，结果确定。
+    - 某 fold 未定义（None）的指标按 fold 跳过，并记录 `n_undefined`。
+    """
+    if not reports:
+        raise ValueError("reports 不能为空")
+    names: list[str] = []
+    for report in reports:
+        for name in report.metrics:
+            if name not in names:
+                names.append(name)
+    per_metric: dict[str, Any] = {}
+    for name in sorted(names):
+        values = [r.metrics[name] for r in reports
+                  if r.metrics.get(name) is not None]
+        n_undefined = len(reports) - len(values)
+        if values:
+            arr = np.asarray(values, dtype=np.float64)
+            per_metric[name] = {
+                "mean": float(np.mean(arr)),
+                "std": float(np.std(arr)),
+                "min": float(np.min(arr)),
+                "max": float(np.max(arr)),
+                "n_defined": len(values),
+                "n_undefined": n_undefined,
+            }
+        else:
+            per_metric[name] = {
+                "mean": None, "std": None, "min": None, "max": None,
+                "n_defined": 0, "n_undefined": n_undefined,
+            }
+    return {
+        "n_folds": len(reports),
+        "total_eval_samples": sum(r.n_samples for r in reports),
+        "per_metric": per_metric,
+    }

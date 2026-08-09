@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from .errors import ResearchError
 
@@ -131,6 +131,164 @@ def temporal_split(
         },
     }
     return TemporalSplitResult(train_idx, validate_idx, test_idx, boundaries)
+
+
+# ---------------------------------------------------------------- 滚动原点交叉验证
+
+
+@dataclass(frozen=True)
+class RollingFold:
+    """单个滚动原点 fold。索引为原始序列中的位置（与 temporal_split 一致）。"""
+
+    fold: int
+    train_idx: list[int]
+    eval_idx: list[int]
+    boundaries: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RollingOriginResult:
+    """滚动原点切分结果：全部 fold 的边界完整记录（供实验制品落盘）。"""
+
+    folds: list[RollingFold]
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+def rolling_origin_splits(
+    timestamps: Sequence[datetime],
+    resolution_seconds: int,
+    *,
+    initial_train_fraction: float | None = None,
+    initial_train_seconds: float | None = None,
+    horizon_seconds: float,
+    step_seconds: float | None = None,
+    mode: Literal["expanding", "sliding"] = "expanding",
+    max_folds: int | None = None,
+    purge_seconds: float = 0.0,
+    embargo_seconds: float = DEFAULT_EMBARGO_SECONDS,
+) -> RollingOriginResult:
+    """滚动原点（rolling-origin）时序交叉验证（research-loop §6 的合规 CV 形态）。
+
+    fold 语义：fold k 的原点 `origin_k = floor_res(b0 + k·step)`；
+    **expanding** 模式训练集为 `[t0, origin_k − purge)`，
+    **sliding** 模式为 `[origin_k − W, origin_k − purge)`
+    （W 为初始训练窗口对齐后的时长，窗口长度恒定）；
+    评估集为 `[origin_k + embargo, floor_res(origin_k + horizon))`。
+
+    - `b0`：初始训练窗口终点——按 `initial_train_fraction`（累积样本数分位
+      对应的时间点）或 `initial_train_seconds`（时长）确定，二者恰给其一；
+      与 §4.1 同规则**向下对齐** resolution。
+    - `step_seconds` 默认等于 `horizon_seconds`（fold 间不重叠）。
+    - 逐 fold 复用 `check_no_leakage` 做 TFX-903 自检（间隙 ≥ purge 跨度）。
+    - 最后一个 fold 的评估窗越过 `t_end` 时截断并记录 `eval_truncated`；
+      评估窗内无样本的 fold 不产生。
+    """
+    if not timestamps:
+        raise ValueError("timestamps 不能为空")
+    if resolution_seconds <= 0:
+        raise ValueError("resolution_seconds 必须为正")
+    if (initial_train_fraction is None) == (initial_train_seconds is None):
+        raise ValueError(
+            "initial_train_fraction 与 initial_train_seconds 必须恰给其一"
+        )
+    if initial_train_fraction is not None and not (0 < initial_train_fraction < 1):
+        raise ValueError("initial_train_fraction 必须在 (0, 1)")
+    if horizon_seconds <= 0:
+        raise ValueError("horizon_seconds 必须为正")
+    step = float(step_seconds) if step_seconds is not None else float(horizon_seconds)
+    if step <= 0:
+        raise ValueError("step_seconds 必须为正")
+    if mode not in ("expanding", "sliding"):
+        raise ValueError(f"未知 mode: {mode!r}（允许 expanding/sliding）")
+    if purge_seconds < 0 or embargo_seconds < 0:
+        raise ValueError("purge/embargo 不能为负")
+
+    n = len(timestamps)
+    epochs = [_to_epoch_seconds(t) for t in timestamps]
+    order = sorted(range(n), key=lambda i: (epochs[i], i))
+    sorted_epochs = [epochs[i] for i in order]
+    t0, t_end = sorted_epochs[0], sorted_epochs[-1]
+
+    def _floor_res(t: float) -> float:
+        return t - (t % resolution_seconds)
+
+    if initial_train_fraction is not None:
+        k0 = min(n - 1, int(initial_train_fraction * n))
+        b0 = _floor_res(sorted_epochs[k0])
+    else:
+        b0 = _floor_res(t0 + float(initial_train_seconds))
+    window = b0 - t0  # sliding 模式的恒定窗口长度（对齐后）
+    if window < resolution_seconds:
+        raise ValueError(
+            f"初始训练窗口为空: b0={_iso(b0)} <= t0={_iso(t0)}"
+        )
+
+    folds: list[RollingFold] = []
+    k = 0
+    while True:
+        if max_folds is not None and len(folds) >= max_folds:
+            break
+        origin = _floor_res(b0 + k * step)
+        if origin + embargo_seconds >= t_end:
+            break  # 评估窗起点已到数据末尾，后续 fold 无意义
+        train_end = origin - purge_seconds
+        train_start = t0 if mode == "expanding" else origin - window
+        eval_start = origin + embargo_seconds
+        eval_end = _floor_res(origin + horizon_seconds)
+
+        train_idx = [
+            i for pos, i in enumerate(order)
+            if train_start <= sorted_epochs[pos] < train_end
+        ]
+        # 评估窗达到数据末尾时含 t_end（与 holdout 测试集的口径一致）
+        eval_inclusive_end = eval_end >= t_end
+        eval_idx = [
+            i for pos, i in enumerate(order)
+            if eval_start <= sorted_epochs[pos] < eval_end
+            or (eval_inclusive_end and sorted_epochs[pos] == t_end)
+        ]
+        if not train_idx or not eval_idx:
+            break  # 空 fold 不产生（后续 origin 更远，必然同样为空）
+        # 逐 fold 泄漏自检（复用 check_no_leakage，不另写一套）
+        check_no_leakage(
+            timestamps, train_idx, eval_idx,
+            min_gap_seconds=purge_seconds, eval_label=f"fold {k} 评估集",
+        )
+        folds.append(RollingFold(
+            fold=k,
+            train_idx=train_idx,
+            eval_idx=eval_idx,
+            boundaries={
+                "fold": k,
+                "origin": _iso(origin),
+                "train_range": [_iso(train_start), _iso(train_end)],
+                "eval_range": [_iso(eval_start), _iso(eval_end)],
+                "eval_truncated": eval_end > t_end,
+                "counts": {"train": len(train_idx), "eval": len(eval_idx)},
+            },
+        ))
+        k += 1
+
+    if not folds:
+        raise ValueError(
+            "滚动原点配置下没有任何有效 fold（初始窗口 + embargo 已覆盖全部数据）"
+        )
+    config = {
+        "mode": mode,
+        "initial_train_fraction": initial_train_fraction,
+        "initial_train_seconds": initial_train_seconds,
+        "horizon_seconds": horizon_seconds,
+        "step_seconds": step,
+        "max_folds": max_folds,
+        "purge_seconds": purge_seconds,
+        "embargo_seconds": embargo_seconds,
+        "resolution_seconds": resolution_seconds,
+        "t0": _iso(t0),
+        "t_end": _iso(t_end),
+        "b0": _iso(b0),
+        "n_folds": len(folds),
+    }
+    return RollingOriginResult(folds=folds, config=config)
 
 
 def check_no_leakage(

@@ -123,6 +123,7 @@ def make_experiment(
     view_id: str = "VIEW-0001",
     category: str = "data",
     holdout: list[str] | None = None,
+    rolling_cv: dict | None = None,
     environment_lock: str | None = None,
 ) -> Experiment:
     """构造 Experiment 契约对象；environment_lock 默认取当前环境指纹。"""
@@ -150,6 +151,15 @@ def make_experiment(
             },
         }
     lock = environment_lock or current_environment_lock()[0]
+    validation: dict[str, Any] = {
+        "temporal_split": {"train": 0.70, "validate": 0.15, "test": 0.15},
+        "equipment_holdout": {
+            "enabled": bool(holdout),
+            "holdout_objects": holdout or [],
+        },
+    }
+    if rolling_cv is not None:
+        validation["rolling_cv"] = rolling_cv
     return Experiment(
         experiment_id=experiment_id,
         goal_id=goal_id,
@@ -157,13 +167,7 @@ def make_experiment(
         dataset_view=view_id,
         model=model,
         target=TARGET,
-        validation={
-            "temporal_split": {"train": 0.70, "validate": 0.15, "test": 0.15},
-            "equipment_holdout": {
-                "enabled": bool(holdout),
-                "holdout_objects": holdout or [],
-            },
-        },
+        validation=validation,
         metrics=["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE"],
         physics_tests={"enabled": True},
         runtime={"environment_lock": lock, "random_seed": 20260808},

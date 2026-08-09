@@ -56,6 +56,7 @@
 | I-39 | `environment_lock` 包条目 sha256 的取值口径未定义，实现取 `name==version` 摘要 | 契约 | 设计 | 待决策 | [conventions §5.3](./conventions.md)（Phase 2 实现发现） |
 | I-40 | `cop_below_carnot` 检查中冷凝温度以冷却水供水温度近似，端口约定需明确 | 实现 | 设计 | 待确认 | Phase 2 实现发现 |
 | I-41 | §6.2 的 `COP > 0` 与「制冷量为正时 input_power > 0」实现上是同一判定，重复计数 | 契约 | 设计 | 待决策 | [implementation-notes §6.2](./implementation-notes.md)（Phase 2 实现发现） |
+| I-47 | Experiment 契约新增 `rolling_cv` 块属 MINOR 契约演进，research-loop §5 示例未含该字段 | 契约 | 设计 | 待决策 | Phase 2 增补（滚动原点 CV） |
 | I-42 | 模型状态机 `can_transition` 允许沿链跳级，发布留痕可被绕过 | 契约 | 设计 | 待决策 | [model-package §5](./model-package.md)（Phase 4 实现发现） |
 | I-43 | 冷加载冒烟未按 environment.lock 重建依赖，与 §8.3 有差距 | 实现 | 设计 | 待设计 | [implementation-notes §8.3](./implementation-notes.md)（Phase 4 实现发现） |
 | I-44 | 编排器「planner 无可行假设」与「连续无信息增益」共用停止码；发布工具默认超范围策略待确认 | 实现 | 设计 | 待确认 | [research-loop §9](./research-loop.md)（Phase 3 实现发现） |
@@ -214,6 +215,10 @@
 ### I-41 `COP > 0` 与「制冷量为正时 input_power > 0」重复计数
 
 **背景**：[implementation-notes §6.2](./implementation-notes.md) 把 `COP > 0` 和「制冷量为正时 `input_power > 0`」列为两条独立硬约束，但在 `Q > 0` 的适用条件下二者是同一判定（COP = Q/P）。Phase 2 实现保留两条以便与文档对照，代价是同一违规样本被两条约束同时计入（总体口径不受影响，每条单独口径虚高）。建议契约合并为一条，或为二者定义不同的适用条件。
+
+### I-47 `validation.rolling_cv` 属契约 MINOR 演进，示例文档未同步
+
+**背景**：滚动原点 CV 作为增强验证方式加入 Experiment 契约（`validation.rolling_cv`，全部字段带默认值、不配则不启用，向后兼容）。按 [conventions §6](./conventions.md)「新增可选字段升 MINOR」的规则，这构成一次契约演进，但 [research-loop §5](./research-loop.md) 的实验定义示例不含该字段，`horizon_seconds` 默认值 86400 为本实现新引入的 **[草案]** 取值。需要设计方确认：契约版本号是否递增、文档示例是否补充、`horizon`/`step`/`embargo` 的默认值如何用真实数据标定。
 
 ---
 

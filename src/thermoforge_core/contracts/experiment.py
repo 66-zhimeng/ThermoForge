@@ -68,11 +68,43 @@ class EquipmentHoldout(BaseModel):
     holdout_objects: list[str] = Field(default_factory=list)
 
 
+class RollingCV(BaseModel):
+    """滚动原点时序交叉验证（research-loop.md §6 的合规 CV 形态）。
+
+    不配置或 `enabled=false` 时不启用（向后兼容：旧实验定义行为不变）。
+    fold 边界与 temporal_split 同规则（时间边界 → 向下对齐 resolution），
+    fold 语义见 `thermoforge_research.splits.rolling_origin_splits`。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    mode: Literal["expanding", "sliding"] = "expanding"
+    initial_train_fraction: float | None = Field(default=None, gt=0, lt=1)
+    initial_train_seconds: float | None = Field(default=None, gt=0)
+    horizon_seconds: float = Field(default=86400.0, gt=0)  # [草案] 默认 1 天
+    step_seconds: float | None = Field(default=None, gt=0)  # 默认 = horizon
+    max_folds: int = Field(default=10, ge=1)
+
+    @model_validator(mode="after")
+    def _initial_window_given(self) -> "RollingCV":
+        if self.enabled and (
+            (self.initial_train_fraction is None)
+            == (self.initial_train_seconds is None)
+        ):
+            raise ValueError(
+                "rolling_cv 启用时 initial_train_fraction 与 "
+                "initial_train_seconds 必须恰给其一"
+            )
+        return self
+
+
 class Validation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     temporal_split: TemporalSplit
     equipment_holdout: EquipmentHoldout = Field(default_factory=EquipmentHoldout)
+    rolling_cv: RollingCV = Field(default_factory=RollingCV)
 
 
 class PhysicsTests(BaseModel):
