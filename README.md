@@ -62,7 +62,9 @@ flowchart LR
 
 ## 文档
 
-从 [文档总览](docs/README.md) 进入。文档分三层：
+**新手从 [入门教程](docs/getting-started.md) 开始**：环境准备、五分钟跑通示例、命令行速查、常见任务流程。
+
+设计文档从 [文档总览](docs/README.md) 进入。文档分三层：
 
 **方案层**（当前工作面）
 
@@ -115,16 +117,16 @@ ThermoForge/
 
 ## 项目状态
 
-**当前处于方案讨论阶段，尚未开始实现。**关键取舍见 [设计决策记录](docs/design-decisions.md)，未决问题见 [开放议题](docs/open-questions.md)。
+**Phase 0–4 的 MVP 已实现并通过端到端示例验证**（见 [新手教程](docs/getting-started.md)），方案文档仍在持续演进。关键取舍见 [设计决策记录](docs/design-decisions.md)，未决问题见 [开放议题](docs/open-questions.md)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | — | 方案论证：范围、决策、风险、开放议题 | 进行中 |
-| Phase 0 | 契约定稿：TFOM / TFDC / Research Goal / Experiment / Model Package Schema | 设计与工程约定成文，Schema 待实现 |
-| Phase 1 | 数据底座：导入器、指纹、Parquet、Dataset View | 未开始 |
-| Phase 2 | 确定性研究内核：Ledger、Runner、验证套件 | 未开始 |
-| Phase 3 | Pi/Agent 编排：工具接口、预算与停止条件 | 未开始 |
-| Phase 4 | 模型注册与部署：Model Package、发布门禁、绑定 | 未开始 |
+| Phase 0 | 契约定稿：TFOM / TFDC / Research Goal / Experiment / Model Package Schema | ✅ 完成（`contracts/` + `thermoforge_core`） |
+| Phase 1 | 数据底座：导入器、指纹、Parquet、Dataset View | ✅ 完成（`thermoforge_data`） |
+| Phase 2 | 确定性研究内核：Ledger、Runner、验证套件 | ✅ 完成（`thermoforge_research` / `thermoforge_models`） |
+| Phase 3 | Pi/Agent 编排：工具接口、预算与停止条件 | ✅ 完成（22 个工具 + CLI + 编排器） |
+| Phase 4 | 模型注册与部署：Model Package、发布门禁、绑定 | ✅ 完成（`thermoforge_runtime`） |
 | Phase 5 | 系统化扩展：容器、队列、多站点、多 Agent | 未开始 |
 
 各阶段验收标准见 [实施路线图](docs/roadmap.md)。
