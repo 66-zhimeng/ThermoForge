@@ -40,6 +40,7 @@ from .envelope import finalize_envelope, make_envelope
 from .runner import current_environment_lock
 from .tools import (
     ToolContext,
+    tf_dataset_modelability,
     tf_dataset_profile,
     tf_dataset_schema,
     tf_experiment_plan,
@@ -55,6 +56,8 @@ STOP_NO_GAIN = "no_information_gain"
 STOP_INSUFFICIENT_COVERAGE = "insufficient_data_coverage"
 STOP_MISSING_VARIABLES = "missing_required_variables"
 STOP_HUMAN_CONFIRMATION = "human_confirmation_required"
+# gap-analysis G3：可建模性门禁未过（存在 blocker），不得进入建模
+STOP_MODELABILITY_FAILED = "modelability_failed"
 
 STOP_REASONS = (
     STOP_ACCEPTANCE_MET,
@@ -63,6 +66,7 @@ STOP_REASONS = (
     STOP_INSUFFICIENT_COVERAGE,
     STOP_MISSING_VARIABLES,
     STOP_HUMAN_CONFIRMATION,
+    STOP_MODELABILITY_FAILED,
 )
 
 _DEFAULT_SPLIT = {"train": 0.70, "validate": 0.15, "test": 0.15}
@@ -123,6 +127,7 @@ class ResearchOrchestrator:
 
         stop = self._precheck_variables(definition)
         stop = stop or self._precheck_coverage()
+        stop = stop or self._precheck_modelability(definition)
         if stop:
             return self._finish(stop)
 
@@ -151,9 +156,15 @@ class ResearchOrchestrator:
                 STOP_MISSING_VARIABLES,
                 f"无法读取数据版本 Schema: {env['summary'].get('error')}",
             )
-        variables = env["summary"]["variables"]
-        available_ids = {v["variable_id"] for v in variables}
-        available_props = {v["property_code"] for v in variables}
+        summary = env["summary"]
+        # 紧凑清单优先（宽表 variables 明细可能被 32KB 截断）
+        available_ids = set(summary.get("variable_ids") or [])
+        available_props = set(summary.get("property_codes") or [])
+        if not available_ids:
+            variables = [v for v in summary.get("variables", [])
+                         if isinstance(v, dict)]
+            available_ids = {v["variable_id"] for v in variables}
+            available_props = {v["property_code"] for v in variables}
         missing: list[str] = []
         for item in [definition.get("target"),
                      *(definition.get("candidate_inputs") or [])]:
@@ -196,6 +207,43 @@ class ResearchOrchestrator:
                 f"（下限 {self.min_rows} 行 / {self.min_coverage_days} 天，§9）",
                 evidence={"rows": rows, "span_days": span_days},
             )
+        return None
+
+    # ---------------------------------------------------------------- G3 门禁
+
+    def _precheck_modelability(
+        self, definition: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """可建模性门禁（G3）：DATA_PROFILING 之后、首个实验之前执行。
+
+        报告 verdict=FAIL（存在 blocker）时不允许登记实验，停止原因
+        `modelability_failed`（结构化，含 blocker 清单与报告 artifact）。
+        """
+        ledger = self.ctx.ledger
+        ledger.transition(
+            self.goal_id, "MODELABILITY_ASSESSMENT",
+            reason="G3 可建模性门禁：进入建模前的语义层判定",
+            actor=self.ctx.actor,
+        )
+        env = tf_dataset_modelability(self.ctx, self.dataset_ref,
+                                      goal_id=self.goal_id)
+        artifact = next((a for a in env.get("artifacts", [])
+                         if a.get("kind") == "modelability_report"), None)
+        if env["status"] == "FAIL":
+            blockers = env["summary"]["blockers"]
+            return self._stop(
+                STOP_MODELABILITY_FAILED,
+                f"可建模性报告存在阻断级检查未过: {blockers}（G3 门禁）",
+                evidence={"blockers": blockers,
+                          "warnings": env["summary"]["warnings"],
+                          "checks": env["summary"]["checks"],
+                          "report_artifact": (artifact or {}).get("path")},
+            )
+        ledger.transition(
+            self.goal_id, "BASELINE_MODELING",
+            reason=f"可建模性门禁通过（warnings={env['summary']['warnings']}）",
+            actor=self.ctx.actor,
+        )
         return None
 
     # ---------------------------------------------------------------- 预算
