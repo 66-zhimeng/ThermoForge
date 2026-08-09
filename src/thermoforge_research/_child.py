@@ -26,7 +26,10 @@ from thermoforge_data.vault import DataVault
 from thermoforge_data.views import materialize_view
 from thermoforge_models.baseline import LinearBaseline
 from thermoforge_models.hybrid import ResidualHybrid
-from thermoforge_models.physics import ChillerPhysicsModel
+from thermoforge_models.physics import (
+    ChillerPhysicsModel,
+    ChillerPhysicsV2,
+)
 from thermoforge_research.errors import ResearchError
 from thermoforge_research.metrics import aggregate_fold_metrics, compute_metrics
 from thermoforge_research.physics_checks import (
@@ -79,10 +82,19 @@ def _parse_inputs(raw: Any) -> dict[str, str] | None:
     return out
 
 
-def _build_physics(hp: Mapping[str, Any]) -> ChillerPhysicsModel:
+def _build_physics(hp: Mapping[str, Any],
+                   physics: str | None = None) -> ChillerPhysicsModel:
+    """按方程版本分派（v1 保留兼容，v2 为 DOE-2 三曲线）。"""
     if "rated_capacity_kw" not in hp:
         raise ValueError("physics 模型缺少超参 rated_capacity_kw（额定参数必须显式声明）")
-    return ChillerPhysicsModel(
+    cls = {
+        None: ChillerPhysicsModel,
+        "cooling_balance_v1": ChillerPhysicsModel,
+        "cooling_balance_v2": ChillerPhysicsV2,
+    }.get(physics)
+    if cls is None:
+        raise ValueError(f"未知物理方程版本: {physics!r}")
+    return cls(
         rated_capacity_kw=float(hp["rated_capacity_kw"]),
         rated_power_kw=(
             float(hp["rated_power_kw"]) if hp.get("rated_power_kw") else None
@@ -101,7 +113,7 @@ def _build_model(model_spec: Mapping[str, Any], seed: int):
                                   alpha=float(hp.get("alpha", 1.0)))
         raise ResearchError("TFX-902", f"未支持的 data estimator: {estimator!r}")
     if category == "physics":
-        return _build_physics(hp)
+        return _build_physics(hp, model_spec.get("physics"))
     if category == "hybrid":
         xgb_params = {
             k: hp[k] for k in
@@ -110,7 +122,7 @@ def _build_model(model_spec: Mapping[str, Any], seed: int):
             if k in hp
         }
         return ResidualHybrid(
-            _build_physics(hp), seed=seed, nthread=1,
+            _build_physics(hp, model_spec.get("physics")), seed=seed, nthread=1,
             xgb_params=xgb_params,
             monotone_constraints=_parse_monotone(hp.get("monotone_constraints")),
         )
@@ -409,8 +421,17 @@ def run(spec_path: Path) -> dict[str, Any]:
                 check_df["__cooling__"] = physics_model.cooling_capacity(eval_df)
                 kwargs["cooling_col"] = "__cooling__"
                 kwargs["chw_supply_col"] = physics_model.inputs["chw_supply_temp"]
-                # 冷凝温度以冷却水供水温度近似（记录近似口径）
-                kwargs["cw_return_col"] = physics_model.inputs["cw_supply_temp"]
+                # I-40 修正：冷凝温度用模型辨识选定的代理列（v2）；
+                # v1 仍为冷却水供水温度近似
+                kwargs["cw_return_col"] = physics_model.condenser_col
+                # v2 的 rated_power_kw 是单台额定：逐样本乘以 run_count
+                if (rated_power and getattr(physics_model, "per_unit_rated", False)
+                        and physics_model.inputs.get("run_count") in eval_df.columns):
+                    check_df["__rated__"] = (
+                        float(rated_power)
+                        * pd.to_numeric(eval_df[physics_model.inputs["run_count"]])
+                    )
+                    kwargs["rated_power"] = "__rated__"
             hard = check_hard_constraints(check_df, **kwargs)
 
             mono_results: dict[str, Any] = {}
@@ -432,8 +453,10 @@ def run(spec_path: Path) -> dict[str, Any]:
                     mono_results[result.name] = result
             combined = combine_reports(hard, mono_results)
             physics_doc = combined.to_dict()
+            physics_doc["condenser_col"] = kwargs.get("cw_return_col")
             physics_doc["note"] = (
-                "cop_below_carnot 的冷凝温度以冷却水供水温度近似"
+                "cop_below_carnot 冷凝温度列见 condenser_col"
+                "（v2 为辨识选定的代理，v1 为冷却水供水近似，I-40）"
             )
             _write_json(exp_dir / "physics_report.json", physics_doc)
 

@@ -18,7 +18,11 @@ import yaml
 
 from thermoforge_models.baseline import LinearBaseline
 from thermoforge_models.hybrid import ResidualHybrid
-from thermoforge_models.physics import ChillerPhysicsModel
+from thermoforge_models.physics import (
+    ChillerPhysicsModel,
+    ChillerPhysicsV2,
+    load_physics_model,
+)
 from thermoforge_models.preprocessing import FeatureScaler
 from thermoforge_research.physics_checks import check_monotonicity
 
@@ -171,3 +175,118 @@ def test_hybrid_rejects_unknown_monotone_feature():
     )
     with pytest.raises(ValueError):
         model.fit(df, y, feature_order=["chw_flow"])
+
+
+# ---------------------------------------------------------------- v2：DOE-2 三曲线
+
+_V2_CAPFT = [1.0, 0.01, 0.0, -0.005, 0.0, 0.0]
+_V2_EIRFT = [0.9, 0.005, 0.0, 0.01, 0.0001, 0.0]
+_V2_EIRFPLR = [0.15, 0.7, 0.15]  # const/plr/plr_sq，Σ=1（DOE-2 归一）
+_V2_QR, _V2_PR = 9672.0, 1100.0  # 单台额定
+
+
+def _biquad(c, a, b):
+    return c[0] + c[1] * a + c[2] * a * a + c[3] * b + c[4] * b * b + c[5] * a * b
+
+
+def _data_v2(n: int = 600, seed: int = 11, constant_units: bool = False):
+    """按已知三曲线生成数据；cw_supply_temp 是真冷凝侧，cw_return_temp 是含噪副本。"""
+    rng = np.random.default_rng(seed)
+    flow = rng.uniform(800, 2400, n)
+    t1 = rng.uniform(15, 19, n)
+    d_t = rng.uniform(4, 5.5, n)
+    t_cw = rng.uniform(20, 36, n)
+    t_cw_noisy = 0.9 * t_cw + rng.normal(0, 0.5, n)
+    units = (np.ones(n) if constant_units
+             else rng.integers(1, 4, n).astype(float))
+    q = flow * 998.0 / 3600.0 * 4.186 * d_t
+    capft = _biquad(_V2_CAPFT, t1, t_cw)
+    eirft = _biquad(_V2_EIRFT, t1, t_cw)
+    plr = q / (_V2_QR * units * capft)
+    h = _V2_EIRFPLR[0] + _V2_EIRFPLR[1] * plr + _V2_EIRFPLR[2] * plr * plr
+    p = _V2_PR * units * plr * eirft * h
+    df = pd.DataFrame({
+        "chw_flow": flow, "chw_supply_temp": t1, "chw_return_temp": t1 + d_t,
+        "cw_supply_temp": t_cw, "cw_return_temp": t_cw_noisy,
+        "run_count": units,
+    })
+    return df, p
+
+
+def test_v2_identification_recovers_known_model():
+    df, p = _data_v2()
+    model = ChillerPhysicsV2(_V2_QR, _V2_PR).fit(df, p)
+    # 冷凝侧代理：按辨识残差选出真冷凝侧（含噪副本残差更高）
+    assert model.condenser_proxy == "cw_supply_temp"
+    scores = model.identification["condenser_proxy"]["rel_rmse_by_candidate"]
+    assert scores["cw_supply_temp"] < scores["cw_return_temp"]
+    # 预测级恢复：无噪合成数据上残差应很小
+    pred = model.predict(df)
+    rel_rmse = float(np.sqrt(np.mean((pred - p) ** 2)) / np.mean(p))
+    assert rel_rmse < 0.05
+    # EIRFPLR 系数恢复（PLR 形状只被它承载，可辨识性强）
+    for name, expected in zip(("const", "plr", "plr_sq"), _V2_EIRFPLR):
+        assert model.eirfplr_coefs[name] == pytest.approx(expected, abs=0.05), name
+    # Σc = 1 归一（DOE-2 额定工况约定）
+    assert sum(model.eirfplr_coefs.values()) == pytest.approx(1.0)
+    # 归一化参数随模型落盘（双二次在原始温度下病态，必须归一化）
+    assert model.normalization["t_chws"]["scale"] > 0
+    assert model.identification["method"] == "alternating_least_squares"
+
+
+def test_v2_serialization_roundtrip(tmp_path):
+    df, p = _data_v2()
+    model = ChillerPhysicsV2(_V2_QR, _V2_PR).fit(df, p)
+    before = model.predict(df)
+    params_path = model.save(tmp_path)
+    doc = yaml.safe_load(params_path.read_text(encoding="utf-8"))
+    # YAML 明文：方程版本、曲线系数+范围、保护范围、归一化、代理选择
+    assert doc["equation_version"] == "cooling_balance_v2"
+    assert doc["format"] == "thermoforge.chiller_physics.v2"
+    for curve in ("capft", "eirft", "eirfplr"):
+        for term, entry in doc["parameters"]["curves"][curve].items():
+            assert "bounds" in entry and "value" in entry, (curve, term)
+    assert doc["parameters"]["curve_guards"]["plr"]
+    assert doc["parameters"]["input_normalization"]["t_chws"]["center"] > 0
+    assert doc["condenser_proxy"] == "cw_supply_temp"
+
+    loaded = load_physics_model(tmp_path)
+    assert isinstance(loaded, ChillerPhysicsV2)
+    assert np.array_equal(before, loaded.predict(df))  # bit-exact 往返
+
+
+def test_v2_coefficient_clipping_recorded(tmp_path):
+    # y 放大 5 倍而额定不变 → 辨识出的 EIRFT 系统性超界 → 裁剪并记录（沿用 v1 做法）
+    df, p = _data_v2()
+    model = ChillerPhysicsV2(_V2_QR, _V2_PR).fit(df, p * 5.0)
+    assert model.identification["clipped_coefficients"], "超界未被裁剪记录"
+    from thermoforge_models.physics import CURVE_BOUNDS_V2
+    for curve, coefs in (("capft", model.capft_coefs),
+                         ("eirft", model.eirft_coefs),
+                         ("eirfplr", model.eirfplr_coefs)):
+        for term, value in coefs.items():
+            lo, hi = CURVE_BOUNDS_V2[curve][term]
+            assert lo <= value <= hi, (curve, term, value)
+
+
+def test_v1_v2_coexist(tmp_path):
+    df, p = _data_v2()
+    # v1 接口与行为不变
+    v1 = ChillerPhysicsModel(rated_capacity_kw=9672.0,
+                             rated_power_kw=4400.0).fit(df, p)
+    v1.save(tmp_path / "v1")
+    assert isinstance(load_physics_model(tmp_path / "v1"), ChillerPhysicsModel)
+    assert load_physics_model(tmp_path / "v1").condenser_col == "cw_supply_temp"
+    # v2 无 run_count 输入时退化为系统级额定（units ≡ 1，数据按单台生成）
+    df1, p1 = _data_v2(constant_units=True)
+    inputs = {"chw_flow": "chw_flow", "chw_supply_temp": "chw_supply_temp",
+              "chw_return_temp": "chw_return_temp",
+              "cw_supply_temp": "cw_supply_temp",
+              "cw_return_temp": "cw_return_temp"}
+    v2 = ChillerPhysicsV2(9672.0, 1100.0, inputs=inputs).fit(df1, p1)
+    pred = v2.predict(df1)
+    rel = float(np.sqrt(np.mean((pred - p1) ** 2)) / np.mean(p1))
+    assert rel < 0.08
+    # v2 需要 rated_power_kw
+    with pytest.raises(ValueError):
+        ChillerPhysicsV2(9672.0).fit(df, p)

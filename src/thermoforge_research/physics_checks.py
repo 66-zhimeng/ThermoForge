@@ -70,13 +70,16 @@ def check_hard_constraints(
     cooling_col: str | None = None,
     chw_supply_col: str | None = None,  # 近似蒸发温度（Cel）
     cw_return_col: str | None = None,  # 近似冷凝温度（Cel）
-    rated_power: float | None = None,
+    rated_power: float | str | None = None,
     upper_power_factor: float = DEFAULT_UPPER_POWER_FACTOR,
 ) -> PhysicsReport:
     """可证伪硬约束检查（§6.2）。
 
     每条约束只在其所需列存在且数值有限、物理上有意义的样本上判定
     （如 COP 类约束要求 Q > 0）；总体口径按「任一适用约束违规即计入」。
+
+    `rated_power` 为标量（系统级额定）或 **列名**（逐样本额定，如 v2
+    模型的「单台额定 × run_count」由调用方预先算成列）。
     """
     n = len(df)
     power = _col(df, power_col)
@@ -111,8 +114,12 @@ def check_hard_constraints(
 
     # input_power ≤ rated × 上限系数（含非负）
     if rated_power is not None:
-        base = np.isfinite(power)
-        violation = (power < 0) | (power > rated_power * upper_power_factor)
+        if isinstance(rated_power, str):
+            rated = _col(df, rated_power)  # 逐样本额定（列名）
+        else:
+            rated = np.full(n, float(rated_power))
+        base = np.isfinite(power) & np.isfinite(rated)
+        violation = (power < 0) | (power > rated * upper_power_factor)
         _register("power_within_rated", base, violation)
 
     overall = np.zeros(n, dtype=bool)

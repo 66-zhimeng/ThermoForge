@@ -130,3 +130,17 @@ def test_combine_reports_merges_monotonicity_into_overall():
     combined = combine_reports(hard, {mono.name: mono})
     assert mono.name in combined.monotonicity
     assert combined.overall_violations == hard.overall_violations + mono.violations
+
+
+def test_rated_power_per_sample_column():
+    # rated_power 传列名：逐样本额定（v2 单台额定 × run_count 的口径）
+    df = pd.DataFrame({
+        "input_power": [2000.0, 900.0, 3500.0],
+        "rated": [1100.0, 1100.0, 3300.0],  # 1 台 / 1 台 / 3 台运行
+    })
+    report = check_hard_constraints(df, power_col="input_power",
+                                    rated_power="rated")
+    rated = report.hard_constraints["power_within_rated"]
+    # 上限 1.1×：2000 > 1210 违规；900 合规；3500 > 3630? 否，合规
+    assert rated.violations == 1
+    assert rated.rate == pytest.approx(1 / 3)

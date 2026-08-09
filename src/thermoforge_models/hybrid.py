@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from .physics import ChillerPhysicsModel
+from .physics import ChillerPhysicsModel, load_physics_model
 from .preprocessing import FeatureScaler
 
 MODEL_FORMAT = "thermoforge.residual_hybrid.v1"
@@ -164,7 +164,7 @@ class ResidualHybrid:
         if meta.get("format") != MODEL_FORMAT:
             raise ValueError(f"未知模型格式: {meta.get('format')!r}")
         model = cls(
-            physics=ChillerPhysicsModel.load(directory),
+            physics=load_physics_model(directory),
             seed=int(meta["seed"]),
             nthread=int(meta["nthread"]),
             xgb_params=meta["xgb_params"],
