@@ -1,0 +1,96 @@
+# 旧格式工作簿物模型：表冷器末端
+contract: TFOM
+contract_version: "1.0"
+model_id: surface_type_heat_exchanger
+version: "1.0"
+properties:
+  flow:
+    unit: "m3/h"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "volume_flow"
+    min_value: 0.0
+    max_value: 20000.0
+    name_zh: 流量
+  chw_supply_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷冻水供水温度
+  chw_return_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷冻水回水温度
+  air_inlet_temp:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -40.0
+    max_value: 50.0
+    name_zh: 进风温度
+  air_inlet_humidity:
+    unit: "%"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "percent"
+    min_value: 0.0
+    max_value: 100.0
+    name_zh: 进风相对湿度
+  fan_frequency:
+    unit: "Hz"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "frequency"
+    min_value: 0.0
+    max_value: 60.0
+    name_zh: 风机频率
+  fan_power:
+    unit: "kW"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "power"
+    min_value: 0.0
+    max_value: 2000.0
+    name_zh: 风机功率
+  status_run:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 运行状态
+  fault_alarm:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 故障报警
+  permissive_ctrl:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 允许控制
+  air_inlet_wetbulb:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -40.0
+    max_value: 50.0
+    name_zh: 进风湿球温度
+  heat_transfer:
+    unit: "kW"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "power"
+    min_value: 0.0
+    max_value: 50000.0
+    name_zh: 换热量

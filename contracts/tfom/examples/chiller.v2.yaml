@@ -1,0 +1,82 @@
+# 旧格式工作簿的冷水主机物模型（r3 物模型名 chiller，data/ 0723 工作簿）。
+# 与 chiller.v1 属性命名不同，按 conventions §6 升版本而非原地修改。
+# load 为 current_percent 的线性重标定（data-survey §F1），expression 精确成立，
+# 供导入器 TFDC-604 派生量一致性检查验证。
+contract: TFOM
+contract_version: "1.0"
+model_id: chiller
+version: "2.0"
+properties:
+  power:
+    name_zh: 输入功率
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 2000.0
+  current_percent:
+    name_zh: 电流百分比
+    unit: "%"
+    dtype: float
+    role: state
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
+  status_run:
+    name_zh: 运行状态
+    unit: "1"
+    dtype: boolean
+    role: state
+    quantity_kind: dimensionless
+  electricity_accum:
+    name_zh: 累计电量
+    unit: kW.h
+    dtype: float
+    role: state
+    quantity_kind: energy
+    min_value: 0.0
+  runtime_accum:
+    name_zh: 累计运行时长（原始单位未确认，按秒登记）
+    unit: s
+    dtype: float
+    role: state
+    quantity_kind: time
+    min_value: 0.0
+  fault_alarm:
+    name_zh: 故障报警
+    unit: "1"
+    dtype: boolean
+    role: state
+    quantity_kind: dimensionless
+  status_maintenance:
+    name_zh: 维护状态
+    unit: "1"
+    dtype: boolean
+    role: state
+    quantity_kind: dimensionless
+  condenser_return_t:
+    name_zh: 冷凝器回水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  evaporator_supply_t:
+    name_zh: 蒸发器供水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  load:
+    name_zh: 制冷量（由电流百分比重标定，非独立测量）
+    unit: kW
+    dtype: float
+    role: derived
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 12000.0
+    expression: current_percent * 9672 / 100

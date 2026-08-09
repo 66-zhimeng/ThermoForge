@@ -1,0 +1,284 @@
+{
+  "$defs": {
+    "EquipmentHoldout": {
+      "additionalProperties": false,
+      "description": "留一设备验证（research-loop.md §6）。",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "holdout_objects": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Holdout Objects",
+          "type": "array"
+        }
+      },
+      "title": "EquipmentHoldout",
+      "type": "object"
+    },
+    "ModelSpec": {
+      "additionalProperties": false,
+      "description": "模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。",
+      "properties": {
+        "category": {
+          "enum": [
+            "physics",
+            "data",
+            "hybrid"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "estimator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimator"
+        },
+        "hyperparameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "title": "Hyperparameters",
+          "type": "object"
+        },
+        "physics": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Physics"
+        },
+        "residual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Residual"
+        }
+      },
+      "required": [
+        "category"
+      ],
+      "title": "ModelSpec",
+      "type": "object"
+    },
+    "PhysicsTests": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "PhysicsTests",
+      "type": "object"
+    },
+    "Runtime": {
+      "additionalProperties": false,
+      "description": "运行环境声明：环境指纹与随机种子（TFX-901/902）。",
+      "properties": {
+        "environment_lock": {
+          "title": "Environment Lock",
+          "type": "string"
+        },
+        "random_seed": {
+          "title": "Random Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "environment_lock",
+        "random_seed"
+      ],
+      "title": "Runtime",
+      "type": "object"
+    },
+    "TemporalSplit": {
+      "additionalProperties": false,
+      "description": "时间顺序切分比例（边界时间点由运行器计算并记录，implementation-notes §4.1）。",
+      "properties": {
+        "test": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Test",
+          "type": "number"
+        },
+        "train": {
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Train",
+          "type": "number"
+        },
+        "validate": {
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Validate",
+          "type": "number"
+        }
+      },
+      "required": [
+        "train",
+        "validate",
+        "test"
+      ],
+      "title": "TemporalSplit",
+      "type": "object"
+    },
+    "Validation": {
+      "additionalProperties": false,
+      "properties": {
+        "equipment_holdout": {
+          "$ref": "#/$defs/EquipmentHoldout"
+        },
+        "temporal_split": {
+          "$ref": "#/$defs/TemporalSplit"
+        }
+      },
+      "required": [
+        "temporal_split"
+      ],
+      "title": "Validation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "实验定义（对应 contracts/experiment/schema.json）。",
+  "properties": {
+    "author": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Author"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "dataset_view": {
+      "pattern": "^VIEW-[0-9]{4,}$",
+      "title": "Dataset View",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "experiment_id": {
+      "pattern": "^EXP-[0-9]{4,}$",
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "goal_id": {
+      "pattern": "^RG-[0-9]{4,}$",
+      "title": "Goal Id",
+      "type": "string"
+    },
+    "hypothesis_id": {
+      "pattern": "^H-[0-9]{4,}$",
+      "title": "Hypothesis Id",
+      "type": "string"
+    },
+    "metrics": {
+      "items": {
+        "enum": [
+          "RMSE",
+          "MAE",
+          "MAPE",
+          "CVRMSE",
+          "NMBE"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Metrics",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "model": {
+      "$ref": "#/$defs/ModelSpec"
+    },
+    "physics_tests": {
+      "$ref": "#/$defs/PhysicsTests"
+    },
+    "runtime": {
+      "$ref": "#/$defs/Runtime"
+    },
+    "target": {
+      "title": "Target",
+      "type": "string"
+    },
+    "validation": {
+      "$ref": "#/$defs/Validation"
+    }
+  },
+  "required": [
+    "experiment_id",
+    "goal_id",
+    "hypothesis_id",
+    "dataset_view",
+    "model",
+    "target",
+    "validation",
+    "metrics",
+    "runtime"
+  ],
+  "title": "Experiment",
+  "type": "object"
+}

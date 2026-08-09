@@ -1,0 +1,30 @@
+# 旧格式工作簿物模型：冷冻水总管
+contract: TFOM
+contract_version: "1.0"
+model_id: chilled_water_header
+version: "1.0"
+properties:
+  f:
+    unit: "m3/h"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "volume_flow"
+    min_value: 0.0
+    max_value: 20000.0
+    name_zh: 流量
+  t_supply:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 供水温度
+  t_return:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 回水温度

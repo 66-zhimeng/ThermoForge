@@ -1,0 +1,240 @@
+{
+  "$defs": {
+    "Acceptance": {
+      "additionalProperties": false,
+      "description": "硬性验收条件。NMBE 按 DD-14 纳入，单独设限。",
+      "properties": {
+        "cvrmse_max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cvrmse Max"
+        },
+        "extrapolation_required": {
+          "default": false,
+          "title": "Extrapolation Required",
+          "type": "boolean"
+        },
+        "inference_latency_ms_max": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inference Latency Ms Max"
+        },
+        "mape_max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mape Max"
+        },
+        "nmbe_abs_max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nmbe Abs Max"
+        },
+        "physics_violation_rate_max": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Physics Violation Rate Max"
+        }
+      },
+      "title": "Acceptance",
+      "type": "object"
+    },
+    "ModelTypes": {
+      "additionalProperties": false,
+      "description": "允许的建模路线（research-loop.md §4）。",
+      "properties": {
+        "data": {
+          "default": true,
+          "title": "Data",
+          "type": "boolean"
+        },
+        "hybrid": {
+          "default": true,
+          "title": "Hybrid",
+          "type": "boolean"
+        },
+        "physics": {
+          "default": true,
+          "title": "Physics",
+          "type": "boolean"
+        }
+      },
+      "title": "ModelTypes",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Research Goal：一次持续研究的根对象。",
+  "properties": {
+    "acceptance": {
+      "$ref": "#/$defs/Acceptance"
+    },
+    "approval_required": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Approval Required",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "author": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Author"
+    },
+    "candidate_inputs": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Candidate Inputs",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "compute_budget_hours": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Compute Budget Hours"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "goal_id": {
+      "pattern": "^RG-[0-9]{4,}$",
+      "title": "Goal Id",
+      "type": "string"
+    },
+    "max_duration_days": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Duration Days"
+    },
+    "max_experiments": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Experiments"
+    },
+    "model_types": {
+      "$ref": "#/$defs/ModelTypes"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "object_model": {
+      "title": "Object Model",
+      "type": "string"
+    },
+    "purpose": {
+      "title": "Purpose",
+      "type": "string"
+    },
+    "target": {
+      "title": "Target",
+      "type": "string"
+    }
+  },
+  "required": [
+    "goal_id",
+    "name",
+    "object_model",
+    "purpose",
+    "target",
+    "candidate_inputs",
+    "acceptance"
+  ],
+  "title": "ResearchGoal",
+  "type": "object"
+}

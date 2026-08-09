@@ -1,0 +1,56 @@
+# 旧格式工作簿物模型：板换
+contract: TFOM
+contract_version: "1.0"
+model_id: heat_exchanger
+version: "1.0"
+properties:
+  chw_supply_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷冻水供水温度
+  chw_return_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷冻水回水温度
+  cw_return_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷却水回水温度
+  cw_supply_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 冷却水供水温度
+  status_run:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 运行状态
+  fault_alarm:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 故障报警
+  permissive_ctrl:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 允许控制

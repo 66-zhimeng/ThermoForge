@@ -1,0 +1,508 @@
+{
+  "$defs": {
+    "BindingRecord": {
+      "additionalProperties": false,
+      "description": "`bindings` 表一行（现场点位绑定，只存在于 Adapter 边界）。",
+      "properties": {
+        "adapter": {
+          "title": "Adapter",
+          "type": "string"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "variable_id": {
+          "title": "Variable Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable_id",
+        "adapter",
+        "source_ref"
+      ],
+      "title": "BindingRecord",
+      "type": "object"
+    },
+    "ObjectRecord": {
+      "additionalProperties": false,
+      "description": "`objects` 表一行。",
+      "properties": {
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "object_model_id": {
+          "title": "Object Model Id",
+          "type": "string"
+        },
+        "object_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Name"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "system_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Id"
+        }
+      },
+      "required": [
+        "object_id",
+        "object_model_id"
+      ],
+      "title": "ObjectRecord",
+      "type": "object"
+    },
+    "ParameterRecord": {
+      "additionalProperties": false,
+      "description": "`parameters` 表一行（设备额定参数和固定参数）。",
+      "properties": {
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "parameter_code": {
+          "title": "Parameter Code",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "object_id",
+        "parameter_code",
+        "value",
+        "unit"
+      ],
+      "title": "ParameterRecord",
+      "type": "object"
+    },
+    "RelationRecord": {
+      "additionalProperties": false,
+      "description": "`relations` 表一行（对象之间的系统拓扑关系）。",
+      "properties": {
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "forward",
+                "reverse"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "from_object": {
+          "title": "From Object",
+          "type": "string"
+        },
+        "medium": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Medium"
+        },
+        "port_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port From"
+        },
+        "port_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port To"
+        },
+        "relation": {
+          "title": "Relation",
+          "type": "string"
+        },
+        "to_object": {
+          "title": "To Object",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_object",
+        "relation",
+        "to_object"
+      ],
+      "title": "RelationRecord",
+      "type": "object"
+    },
+    "TfdcManifest": {
+      "additionalProperties": false,
+      "description": "`manifest` 表（key/value 两列表解析后的结构）。",
+      "properties": {
+        "contract": {
+          "const": "TFDC",
+          "title": "Contract",
+          "type": "string"
+        },
+        "contract_version": {
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "dataset_id": {
+          "title": "Dataset Id",
+          "type": "string"
+        },
+        "dataset_version": {
+          "minimum": 1,
+          "title": "Dataset Version",
+          "type": "integer"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "object_model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Model Version"
+        },
+        "site_id": {
+          "title": "Site Id",
+          "type": "string"
+        },
+        "source_system": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source System"
+        },
+        "time_resolution": {
+          "title": "Time Resolution",
+          "type": "string"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract",
+        "contract_version",
+        "dataset_id",
+        "dataset_version",
+        "site_id",
+        "timezone",
+        "time_resolution"
+      ],
+      "title": "TfdcManifest",
+      "type": "object"
+    },
+    "VariableRecord": {
+      "additionalProperties": false,
+      "description": "`variables` 表一行。",
+      "properties": {
+        "aggregation": {
+          "anyOf": [
+            {
+              "enum": [
+                "mean",
+                "sum",
+                "min",
+                "max",
+                "first",
+                "last",
+                "median"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aggregation"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "dtype": {
+          "enum": [
+            "float",
+            "integer",
+            "boolean",
+            "string"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "max_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Value"
+        },
+        "min_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Value"
+        },
+        "name_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name En"
+        },
+        "name_zh": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name Zh"
+        },
+        "nullable": {
+          "default": true,
+          "title": "Nullable",
+          "type": "boolean"
+        },
+        "object_id": {
+          "title": "Object Id",
+          "type": "string"
+        },
+        "property_code": {
+          "title": "Property Code",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "state",
+            "control",
+            "disturbance",
+            "target",
+            "context",
+            "derived"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sample_period": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Period"
+        },
+        "source_kind": {
+          "enum": [
+            "measured",
+            "derived",
+            "estimated",
+            "manual"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "variable_id": {
+          "title": "Variable Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable_id",
+        "object_id",
+        "property_code",
+        "unit",
+        "dtype",
+        "role",
+        "source_kind"
+      ],
+      "title": "VariableRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "TFDC-XLSX 整册结构：四张必需表 + 三张可选表，含跨表引用校验。",
+  "properties": {
+    "bindings": {
+      "items": {
+        "$ref": "#/$defs/BindingRecord"
+      },
+      "title": "Bindings",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "manifest": {
+      "$ref": "#/$defs/TfdcManifest"
+    },
+    "objects": {
+      "items": {
+        "$ref": "#/$defs/ObjectRecord"
+      },
+      "minItems": 1,
+      "title": "Objects",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "parameters": {
+      "items": {
+        "$ref": "#/$defs/ParameterRecord"
+      },
+      "title": "Parameters",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "relations": {
+      "items": {
+        "$ref": "#/$defs/RelationRecord"
+      },
+      "title": "Relations",
+      "type": "array",
+      "x-tf-set-semantics": true
+    },
+    "variables": {
+      "items": {
+        "$ref": "#/$defs/VariableRecord"
+      },
+      "minItems": 1,
+      "title": "Variables",
+      "type": "array",
+      "x-tf-set-semantics": true
+    }
+  },
+  "required": [
+    "manifest",
+    "objects",
+    "variables"
+  ],
+  "title": "TfdcDataset",
+  "type": "object"
+}

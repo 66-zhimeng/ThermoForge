@@ -1,0 +1,39 @@
+# 冷冻水总管示例物模型（TFOM v1），供 tests/fixtures/valid_minimal.xlsx 引用
+contract: TFOM
+contract_version: "1.0"
+model_id: chilled_header
+version: "1.0"
+properties:
+  header_supply_temp:
+    name_zh: 冷冻水供水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 2.0
+    max_value: 20.0
+  header_return_temp:
+    name_zh: 冷冻水回水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 5.0
+    max_value: 25.0
+  header_flow:
+    name_zh: 冷冻水总管流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 5000.0
+  supply_return_temp_diff:
+    name_zh: 供回水温差
+    unit: K
+    dtype: float
+    role: derived
+    quantity_kind: temperature_difference
+    min_value: 0.0
+    max_value: 10.0
+    expression: header_return_temp - header_supply_temp

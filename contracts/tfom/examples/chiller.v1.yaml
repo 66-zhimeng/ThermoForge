@@ -1,0 +1,113 @@
+# 冷水机示例物模型（TFOM v1）
+# 覆盖 state / control / target / derived 四种角色；
+# 温差单位使用 K（conventions.md §2.2），比率类显式声明单位与范围（§2.3）。
+contract: TFOM
+contract_version: "1.0"
+model_id: chiller
+version: "1.0"
+properties:
+  evap_chw_supply_temp:
+    name_zh: 冷冻水供水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 2.0
+    max_value: 20.0
+  evap_chw_return_temp:
+    name_zh: 冷冻水回水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 5.0
+    max_value: 25.0
+  evap_chw_flow:
+    name_zh: 冷冻水流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 1200.0
+  cw_supply_temp:
+    name_zh: 冷却水供水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 10.0
+    max_value: 40.0
+  cw_return_temp:
+    name_zh: 冷却水回水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 12.0
+    max_value: 45.0
+  outdoor_wet_bulb_temp:
+    name_zh: 室外湿球温度
+    unit: Cel
+    dtype: float
+    role: context
+    quantity_kind: temperature
+    min_value: -10.0
+    max_value: 40.0
+  chw_valve_opening:
+    name_zh: 冷冻水阀门开度
+    unit: "%"
+    dtype: float
+    role: control
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
+  compressor_enable:
+    name_zh: 压缩机启停指令
+    unit: "1"
+    dtype: boolean
+    role: control
+    quantity_kind: dimensionless
+  input_power:
+    name_zh: 输入功率
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 1200.0
+  part_load_ratio:
+    name_zh: 部分负荷率
+    unit: "1"
+    dtype: float
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 1.0
+  cooling_capacity:
+    name_zh: 制冷量
+    unit: kW
+    dtype: float
+    role: derived
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 5000.0
+    expression: evap_chw_flow * 1.163 * supply_return_temp_diff
+  supply_return_temp_diff:
+    name_zh: 冷冻水供回水温差
+    unit: K
+    dtype: float
+    role: derived
+    quantity_kind: temperature_difference
+    min_value: 0.0
+    max_value: 10.0
+    expression: evap_chw_return_temp - evap_chw_supply_temp
+  cop:
+    name_zh: 能效比
+    unit: "1"
+    dtype: float
+    role: derived
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 12.0
+    expression: cooling_capacity / input_power

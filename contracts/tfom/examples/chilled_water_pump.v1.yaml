@@ -1,0 +1,47 @@
+# 旧格式工作簿物模型：冷冻水泵（data/ 0723 工作簿）
+contract: TFOM
+contract_version: "1.0"
+model_id: chilled_water_pump
+version: "1.0"
+properties:
+  power:
+    unit: "kW"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "power"
+    min_value: 0.0
+    max_value: 500.0
+    name_zh: 功率
+  status_frequency:
+    unit: "Hz"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "frequency"
+    min_value: 0.0
+    max_value: 60.0
+    name_zh: 运行频率
+  status_run:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 运行状态
+  fault_alarm:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 故障报警
+  maintenance_status:
+    unit: "1"
+    dtype: "boolean"
+    role: "state"
+    quantity_kind: "dimensionless"
+    name_zh: 维护状态
+  runtime_accum:
+    unit: "s"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "time"
+    min_value: 0.0
+    name_zh: 累计运行时长（原始单位未确认，按秒登记）

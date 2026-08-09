@@ -1,0 +1,352 @@
+{
+  "$defs": {
+    "Constraints": {
+      "additionalProperties": false,
+      "description": "`constraints.yaml`（model-package.md §4）。",
+      "properties": {
+        "forbidden_extrapolation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forbidden Extrapolation"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/InputConstraint"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "missing_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Policy"
+        },
+        "object_model_compat": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Model Compat"
+        },
+        "output_max_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Max Value"
+        },
+        "output_min_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Min Value"
+        },
+        "physical_constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Physical Constraints",
+          "type": "array"
+        },
+        "validated_domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validated Domain"
+        }
+      },
+      "title": "Constraints",
+      "type": "object"
+    },
+    "InputConstraint": {
+      "additionalProperties": false,
+      "description": "单个输入的工程范围与超范围策略（implementation-notes §9.2）。",
+      "properties": {
+        "max_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Value"
+        },
+        "min_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Value"
+        },
+        "out_of_range": {
+          "default": "reject",
+          "enum": [
+            "reject",
+            "clamp",
+            "passthrough_with_flag"
+          ],
+          "title": "Out Of Range",
+          "type": "string"
+        },
+        "property_code": {
+          "title": "Property Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "property_code"
+      ],
+      "title": "InputConstraint",
+      "type": "object"
+    },
+    "ModelSignature": {
+      "additionalProperties": false,
+      "description": "模型签名（model-package.md §3）。",
+      "properties": {
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/SignaturePort"
+          },
+          "minItems": 1,
+          "title": "Inputs",
+          "type": "array"
+        },
+        "model_id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "object_model": {
+          "title": "Object Model",
+          "type": "string"
+        },
+        "object_model_compat": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Model Compat"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/SignaturePort"
+          },
+          "minItems": 1,
+          "title": "Outputs",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "version",
+        "object_model",
+        "inputs",
+        "outputs"
+      ],
+      "title": "ModelSignature",
+      "type": "object"
+    },
+    "SignaturePort": {
+      "additionalProperties": false,
+      "description": "签名中的一个输入/输出端口。",
+      "properties": {
+        "dtype": {
+          "enum": [
+            "float",
+            "integer",
+            "boolean",
+            "string"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "property_code": {
+          "title": "Property Code",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "property_code",
+        "unit",
+        "dtype"
+      ],
+      "title": "SignaturePort",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "模型包元数据（对应 contracts/model-package/schema.json）。",
+  "properties": {
+    "author": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Author"
+    },
+    "constraints": {
+      "$ref": "#/$defs/Constraints"
+    },
+    "contract": {
+      "const": "TFMP",
+      "default": "TFMP",
+      "title": "Contract",
+      "type": "string"
+    },
+    "contract_version": {
+      "default": "1.0",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "experiment_id": {
+      "anyOf": [
+        {
+          "pattern": "^EXP-[0-9]{4,}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Experiment Id"
+    },
+    "goal_id": {
+      "anyOf": [
+        {
+          "pattern": "^RG-[0-9]{4,}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Goal Id"
+    },
+    "model_id": {
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Model Id",
+      "type": "string"
+    },
+    "signature": {
+      "$ref": "#/$defs/ModelSignature"
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "validated",
+        "approved",
+        "production",
+        "deprecated",
+        "retired"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model_id",
+    "version",
+    "status",
+    "signature"
+  ],
+  "title": "ModelPackage",
+  "type": "object"
+}

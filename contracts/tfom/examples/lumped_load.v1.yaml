@@ -1,0 +1,61 @@
+# 旧格式工作簿物模型：集总负载（按需求方意见不参与训练，见 data/README.md）
+contract: TFOM
+contract_version: "1.0"
+model_id: lumped_load
+version: "1.0"
+properties:
+  load:
+    unit: "kW"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "power"
+    min_value: 0.0
+    max_value: 50000.0
+    name_zh: 负载
+  heat_transfer:
+    unit: "kW"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "power"
+    min_value: 0.0
+    max_value: 50000.0
+    name_zh: 换热量
+  load_ratio:
+    unit: "1"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "dimensionless"
+    min_value: 0.0
+    max_value: 1.0
+    name_zh: 负载率
+  f:
+    unit: "m3/h"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "volume_flow"
+    min_value: 0.0
+    max_value: 20000.0
+    name_zh: 流量
+  t_supply:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 供水温度
+  t_return:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 回水温度
+  stored_heat:
+    unit: "kW.h"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "energy"
+    min_value: 0.0
+    name_zh: 蓄热量

@@ -1,0 +1,46 @@
+# 旧格式工作簿物模型：冷却塔
+contract: TFOM
+contract_version: "1.0"
+model_id: cooling_tower
+version: "1.0"
+properties:
+  supply_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 供水温度
+  return_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -5.0
+    max_value: 60.0
+    name_zh: 回水温度
+  supply_p:
+    unit: "kPa"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "pressure"
+    min_value: 0.0
+    max_value: 2000.0
+    name_zh: 供水压力
+  return_p:
+    unit: "kPa"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "pressure"
+    min_value: 0.0
+    max_value: 2000.0
+    name_zh: 回水压力
+  instant_flow:
+    unit: "m3/h"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "volume_flow"
+    min_value: 0.0
+    max_value: 20000.0
+    name_zh: 瞬时流量

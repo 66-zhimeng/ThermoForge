@@ -1,0 +1,22 @@
+# 旧格式工作簿物模型：环境参数
+contract: TFOM
+contract_version: "1.0"
+model_id: environment_parameters
+version: "1.0"
+properties:
+  ambient_t:
+    unit: "Cel"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "temperature"
+    min_value: -40.0
+    max_value: 50.0
+    name_zh: 室外干球温度
+  ambient_h:
+    unit: "%"
+    dtype: "float"
+    role: "state"
+    quantity_kind: "percent"
+    min_value: 0.0
+    max_value: 100.0
+    name_zh: 室外相对湿度
