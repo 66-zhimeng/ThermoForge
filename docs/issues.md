@@ -54,7 +54,10 @@
 | I-37 | 旧格式适配器的 0/1→布尔转换属适配层登记规则，需数据提供方确认语义 | 数据 | 数据提供方 | 待确认 | Phase 1 实现发现 |
 | I-38 | Experiment 契约 `hyperparameters` 只支持标量，physics 输入映射与单调性约束暂以字符串编码 | 契约 | 设计 | 待决策 | Phase 2 实现发现 |
 | I-39 | `environment_lock` 包条目 sha256 的取值口径未定义，实现取 `name==version` 摘要 | 契约 | 设计 | 待决策 | [conventions §5.3](./conventions.md)（Phase 2 实现发现） |
-| I-40 | `cop_below_carnot` 检查中冷凝温度以冷却水供水温度近似，端口约定需明确 | 实现 | 设计 | 待确认 | Phase 2 实现发现 |
+| I-40 | `cop_below_carnot` 检查中冷凝温度以冷却水供水温度近似，端口约定需明确 | 实现 | 设计 | ~~待确认~~ 已解决（v2 按辨识残差选代理） | Phase 2 实现发现，v2 修订 |
+| I-50 | WX 数据 `cw_return_temp` 低于 `cw_supply_temp` 约 6 K，冷却水供回标签疑似互换 | 数据 | 数据提供方 | 待确认 | v2 物理模型切片发现 |
+| I-51 | 同源相关性检测必须逐对象评估：跨对象池化把单机 r=0.995 稀释到 0.57，负例会漏报 | 实现 | 设计 | 待确认 | G3 实现发现（垂直切片实测） |
+| I-52 | 宽表数据集 Schema 明细超出信封 32KB 上限，编排预检需要紧凑清单通道 | 契约 | 设计 | 待决策 | G3 实现发现（implementation-notes §11 张力） |
 | I-41 | §6.2 的 `COP > 0` 与「制冷量为正时 input_power > 0」实现上是同一判定，重复计数 | 契约 | 设计 | 待决策 | [implementation-notes §6.2](./implementation-notes.md)（Phase 2 实现发现） |
 | I-47 | Experiment 契约新增 `rolling_cv` 块属 MINOR 契约演进，research-loop §5 示例未含该字段 | 契约 | 设计 | 待决策 | Phase 2 增补（滚动原点 CV） |
 | I-42 | 模型状态机 `can_transition` 允许沿链跳级，发布留痕可被绕过 | 契约 | 设计 | 待决策 | [model-package §5](./model-package.md)（Phase 4 实现发现） |
@@ -64,6 +67,7 @@
 | I-46 | 残差混合的 monotone_constraints 只约束残差项，组合模型单调性不传递 | 实现 | 设计 | 待决策 | [implementation-notes §6.3](./implementation-notes.md)（垂直切片实测） |
 | I-48 | ~~F6 COP 量纲问题~~已撤销：站点为高温离心式冷机，COP 9~11 物理合理；遗留两种制冷量口径偏差的核对 | 数据 | 数据 | 已解决 | [data-survey §F6](./data-survey.md)（2026-08-09 需求方确认） |
 | I-49 | 数据预处理需由 Agent 自主完成（目前清洗规则由人工给出、脚本由人工触发），预处理能力需工具化进编排层 | 需求 | 设计 | 待设计 | 2026-08-09 需求方确认 |
+| I-53 | 预处理错误码 TFPP-001~006 暂登记在 `thermoforge_data.preprocess` 模块内，conventions §7 无预处理小节 | 契约 | 设计 | 待决策 | I-49 实现发现 |
 
 ---
 
@@ -214,6 +218,12 @@
 
 **背景**：`physics_checks.check_hard_constraints` 的 `cop_below_carnot` 需要蒸发/冷凝两侧温度。Experiment Runner 在视图中只有冷却水**供水**温度时以其近似冷凝温度（偏高估 Carnot 上限会放松约束还是收紧取决于端口选择），近似口径写入 `physics_report.json` 的 `note` 字段。需要契约层明确应使用哪个端口（冷凝器回水/冷却水回水），以及在端口缺失时该约束应跳过还是降级。
 
+**解决（v2 修订）**：`ChillerPhysicsV2` 在辨识时对两个候选端口（cw_supply / cw_return）分别做完整模型辨识，按训练集相对 RMSE 选定代理并写入参数 YAML（`condenser_proxy`）；Runner 的 Carnot 检查改用模型声明的 `condenser_col`。端口缺失时约束自动跳过（无适用样本）。
+
+### I-50 冷却水供回温度标签疑似互换
+
+**背景**：`WX_2025_PLANT` 中 `cw_return_temp` 低于 `cw_supply_temp` 约 6 K（p1/p99 −9.5/−4.9 K），与冷却水环路物理方向相反（冷凝器出水应更热）。v2 代理评估中出现交叉证据：单变量 COP 相关性 cw_supply 更强（R² 0.583 vs 0.538），但完整模型辨识残差 cw_return 更优（0.0675 vs 0.0886）。需数据提供方确认标签含义；若确认互换，修订派生规则（`derive_plant.py`）并新建数据集 revision。
+
 ### I-41 `COP > 0` 与「制冷量为正时 input_power > 0」重复计数
 
 **背景**：[implementation-notes §6.2](./implementation-notes.md) 把 `COP > 0` 和「制冷量为正时 `input_power > 0`」列为两条独立硬约束，但在 `Q > 0` 的适用条件下二者是同一判定（COP = Q/P）。Phase 2 实现保留两条以便与文档对照，代价是同一违规样本被两条约束同时计入（总体口径不受影响，每条单独口径虚高）。建议契约合并为一条，或为二者定义不同的适用条件。
@@ -263,11 +273,27 @@
 
 **遗留**：两种制冷量口径（`sum(load)` vs `Q_表头`）的偏差（p50 +10.4%、p95 +62%）仍然成立，物理建模前建议核对口径；切片中物理模型 CVRMSE 1.18 不再是「数据不可能」的必然结果，值得在口径核对后重新做参数辨识。
 
+### I-51 同源相关性检测的池化口径
+
+**背景**：G3 可建模性报告实现中发现，同源检测（候选-目标相关性）若把多个设备实例的序列直接拼接池化，跨对象差异会严重稀释相关性——WX 数据中 `chiller_01.power ~ chiller_01.current_percent` 单机 r=0.9955（F1），与四台冷机功率混池后仅 0.57，负例会漏报。**实现口径**：同源检测逐对象评估后取最重级别；两层 `object.property` 候选（跨设备驱动量）对每个目标对象分别评估。同时相关性只在目标有效工况（非零）样本上计算——停机工况输入与目标同为零会制造虚假高相关（`same_origin_positive_target` 可配）。该口径属参考阈值语义，需领域确认（关联 I-30）。
+
+### I-52 宽表 Schema 与信封 32KB 上限的张力
+
+**背景**：G3 门禁链路暴露——`tf_dataset_schema` 对 241 变量的宽表数据集，完整 variables 明细超出信封 32KB 上限被逐级截断，编排层 `_precheck_variables` 一度拿到截断标记而非变量清单，误判「必需变量缺失」。**处理**：schema 完整明细始终落 artifact，信封 summary 固定携带紧凑清单 `variable_ids` / `property_codes` + 前 50 条明细。若其他宽摘要工具（profile/compare）被编排链路消费，需要同样的「紧凑字段 + artifact」约定，建议写入 §11 信封约定修订。
+
 ### I-49 数据预处理需由 Agent 自主完成
 
 **背景**：2026-08-09 需求方明确「数据的处理需要 Agent 自己解决」。目前的预处理（冷却塔填充、冷冻水泵时间轴修复、旧格式规范化）是人工给规则、人工触发 `scripts/` 下的脚本完成的，与「Agent 只做编排、计算走确定性工具」的架构之间存在落差：预处理规则本身（如「塔流量 = 总管流量 ÷ 运行台数」）来自领域知识，需要 Agent 能提出规则、固化为确定性预处理工具并留痕。
 
 **需要设计**：预处理工具化方案——规则提案 → 人工或规则审批 → 固化为确定性转换（类似 DD-02 方案 C 的「验证后固化」思路）→ 纳入 `tf_dataset_*` 工具体系与 Dataset View 谱系。与 [risks R8](./risks.md) 的规范化预处理工具是同一组件。
+
+**实现（2026-08-09）**：已落地为 `thermoforge_data.preprocess` + `tf_preprocess_propose/approve/apply/list` 四个工具。Agent 只能提出规则参数（pydantic Schema 校验），执行的是规则库中预先注册的确定性变换；原人工脚本 `scripts/fill_cooling_tower.py`、`scripts/fix_chwp.py` 固化为 `fill_from_header_divide_by_count`、`repair_time_axis`、`fix_header_labels` 三个规则类型。审批门禁：`proposed` 规则不得作用于产生 vault revision 的正式导入（TFPP-002），`actor=human` 审批后方可，全程留痕（ApprovalRecord + 逐规则输入/输出指纹）。等价性验证：对原始工作簿应用规则集与人工脚本处理副本导入的 `content_sha256` 一致（tests/test_preprocess_equivalence.py，slow）。注意：fill 脚本写出时的 `round(v, 10)` 精度需以规则参数 `round_decimals: 10` 显式复现，否则冷却塔列在末位比特上不等价。
+
+### I-53 预处理错误码未入 conventions §7
+
+**背景**：I-49 的实现需要预处理域错误码（规则类型未注册、未审批作用于正式导入、规则集不存在、目标不存在、同版本内容冲突、非 human 审批），但 conventions §7 错误码表是冻结文档且 Phase 0 的 `tests/test_errors.py` 逐条比对注册表与文档原文，无法在不改文档的前提下扩充 `ERROR_REGISTRY`。
+
+**Phase 1.5 的处理**：`TFPP-001`~`TFPP-006` 登记在 `thermoforge_data.preprocess` 模块内（模块级常量 + `PreprocessError.code`），信封诊断以自由码形式携带（与 tools.py 既有 `CHILD_ERROR` 同一模式）。**需要决策**：conventions §7 增补预处理小节（如 `TFPP-11xx` 号段）后并入注册表。
 
 ---
 

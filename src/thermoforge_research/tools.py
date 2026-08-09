@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +36,17 @@ from pydantic import ValidationError
 from thermoforge_core.contracts.experiment import Experiment
 from thermoforge_core.contracts.research_goal import ResearchGoal
 from thermoforge_core.timeutil import parse_timestamp
-from thermoforge_data.importer import TfomRegistry, import_xlsx
+from thermoforge_data.importer import TfomRegistry, default_registry, import_parsed, import_xlsx
+from thermoforge_data.legacy import convert_legacy_tables, load_workbook_model
+from thermoforge_data.preprocess import (
+    TFPP_APPROVAL_FORBIDDEN,
+    ApprovalRecord,
+    PreprocessError,
+    RuleSet,
+    RuleStore,
+    apply_ruleset,
+    validate_rule_params,
+)
 from thermoforge_data.vault import DataVault, VaultError
 from thermoforge_data.views import (
     materialize_view,
@@ -56,6 +67,7 @@ from thermoforge_runtime.package import boundary_rows, build_model_package
 from thermoforge_runtime.registry import ModelRegistry
 
 from .errors import ResearchError
+from .modelability import ModelabilityConfig, build_modelability_report
 from .whitelist import check_candidate_inputs, check_view_within_whitelist
 
 QUERY_AGGREGATIONS = ("count", "missing", "mean", "min", "max", "std")
@@ -94,6 +106,7 @@ class ToolContext:
         self._vault: DataVault | None = None
         self._ledger: ResearchLedger | None = None
         self._registry: ModelRegistry | None = None
+        self._preprocess_store: RuleStore | None = None
 
     @property
     def vault(self) -> DataVault:
@@ -116,6 +129,12 @@ class ToolContext:
     @property
     def view_cache_root(self) -> Path:
         return self.research_root / "view_cache"
+
+    @property
+    def preprocess_store(self) -> RuleStore:
+        if self._preprocess_store is None:
+            self._preprocess_store = RuleStore(self.research_root / "preprocess")
+        return self._preprocess_store
 
 
 def _finish(ctx: ToolContext, env: dict[str, Any]) -> dict[str, Any]:
@@ -236,17 +255,38 @@ def tf_dataset_get(ctx: ToolContext, ref: str) -> dict[str, Any]:
 
 
 def tf_dataset_schema(ctx: ToolContext, ref: str) -> dict[str, Any]:
-    """数据版本的变量 Schema（variable_id/unit/dtype/role/范围）。"""
+    """数据版本的变量 Schema（variable_id/unit/dtype/role/范围）。
+
+    宽表数据集的完整 variables 明细始终落 artifact；信封 summary 携带
+    紧凑清单（variable_ids/property_codes，供白名单与预检使用）+
+    前 50 条明细（§11 响应上限）。
+    """
     tool = "tf_dataset_schema"
     try:
         variables = ctx.vault.load_variables(ref)
         objects = ctx.vault.load_objects(ref)
     except VaultError as exc:
         return _error_envelope(ctx, tool, exc, inputs={"ref": ref})
+    out_dir = ctx.artifacts_root / "schema"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = out_dir / f"{ref.replace('@', '_')}-schema.json"
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".tmp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fp:
+        json.dump({"dataset_ref": ref, "variables": variables,
+                   "objects": objects}, fp, ensure_ascii=False,
+                  sort_keys=True, indent=2)
+        fp.write("\n")
+    os.replace(tmp, artifact_path)
     return _finish(ctx, make_envelope(
         tool, id=ref, status="OK", inputs={"ref": ref},
-        summary={"variables": variables, "objects": objects,
-                 "variable_count": len(variables)},
+        summary={"variable_count": len(variables),
+                 "variable_ids": sorted(v["variable_id"] for v in variables),
+                 "property_codes": sorted({v["property_code"]
+                                           for v in variables}),
+                 "objects": objects,
+                 "variables": variables[:50],
+                 "variables_in_artifact": len(variables)},
+        artifacts=[_artifact(artifact_path, "schema")],
     ))
 
 
@@ -502,6 +542,65 @@ def tf_dataset_compare(ctx: ToolContext, ref_a: str, ref_b: str) -> dict[str, An
 
 
 # ---------------------------------------------------------------- 研究工具
+
+
+def tf_dataset_modelability(
+    ctx: ToolContext,
+    ref: str,
+    *,
+    goal_id: str | None = None,
+    target: str | None = None,
+    candidate_inputs: Sequence[str] | None = None,
+    object_model: str | None = None,
+) -> dict[str, Any]:
+    """可建模性报告（G3 语义层检查）。FAIL = 存在 blocker，不得进入建模。
+
+    target/candidate_inputs 可由 `goal_id` 从账本中的 Research Goal 定义
+    读取；完整报告始终落 artifact，信封只带摘要（§11）。
+    """
+    tool = "tf_dataset_modelability"
+    try:
+        if goal_id is not None:
+            goal = ctx.ledger.get(goal_id)
+            definition = goal.get("definition") or {}
+            target = target or definition.get("target")
+            candidate_inputs = candidate_inputs or definition.get(
+                "candidate_inputs")
+            object_model = object_model or definition.get("object_model")
+        if not target or not candidate_inputs:
+            raise ValueError("必须提供 goal_id 或显式 target + candidate_inputs")
+        report = build_modelability_report(
+            ctx.vault, ref, target=str(target),
+            candidate_inputs=[str(c) for c in candidate_inputs],
+            object_model=object_model, registry=ctx.tfom_registry,
+        )
+    except (VaultError, KeyError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs={"ref": ref,
+                                                       "goal_id": goal_id})
+    out_dir = ctx.artifacts_root / "modelability"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = out_dir / f"{ref.replace('@', '_').replace('/', '_')}-modelability.json"
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".tmp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fp:
+        json.dump(report, fp, ensure_ascii=False, sort_keys=True, indent=2)
+        fp.write("\n")
+    os.replace(tmp, artifact_path)
+    ok = report["verdict"] == "PASS"
+    return _finish(ctx, make_envelope(
+        tool, ok=ok, id=ref, status=report["verdict"],
+        inputs={"ref": ref, "goal_id": goal_id, "target": report["target"]},
+        summary={
+            "verdict": report["verdict"],
+            "blockers": report["blockers"],
+            "warnings": report["warnings"],
+            "checks": [
+                {"name": c["name"], "level": c["level"],
+                 "passed": c["passed"], "summary": c["summary"]}
+                for c in report["checks"]
+            ],
+        },
+        artifacts=[_artifact(artifact_path, "modelability_report")],
+    ))
 
 
 def tf_goal_create(
@@ -987,6 +1086,238 @@ def tf_model_publish(
     ))
 
 
+# ---------------------------------------------------------------- 预处理工具（I-49）
+
+
+def tf_preprocess_propose(
+    ctx: ToolContext,
+    ruleset: Mapping[str, Any],
+) -> dict[str, Any]:
+    """提交预处理规则集（Schema 校验 + 参数校验 + 版本化存储）。
+
+    Agent 只能提出规则参数；执行的是规则库中预先注册的确定性变换
+    （DD-02 方案 C）。新规则一律 status=proposed，需 human 审批。
+    """
+    tool = "tf_preprocess_propose"
+    try:
+        rs = RuleSet.model_validate(dict(ruleset))
+        for rule in rs.rules:
+            validate_rule_params(rule)  # 参数在 propose 时即校验
+        # 工具层提交一律记为 proposed + 当前 actor（不信任输入的 status）
+        rs = RuleSet.model_validate({
+            **rs.model_dump(mode="json"),
+            "rules": [
+                {**r, "status": "proposed", "proposer": ctx.actor,
+                 "approvals": []}
+                for r in rs.model_dump(mode="json")["rules"]
+            ],
+        })
+        ctx.preprocess_store.save(rs)
+    except (ValidationError, PreprocessError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc,
+                               inputs={"ruleset_id": ruleset.get("ruleset_id")})
+    return _finish(ctx, make_envelope(
+        tool, id=rs.ref, status="PROPOSED",
+        inputs={"ruleset_id": rs.ruleset_id, "version": rs.version},
+        summary={
+            "ruleset": rs.ref,
+            "content_hash": rs.content_hash(),
+            "rules": [
+                {"rule_id": r.rule_id, "rule_type": r.rule_type,
+                 "sheet": r.sheet, "status": r.status}
+                for r in rs.rules
+            ],
+        },
+    ))
+
+
+def tf_preprocess_approve(
+    ctx: ToolContext,
+    ruleset_id: str,
+    *,
+    version: int | None = None,
+    rule_ids: Sequence[str] | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """审批规则（actor 必须为 human，全部留痕）。"""
+    tool = "tf_preprocess_approve"
+    inputs = {"ruleset_id": ruleset_id, "version": version,
+              "rule_ids": list(rule_ids) if rule_ids else None}
+    if ctx.actor != "human":
+        return _error_envelope(
+            ctx, tool,
+            PreprocessError(
+                TFPP_APPROVAL_FORBIDDEN,
+                f"审批 actor 必须为 human，当前: {ctx.actor!r}",
+            ),
+            inputs=inputs,
+        )
+    try:
+        rs = ctx.preprocess_store.load(ruleset_id, version)
+        targets = set(rule_ids) if rule_ids else {r.rule_id for r in rs.rules}
+        unknown = targets - {r.rule_id for r in rs.rules}
+        if unknown:
+            raise PreprocessError("TFPP-003", f"规则不存在: {sorted(unknown)}")
+        now = datetime.now(timezone.utc).isoformat()
+        changed = []
+        for rule in rs.rules:
+            if rule.rule_id not in targets or rule.status == "approved":
+                continue
+            rule.status = "approved"
+            rule.approvals.append(ApprovalRecord(
+                actor=ctx.actor, action="approve", at=now, note=note,
+            ))
+            changed.append(rule.rule_id)
+        ctx.preprocess_store.save(rs)  # 内容哈希不变，仅留痕元数据更新
+    except (PreprocessError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+    return _finish(ctx, make_envelope(
+        tool, id=rs.ref, status="APPROVED" if changed else "UNCHANGED",
+        inputs=inputs,
+        summary={
+            "approved": changed,
+            "rules": [
+                {"rule_id": r.rule_id, "status": r.status,
+                 "approvals": [a.model_dump(mode="json")
+                               for a in r.approvals]}
+                for r in rs.rules
+            ],
+        },
+    ))
+
+
+def tf_preprocess_apply(
+    ctx: ToolContext,
+    path: str | Path,
+    ruleset_id: str,
+    *,
+    version: int | None = None,
+    import_into_vault: bool = False,
+    write_workbook: bool = False,
+    output_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """执行规则集：原始工作簿 + 规则集 → 内存表模型（可选落 xlsx / 落 vault）。
+
+    审批门禁：`import_into_vault=True`（产生 vault revision 的正式导入）
+    要求全部规则 approved；预览执行（不落 vault）允许 proposed 规则。
+    逐规则记录 lineage（rule_id、参数、输入/输出指纹）。
+    """
+    tool = "tf_preprocess_apply"
+    inputs = {"path": str(path), "ruleset_id": ruleset_id, "version": version,
+              "import_into_vault": import_into_vault}
+    try:
+        rs = ctx.preprocess_store.load(ruleset_id, version)
+        sheets = load_workbook_model(path)
+        executions = apply_ruleset(
+            sheets, rs, require_approved=import_into_vault,
+        )
+    except (PreprocessError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+
+    run_dir = ctx.research_root / "preprocess" / "runs" / (
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lineage_doc = {
+        "ruleset": rs.ref,
+        "content_hash": rs.content_hash(),
+        "source_path": str(path),
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+        "actor": ctx.actor,
+        "rules": [e.to_dict() for e in executions],
+    }
+    artifacts: list[dict[str, Any]] = []
+    lineage_path = run_dir / "lineage.json"
+    fd, tmp = tempfile.mkstemp(dir=run_dir, prefix=".tmp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fp:
+        json.dump(lineage_doc, fp, ensure_ascii=False, sort_keys=True, indent=2)
+        fp.write("\n")
+    os.replace(tmp, lineage_path)
+    artifacts.append(_artifact(lineage_path, "preprocess_lineage"))
+
+    dataset_ref = None
+    diagnostics: list[dict[str, Any]] = []
+    if write_workbook:
+        out = Path(output_path) if output_path else (
+            run_dir / "processed.xlsx"
+        )
+        _write_workbook_model(sheets, out)
+        artifacts.append(_artifact(out, "processed_workbook"))
+    if import_into_vault:
+        registry = ctx.tfom_registry or default_registry()
+        conv = convert_legacy_tables(
+            sheets, registry, source_name=Path(path).name,
+        )
+        result = import_parsed(
+            conv.dataset, conv.timestamps, conv.columns,
+            registry=registry,
+            pre_diagnostics=conv.pre_diagnostics,
+            degradations=conv.degradations,
+            source_path=path,
+        )
+        diagnostics = diagnostic_dicts(result.diagnostics)
+        if not result.ok:
+            return _finish(ctx, make_envelope(
+                tool, ok=False, status="FAILED", inputs=inputs,
+                summary={"error": "导入存在 ERROR 级诊断，未写入 vault",
+                         "ruleset": rs.ref},
+                diagnostics=diagnostics,
+                artifacts=artifacts,
+            ))
+        lineage = conv.lineage(path)
+        lineage["preprocess"] = lineage_doc
+        try:
+            dataset_ref = ctx.vault.store(result, source_path=path,
+                                          lineage=lineage)
+        except VaultError as exc:
+            return _error_envelope(ctx, tool, exc, inputs=inputs)
+    return _finish(ctx, make_envelope(
+        tool, ok=True, id=dataset_ref or rs.ref,
+        status="IMPORTED" if dataset_ref else "APPLIED",
+        inputs=inputs,
+        summary={
+            "ruleset": rs.ref,
+            "content_hash": rs.content_hash(),
+            "dataset_ref": dataset_ref,
+            "rules": [
+                {"rule_id": e.rule_id, "rule_type": e.rule_type,
+                 "skipped": e.skipped,
+                 "input_sha256": (e.input_sha256 or "")[:16],
+                 "output_sha256": (e.output_sha256 or "")[:16],
+                 "detail": e.detail}
+                for e in executions
+            ],
+        },
+        diagnostics=diagnostics,
+        artifacts=artifacts,
+    ))
+
+
+def _write_workbook_model(sheets: Mapping[str, Any], path: Path) -> None:
+    """内存表模型 → xlsx（openpyxl 写模式；仅 apply 显式要求时调用）。"""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    for name, sheet in sheets.items():
+        ws = wb.create_sheet(name)
+        for row in [*sheet.header_rows, *sheet.data_rows]:
+            ws.append(list(row))
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".xlsx")
+    os.close(fd)
+    wb.save(tmp)
+    os.replace(tmp, path)
+
+
+def tf_preprocess_list(ctx: ToolContext) -> dict[str, Any]:
+    """列出全部规则集及规则审批状态。"""
+    rulesets = ctx.preprocess_store.list_rulesets()
+    return _finish(ctx, make_envelope(
+        "tf_preprocess_list", status="OK",
+        summary={"rulesets": rulesets, "count": len(rulesets)},
+    ))
+
+
 # architecture §6 工具清单 → 入口（与 pi/tools.json 保持一致）
 TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_import": tf_dataset_import,
@@ -998,6 +1329,7 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_sample": tf_dataset_sample,
     "tf_dataset_materialize": tf_dataset_materialize,
     "tf_dataset_compare": tf_dataset_compare,
+    "tf_dataset_modelability": tf_dataset_modelability,
     "tf_goal_create": tf_goal_create,
     "tf_research_status": tf_research_status,
     "tf_hypothesis_create": tf_hypothesis_create,
@@ -1006,4 +1338,8 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_experiment_get": tf_experiment_get,
     "tf_model_compare": tf_model_compare,
     "tf_model_publish": tf_model_publish,
+    "tf_preprocess_propose": tf_preprocess_propose,
+    "tf_preprocess_approve": tf_preprocess_approve,
+    "tf_preprocess_apply": tf_preprocess_apply,
+    "tf_preprocess_list": tf_preprocess_list,
 }

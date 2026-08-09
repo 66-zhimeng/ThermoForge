@@ -17,6 +17,7 @@
     {"name": "tf_dataset_sample", "entry": "thermoforge_research.tools:tf_dataset_sample", "side_effect": false, "max_rows": 200},
     {"name": "tf_dataset_materialize", "entry": "thermoforge_research.tools:tf_dataset_materialize", "side_effect": true, "returns_id": "VIEW-NNNN"},
     {"name": "tf_dataset_compare", "entry": "thermoforge_research.tools:tf_dataset_compare", "side_effect": false},
+    {"name": "tf_dataset_modelability", "entry": "thermoforge_research.tools:tf_dataset_modelability", "side_effect": false},
     {"name": "tf_goal_create", "entry": "thermoforge_research.tools:tf_goal_create", "side_effect": true, "returns_id": "RG-NNNN"},
     {"name": "tf_research_status", "entry": "thermoforge_research.tools:tf_research_status", "side_effect": false},
     {"name": "tf_hypothesis_create", "entry": "thermoforge_research.tools:tf_hypothesis_create", "side_effect": true, "returns_id": "H-NNNN"},
@@ -24,6 +25,10 @@
     {"name": "tf_experiment_run", "entry": "thermoforge_research.tools:tf_experiment_run", "side_effect": true, "returns_id": "EXP-NNNN"},
     {"name": "tf_experiment_get", "entry": "thermoforge_research.tools:tf_experiment_get", "side_effect": false},
     {"name": "tf_model_compare", "entry": "thermoforge_research.tools:tf_model_compare", "side_effect": false},
-    {"name": "tf_model_publish", "entry": "thermoforge_research.tools:tf_model_publish", "side_effect": true, "returns_id": "model_id@version"}
+    {"name": "tf_model_publish", "entry": "thermoforge_research.tools:tf_model_publish", "side_effect": true, "returns_id": "model_id@version"},
+    {"name": "tf_preprocess_propose", "entry": "thermoforge_research.tools:tf_preprocess_propose", "side_effect": true, "returns_id": "ruleset_id@vN"},
+    {"name": "tf_preprocess_approve", "entry": "thermoforge_research.tools:tf_preprocess_approve", "side_effect": true, "returns_id": "ruleset_id@vN", "actor_required": "human"},
+    {"name": "tf_preprocess_apply", "entry": "thermoforge_research.tools:tf_preprocess_apply", "side_effect": true, "returns_id": "dataset_id@rev_NNNN"},
+    {"name": "tf_preprocess_list", "entry": "thermoforge_research.tools:tf_preprocess_list", "side_effect": false}
   ]
 }
