@@ -1,0 +1,29 @@
+{
+  "contract": "TF-PI-TOOLS",
+  "version": "1.0",
+  "description": "architecture.md §6 工具清单 → Python 入口（thermoforge_research.tools）。每个工具第一参数为 ToolContext，返回统一信封（implementation-notes §11）。",
+  "envelope": {
+    "max_response_bytes": 32768,
+    "sample_max_rows": 200,
+    "profile_quantile_points": ["min", "p01", "p25", "p50", "p75", "p99", "max"]
+  },
+  "tools": [
+    {"name": "tf_dataset_import", "entry": "thermoforge_research.tools:tf_dataset_import", "side_effect": true, "returns_id": "dataset_id@rev_NNNN"},
+    {"name": "tf_dataset_list", "entry": "thermoforge_research.tools:tf_dataset_list", "side_effect": false},
+    {"name": "tf_dataset_get", "entry": "thermoforge_research.tools:tf_dataset_get", "side_effect": false},
+    {"name": "tf_dataset_schema", "entry": "thermoforge_research.tools:tf_dataset_schema", "side_effect": false},
+    {"name": "tf_dataset_profile", "entry": "thermoforge_research.tools:tf_dataset_profile", "side_effect": false},
+    {"name": "tf_dataset_query", "entry": "thermoforge_research.tools:tf_dataset_query", "side_effect": false},
+    {"name": "tf_dataset_sample", "entry": "thermoforge_research.tools:tf_dataset_sample", "side_effect": false, "max_rows": 200},
+    {"name": "tf_dataset_materialize", "entry": "thermoforge_research.tools:tf_dataset_materialize", "side_effect": true, "returns_id": "VIEW-NNNN"},
+    {"name": "tf_dataset_compare", "entry": "thermoforge_research.tools:tf_dataset_compare", "side_effect": false},
+    {"name": "tf_goal_create", "entry": "thermoforge_research.tools:tf_goal_create", "side_effect": true, "returns_id": "RG-NNNN"},
+    {"name": "tf_research_status", "entry": "thermoforge_research.tools:tf_research_status", "side_effect": false},
+    {"name": "tf_hypothesis_create", "entry": "thermoforge_research.tools:tf_hypothesis_create", "side_effect": true, "returns_id": "H-NNNN"},
+    {"name": "tf_experiment_plan", "entry": "thermoforge_research.tools:tf_experiment_plan", "side_effect": true, "returns_id": "EXP-NNNN"},
+    {"name": "tf_experiment_run", "entry": "thermoforge_research.tools:tf_experiment_run", "side_effect": true, "returns_id": "EXP-NNNN"},
+    {"name": "tf_experiment_get", "entry": "thermoforge_research.tools:tf_experiment_get", "side_effect": false},
+    {"name": "tf_model_compare", "entry": "thermoforge_research.tools:tf_model_compare", "side_effect": false},
+    {"name": "tf_model_publish", "entry": "thermoforge_research.tools:tf_model_publish", "side_effect": true, "returns_id": "model_id@version"}
+  ]
+}
