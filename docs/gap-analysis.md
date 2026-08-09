@@ -53,6 +53,8 @@
 
 **需要补**：一份下游接口假设文档，即使暂时只能写成「假设优化器具备以下特征」，也比空白强。这同时会给 [Q4](./open-questions.md)（是否进入闭环控制）提供判据。
 
+> **已回答（2026-08-09）**：下游消费者确认为两类——仿真（秒级动态模型，不要求可微）与算法寻优（静态模型，必须可微连续）。已固化为 [DD-17](./design-decisions.md)，含模型选型约束（树模型不得作为寻优模型）。寻优器的具体接口（调用频率、批量、降级策略）仍待确认。
+
 ### G2 TFOM 契约实际未定义
 
 **现状**：TFOM 被 6 份文档引用——architecture 的组件表、data-contract 的校验、research-loop 的 `object_model`、model-package 的签名与兼容性、conventions 的 `quantity_kind` 建议、glossary。但它的规范只有 [data-contract §3](./data-contract.md) 里约 20 行的一个 YAML 示例，而 TFDC-XLSX 有 5 个小节。
