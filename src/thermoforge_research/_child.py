@@ -1,0 +1,429 @@
+"""Experiment Runner 的子进程入口（implementation-notes §7.1）。
+
+由 `runner.run_experiment` 以 `python -m thermoforge_research._child spec.json`
+启动；线程数环境变量与 PYTHONHASHSEED 已被父进程预置（import 前生效）。
+本进程内不得假定任何随机源未固定：种子清单一并写出（§7.2）。
+
+契约性失败（TFX-9xx）写 child_result.json（status=failed + error_code）
+并以退出码 2 结束；未捕获异常写 stderr 并以退出码 1 结束。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import sys
+import tempfile
+import traceback
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import numpy as np
+import pandas as pd
+
+from thermoforge_data.vault import DataVault
+from thermoforge_data.views import materialize_view
+from thermoforge_models.baseline import LinearBaseline
+from thermoforge_models.hybrid import ResidualHybrid
+from thermoforge_models.physics import ChillerPhysicsModel
+from thermoforge_research.errors import ResearchError
+from thermoforge_research.metrics import compute_metrics
+from thermoforge_research.physics_checks import (
+    check_hard_constraints,
+    check_monotonicity,
+    combine_reports,
+)
+from thermoforge_research.runner import current_environment_lock
+from thermoforge_research.splits import check_no_leakage, temporal_split
+from thermoforge_core.timeutil import parse_time_resolution
+
+MONOTONE_GRID_POINTS = 21  # 单调性受控扰动扫描的点数（§6.3）
+
+
+def _write_json(path: Path, doc: Any) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fp:
+        json.dump(doc, fp, ensure_ascii=False, sort_keys=True, indent=2,
+                  allow_nan=False)
+        fp.write("\n")
+    os.replace(tmp, path)
+
+
+def _parse_monotone(raw: Any) -> dict[str, int]:
+    """hyperparameters 中的单调性约束字符串："feat:1;feat2:-1"。"""
+    if not raw:
+        return {}
+    out: dict[str, int] = {}
+    for item in str(raw).split(";"):
+        name, _, direction = item.partition(":")
+        out[name.strip()] = int(direction)
+    return out
+
+
+def _parse_inputs(raw: Any) -> dict[str, str] | None:
+    """physics 输入列映射字符串："chw_flow=evap_chw_flow;cw_supply_temp=..."。
+
+    （Experiment 契约的 hyperparameters 只支持标量，映射以字符串编码。）
+    """
+    if not raw:
+        return None
+    out: dict[str, str] = {}
+    for item in str(raw).split(";"):
+        key, _, col = item.partition("=")
+        out[key.strip()] = col.strip()
+    return out
+
+
+def _build_physics(hp: Mapping[str, Any]) -> ChillerPhysicsModel:
+    if "rated_capacity_kw" not in hp:
+        raise ValueError("physics 模型缺少超参 rated_capacity_kw（额定参数必须显式声明）")
+    return ChillerPhysicsModel(
+        rated_capacity_kw=float(hp["rated_capacity_kw"]),
+        rated_power_kw=(
+            float(hp["rated_power_kw"]) if hp.get("rated_power_kw") else None
+        ),
+        inputs=_parse_inputs(hp.get("inputs")),
+    )
+
+
+def _build_model(model_spec: Mapping[str, Any], seed: int):
+    category = model_spec["category"]
+    hp = model_spec.get("hyperparameters", {})
+    if category == "data":
+        estimator = model_spec.get("estimator") or model_spec.get("residual")
+        if estimator in ("linear", "ridge"):
+            return LinearBaseline(method=str(estimator),
+                                  alpha=float(hp.get("alpha", 1.0)))
+        raise ResearchError("TFX-902", f"未支持的 data estimator: {estimator!r}")
+    if category == "physics":
+        return _build_physics(hp)
+    if category == "hybrid":
+        xgb_params = {
+            k: hp[k] for k in
+            ("n_estimators", "max_depth", "learning_rate", "subsample",
+             "colsample_bytree")
+            if k in hp
+        }
+        return ResidualHybrid(
+            _build_physics(hp), seed=seed, nthread=1,
+            xgb_params=xgb_params,
+            monotone_constraints=_parse_monotone(hp.get("monotone_constraints")),
+        )
+    raise ResearchError("TFX-902", f"未支持的模型类别: {category!r}")
+
+
+def _fit(model: Any, df: pd.DataFrame, y: np.ndarray,
+         features: Sequence[str]) -> None:
+    if isinstance(model, LinearBaseline | ResidualHybrid):
+        model.fit(df, y, feature_order=features)
+    else:
+        model.fit(df, y)
+
+
+def _seed_manifest(seed: int) -> dict[str, Any]:
+    """种子清单（§7.2）：逐一设置并记录。"""
+    random.seed(seed)
+    rng = np.random.default_rng(seed)  # 显式 Generator，不用全局 np.random.seed
+    return {
+        "random_seed": seed,
+        "entries": {
+            "PYTHONHASHSEED": os.environ.get("PYTHONHASHSEED"),
+            "random.seed": seed,
+            "numpy.default_rng": seed,
+            "sklearn.random_state": seed,
+            "xgboost.seed": seed,
+            "xgboost.nthread": 1,
+            "temporal_split": "deterministic-time-boundary",  # 无随机
+        },
+        "thread_env": {
+            k: os.environ.get(k)
+            for k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                      "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
+                      "VECLIB_MAXIMUM_THREADS")
+        },
+        "_rng_probe": float(rng.random()),  # 验证 Generator 可用且确定
+    }
+
+
+def run(spec_path: Path) -> dict[str, Any]:
+    with open(spec_path, encoding="utf-8") as fp:
+        spec = json.load(fp)
+    exp = spec["experiment"]
+    exp_dir = Path(spec["experiment_dir"])
+
+    # ---- 种子（TFX-902）
+    seed = (exp.get("runtime") or {}).get("random_seed")
+    if seed is None:
+        raise ResearchError("TFX-902", "实验未声明随机种子（runtime.random_seed）")
+    manifest = _seed_manifest(int(seed))
+    _write_json(exp_dir / "seed_manifest.json", manifest)
+
+    # ---- 环境指纹（TFX-901）
+    lock, env_doc = current_environment_lock()
+    env_doc["code_version"] = spec.get("code_version")
+    _write_json(exp_dir / "environment.json", env_doc)
+    declared = (exp.get("runtime") or {}).get("environment_lock")
+    if declared != lock:
+        raise ResearchError(
+            "TFX-901",
+            f"运行环境与实验声明不符: declared={declared} actual={lock}",
+        )
+
+    # ---- 数据：View 物化（revision + view_hash 记录）
+    view_definition = spec["view_definition"]
+    vault = DataVault(spec["vault_root"])
+    mv = materialize_view(vault, view_definition, spec["view_cache_root"])
+    df = mv.table.to_pandas()
+    features = [str(f) for f in view_definition["features"]]
+    target = str(view_definition["target"])
+
+    with open(Path(spec["vault_root"]) / "datasets"
+              / str(view_definition["dataset"]).split("@")[0]
+              / str(view_definition["dataset"]).split("@")[1]
+              / "manifest.json", encoding="utf-8") as fp:
+        manifest_doc = json.load(fp)
+    resolution_seconds = parse_time_resolution(manifest_doc["time_resolution"])
+    if view_definition.get("resolution"):
+        resolution_seconds = parse_time_resolution(str(view_definition["resolution"]))
+
+    # ---- 切分（时间边界 + purge/embargo；边界记录进制品）
+    ts_unique = sorted(df["timestamp"].unique())
+    ts_list = [pd.Timestamp(t).to_pydatetime() for t in ts_unique]
+    split = temporal_split(
+        ts_list, resolution_seconds,
+        train=exp["validation"]["temporal_split"]["train"],
+        validate=exp["validation"]["temporal_split"]["validate"],
+        test=exp["validation"]["temporal_split"]["test"],
+        purge_seconds=float(spec["purge_seconds"]),
+        embargo_seconds=float(spec["embargo_seconds"]),
+    )
+    boundaries = dict(split.boundaries)
+    boundaries["dataset"] = str(view_definition["dataset"])
+    boundaries["view_hash"] = mv.view_hash
+    _write_json(exp_dir / "split.json", boundaries)
+
+    holdout = (exp["validation"].get("equipment_holdout") or {})
+    holdout_objects = list(holdout.get("holdout_objects") or [])
+    if holdout.get("enabled") and not holdout_objects:
+        raise ValueError("equipment_holdout.enabled 但未给出 holdout_objects")
+    holdout_set = set(holdout_objects)
+
+    # ---- 泄漏自检（TFX-903）
+    check_no_leakage(ts_list, split.train_idx, split.validate_idx,
+                     min_gap_seconds=float(spec["purge_seconds"]),
+                     eval_label="验证集")
+    check_no_leakage(ts_list, split.train_idx, split.test_idx,
+                     min_gap_seconds=float(spec["purge_seconds"]),
+                     eval_label="测试集")
+
+    # 按边界区间划分行（train/validate 左闭右开；test 含 t_end）
+    from thermoforge_core.timeutil import parse_timestamp
+
+    b = split.boundaries
+    tr_lo, tr_hi = (parse_timestamp(b["train_range"][0]),
+                    parse_timestamp(b["train_range"][1]))
+    va_lo, va_hi = (parse_timestamp(b["validate_range"][0]),
+                    parse_timestamp(b["validate_range"][1]))
+    te_lo = parse_timestamp(b["test_range"][0])
+    ts_col = df["timestamp"]
+    is_holdout = df["object_id"].astype(str).isin(holdout_set)
+    subsets = {
+        "train": df[~is_holdout & (ts_col >= tr_lo) & (ts_col < tr_hi)],
+        "validate": df[~is_holdout & (ts_col >= va_lo) & (ts_col < va_hi)],
+        "test": df[~is_holdout & (ts_col >= te_lo)],
+    }
+
+    if holdout_set:
+        seen_train_objects = set(
+            subsets["train"]["object_id"].astype(str).unique()
+        )
+        overlap = seen_train_objects & holdout_set
+        if overlap:
+            raise ResearchError(
+                "TFX-903", f"留一设备验证下训练集包含留出设备: {sorted(overlap)}"
+            )
+
+    needed = features + [target]
+    dropped = {}
+    for name, sub in subsets.items():
+        before = len(sub)
+        subsets[name] = sub.dropna(subset=needed)
+        dropped[name] = before - len(subsets[name])
+    if not len(subsets["train"]):
+        raise ResearchError("TFX-905", "训练集清洗后无样本")
+
+    # ---- 训练
+    model = _build_model(exp["model"], int(seed))
+    train_df = subsets["train"]
+    y_train = train_df[target].to_numpy(np.float64)
+    _fit(model, train_df, y_train, features)
+    model_dir = exp_dir / "model"
+    model.save(model_dir)
+
+    # ---- 评估：validate / test（面 A）+ 设备留出面 B/C
+    y_floor = spec.get("y_floor")
+    metrics_doc: dict[str, Any] = {"dropped_na_rows": dropped, "surfaces": {}}
+    prediction_frames: list[pd.DataFrame] = []
+
+    surfaces: dict[str, pd.DataFrame] = {
+        "validate": subsets["validate"], "A": subsets["test"],
+    }
+    if holdout_set:
+        # 面 B：未见设备 × 已见时间（< 测试起点）；面 C：未见设备 × 未来
+        held = df[is_holdout].dropna(subset=needed)
+        held_ts = ts_col.loc[held.index]
+        surfaces["B"] = held[held_ts < te_lo]
+        surfaces["C"] = held[held_ts >= te_lo]
+
+    for surface, sub in surfaces.items():
+        if not len(sub):
+            metrics_doc["surfaces"][surface] = {"n_samples": 0, "metrics": {}}
+            continue
+        y_true = sub[target].to_numpy(np.float64)
+        y_pred = np.asarray(model.predict(sub), dtype=np.float64)
+        report = compute_metrics(
+            y_true.tolist(), y_pred.tolist(), exp["metrics"],
+            y_floor=y_floor,
+            object_ids=sub["object_id"].astype(str).tolist(),
+        )
+        metrics_doc["surfaces"][surface] = report.to_dict()
+        prediction_frames.append(pd.DataFrame({
+            "surface": surface,
+            "object_id": sub["object_id"].astype(str).to_numpy(),
+            "timestamp": sub["timestamp"].to_numpy(),
+            "y_true": y_true,
+            "y_pred": y_pred,
+        }))
+
+    # DD-07 配套：残差混合必须同时报告物理主干单独的指标与残差占比
+    if isinstance(model, ResidualHybrid):
+        physics_only: dict[str, Any] = {}
+        for surface, sub in surfaces.items():
+            if not len(sub):
+                continue
+            y_true = sub[target].to_numpy(np.float64)
+            y_pred = np.asarray(model.physics_only(sub), dtype=np.float64)
+            physics_only[surface] = compute_metrics(
+                y_true.tolist(), y_pred.tolist(), exp["metrics"],
+                y_floor=y_floor,
+            ).to_dict()
+        metrics_doc["physics_only"] = physics_only
+        metrics_doc["residual_share"] = {
+            surface: model.residual_share(sub)
+            for surface, sub in surfaces.items() if len(sub)
+        }
+
+    _write_json(exp_dir / "metrics.json", metrics_doc)
+    if prediction_frames:
+        pd.concat(prediction_frames).to_parquet(
+            exp_dir / "predictions.parquet", compression="zstd", index=False
+        )
+
+    # ---- 物理验证（§6）
+    physics_doc: dict[str, Any] | None = None
+    if (exp.get("physics_tests") or {}).get("enabled"):
+        eval_df = subsets["test"] if len(subsets["test"]) else subsets["validate"]
+        if len(eval_df):
+            y_pred = np.asarray(model.predict(eval_df), dtype=np.float64)
+            rated_power = (exp["model"].get("hyperparameters") or {}).get(
+                "rated_power_kw"
+            )
+            check_df = eval_df.copy()
+            check_df["__pred_power__"] = y_pred
+            kwargs: dict[str, Any] = {
+                "power_col": "__pred_power__",
+                "rated_power": float(rated_power) if rated_power else None,
+            }
+            if isinstance(model, ChillerPhysicsModel | ResidualHybrid):
+                physics_model = (
+                    model if isinstance(model, ChillerPhysicsModel)
+                    else model.physics
+                )
+                check_df["__cooling__"] = physics_model.cooling_capacity(eval_df)
+                kwargs["cooling_col"] = "__cooling__"
+                kwargs["chw_supply_col"] = physics_model.inputs["chw_supply_temp"]
+                # 冷凝温度以冷却水供水温度近似（记录近似口径）
+                kwargs["cw_return_col"] = physics_model.inputs["cw_supply_temp"]
+            hard = check_hard_constraints(check_df, **kwargs)
+
+            mono_results: dict[str, Any] = {}
+            monotone = getattr(model, "monotone_constraints", None) or {}
+            if monotone and isinstance(model, ResidualHybrid):
+                base_row = {
+                    f: float(np.nanmedian(
+                        pd.to_numeric(train_df[f], errors="coerce")))
+                    for f in model.feature_order
+                }
+                for feat, direction in monotone.items():
+                    col = pd.to_numeric(train_df[feat], errors="coerce")
+                    grid = np.linspace(float(col.min()), float(col.max()),
+                                       MONOTONE_GRID_POINTS)
+                    result = check_monotonicity(
+                        model.predict, base_row, feat, grid.tolist(),
+                        direction=int(direction),
+                    )
+                    mono_results[result.name] = result
+            combined = combine_reports(hard, mono_results)
+            physics_doc = combined.to_dict()
+            physics_doc["note"] = (
+                "cop_below_carnot 的冷凝温度以冷却水供水温度近似"
+            )
+            _write_json(exp_dir / "physics_report.json", physics_doc)
+
+    artifacts = {
+        "model_dir": "model/",
+        "metrics": "metrics.json",
+        "predictions": "predictions.parquet",
+        "split": "split.json",
+        "seed_manifest": "seed_manifest.json",
+        "environment": "environment.json",
+        "physics_report": (
+            "physics_report.json" if physics_doc is not None else None
+        ),
+    }
+    conclusion = {
+        "summary": "实验完成",
+        "dataset_revision": str(view_definition["dataset"]),
+        "view_hash": mv.view_hash,
+        "view_cache_reused": mv.reused,
+        "surfaces": {
+            name: surf.get("metrics", {})
+            for name, surf in metrics_doc["surfaces"].items()
+        },
+    }
+    return {
+        "status": "completed",
+        "artifacts": artifacts,
+        "metrics": metrics_doc,
+        "physics": physics_doc,
+        "conclusion": conclusion,
+        "next_questions": [],
+    }
+
+
+def main(argv: Sequence[str]) -> int:
+    spec_path = Path(argv[1] if len(argv) > 1 else "spec.json")
+    exp_dir = spec_path.resolve().parent
+    try:
+        result = run(spec_path)
+    except ResearchError as exc:
+        _write_json(exp_dir / "child_result.json", {
+            "status": "failed", "error_code": exc.code, "error": str(exc),
+        })
+        print(str(exc), file=sys.stderr)
+        return 2
+    except Exception:
+        traceback.print_exc()
+        _write_json(exp_dir / "child_result.json", {
+            "status": "failed", "error_code": "CHILD_EXCEPTION",
+            "error": traceback.format_exc(limit=3),
+        })
+        return 1
+    _write_json(exp_dir / "child_result.json", result)
+    print(f"experiment completed: {result['conclusion']['dataset_revision']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
