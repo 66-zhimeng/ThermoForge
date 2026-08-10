@@ -41,6 +41,47 @@ DEFAULT_PORT = 8765
 CONFIG_PATH = REPO_ROOT / "pi" / "agent.toml"
 MAX_BODY = 1 << 20  # 1MB，足够长对话；防止意外的大 body
 
+# 服务商目录：只是把常见端点的地址填对，**不构成限制**——base_url 与
+# 模型名始终可以手填，任何 OpenAI 兼容的 chat completions + function
+# calling 端点都能用（含自建 vLLM / one-api / new-api 这类聚合网关）。
+# 模型名随服务商更新，这里只作候选提示，以各家文档为准。
+PROVIDERS: list[dict[str, Any]] = [
+    {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com",
+     "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+     "note": "OpenAI 兼容格式，接口地址不要加 /v1。"},
+    {"id": "openrouter", "name": "OpenRouter（通用路由）",
+     "base_url": "https://openrouter.ai/api/v1",
+     "models": ["deepseek/deepseek-chat", "anthropic/claude-sonnet-4",
+                "openai/gpt-4o", "google/gemini-2.0-flash-001"],
+     "note": "一个 key 转发到几百个模型，模型名写成 服务商/模型 的形式。"},
+    {"id": "moonshot", "name": "Moonshot / Kimi",
+     "base_url": "https://api.moonshot.cn/v1",
+     "models": ["kimi-k2-0905-preview", "moonshot-v1-128k"], "note": ""},
+    {"id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1",
+     "models": ["gpt-4o", "gpt-4o-mini"], "note": ""},
+    {"id": "dashscope", "name": "阿里云百炼 / 通义千问",
+     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "models": ["qwen-max", "qwen-plus", "qwen-turbo"],
+     "note": "用「兼容模式」地址，不是原生 DashScope 地址。"},
+    {"id": "zhipu", "name": "智谱 GLM",
+     "base_url": "https://open.bigmodel.cn/api/paas/v4",
+     "models": ["glm-4-plus", "glm-4-flash"], "note": ""},
+    {"id": "siliconflow", "name": "硅基流动 SiliconFlow",
+     "base_url": "https://api.siliconflow.cn/v1",
+     "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"],
+     "note": ""},
+    {"id": "volcengine", "name": "火山引擎 / 豆包",
+     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+     "models": ["doubao-pro-32k"],
+     "note": "模型名填推理接入点 ID（ep-... 开头）也可以。"},
+    {"id": "ollama", "name": "Ollama（本机模型）",
+     "base_url": "http://localhost:11434/v1",
+     "models": ["qwen2.5", "llama3.1"],
+     "note": "本机跑的模型，API Key 随便填一个非空值即可。"},
+    {"id": "custom", "name": "自定义 / 自建网关", "base_url": "", "models": [],
+     "note": "任何 OpenAI 兼容端点：one-api、new-api、vLLM、LM Studio…"},
+]
+
 
 # ---------------------------------------------------------------- 状态
 
@@ -138,11 +179,15 @@ def read_config() -> dict[str, Any]:
                      or doc.get("base_url") or DEFAULT_BASE_URL),
         "model": (os.environ.get("TF_AGENT_MODEL")
                   or doc.get("model") or DEFAULT_MODEL),
+        "proxy": str(os.environ.get("TF_AGENT_PROXY")
+                     or doc.get("proxy") or ""),
         "config_path": str(CONFIG_PATH),
+        "providers": PROVIDERS,
     }
 
 
-def write_config(api_key: str, base_url: str, model: str) -> None:
+def write_config(api_key: str, base_url: str, model: str,
+                 proxy: str = "") -> None:
     """写 pi/agent.toml（gitignore 内）。空密钥表示保留原值。"""
     import tomllib
 
@@ -153,14 +198,20 @@ def write_config(api_key: str, base_url: str, model: str) -> None:
     key = api_key or str(current.get("api_key") or "")
     if not key:
         raise ValueError("API key 不能为空")
+    if not base_url:
+        raise ValueError("接口地址不能为空")
+    if not model:
+        raise ValueError("模型名不能为空")
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# ThermoForge Agent 配置（本文件已 gitignore，密钥不会入库）",
         f'api_key = "{_toml_escape(key)}"',
         f'base_url = "{_toml_escape(base_url)}"',
         f'model = "{_toml_escape(model)}"',
-        "",
     ]
+    if proxy:
+        lines.append(f'proxy = "{_toml_escape(proxy)}"')
+    lines.append("")
     tmp = CONFIG_PATH.with_suffix(".toml.tmp")
     tmp.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     os.replace(tmp, CONFIG_PATH)
@@ -206,9 +257,13 @@ def diagnose(exc: Exception, config: Any) -> str:
     if "Authentication" in name or "401" in text:
         return "密钥被拒绝（401）。检查 key 是否复制完整、是否属于这个服务商。"
     if "NotFound" in name or "404" in text:
+        hint = ""
+        if "deepseek" in str(config.base_url).lower():
+            hint = ("　DeepSeek 现在的模型名是 deepseek-v4-pro 或 "
+                    "deepseek-v4-flash（deepseek-chat 是旧名字），"
+                    "接口地址是 https://api.deepseek.com，不要加 /v1。")
         return (f"接口或模型不存在（404）。当前模型名 “{config.model}”，"
-                f"接口地址 “{config.base_url}”。DeepSeek 的模型名是 "
-                f"deepseek-chat，接口地址 https://api.deepseek.com。")
+                f"接口地址 “{config.base_url}”。{hint}")
     if "PermissionDenied" in name or "403" in text:
         return "密钥没有访问该模型的权限（403）。"
     if "RateLimit" in name or "429" in text:
@@ -227,6 +282,96 @@ def api_check() -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "error": diagnose(exc, config),
                 "detail": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def api_diagnose() -> dict[str, Any]:
+    """分层网络自检：DNS → TCP → TLS → HTTP。
+
+    「连不上」有太多种原因，笼统一句话没法排查。逐层测能直接指出断点：
+    DNS 失败是解析问题，TCP 失败多为防火墙，TLS 慢/失败常是中间设备，
+    HTTP 通了则说明网络没问题、该看密钥和模型名。
+    """
+    import socket
+    import ssl
+    import time
+    from urllib.parse import urlparse
+
+    config = CONSOLE.config()
+    base_url = (config.base_url if config
+                else read_config()["base_url"])
+    parsed = urlparse(base_url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    steps: list[dict[str, Any]] = []
+
+    def step(name: str, fn) -> bool:
+        t0 = time.monotonic()
+        try:
+            detail = fn()
+            steps.append({"name": name, "ok": True,
+                          "ms": round((time.monotonic() - t0) * 1000),
+                          "detail": detail})
+            return True
+        except Exception as exc:
+            steps.append({"name": name, "ok": False,
+                          "ms": round((time.monotonic() - t0) * 1000),
+                          "detail": f"{type(exc).__name__}: {exc}"[:200]})
+            return False
+
+    if not host:
+        return {"ok": False, "host": base_url,
+                "steps": [{"name": "解析地址", "ok": False, "ms": 0,
+                           "detail": f"接口地址填得不对：{base_url!r}"}]}
+
+    addrs: list[str] = []
+
+    def _dns() -> str:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        addrs.extend(sorted({i[4][0] for i in infos}))
+        return "、".join(addrs[:3])
+
+    if not step(f"DNS 解析 {host}", _dns):
+        return {"ok": False, "host": host, "port": port, "steps": steps,
+                "verdict": "域名解析不了。检查网络连接或 DNS 设置；"
+                           "如果接口地址是手填的，确认没有拼错。"}
+
+    def _tcp() -> str:
+        with socket.create_connection((host, port), timeout=15) as sock:
+            return f"已连到 {sock.getpeername()[0]}:{port}"
+
+    if not step(f"TCP 连接 {port} 端口", _tcp):
+        return {"ok": False, "host": host, "port": port, "steps": steps,
+                "verdict": "域名能解析但连不上端口，通常是防火墙或需要代理。"
+                           "如果你在公司网络里，去下面填代理地址。"}
+
+    def _tls() -> str:
+        context = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=20) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                return f"{tls.version()}（证书签发给 {host}）"
+
+    if parsed.scheme == "https" and not step("TLS 握手", _tls):
+        return {"ok": False, "host": host, "port": port, "steps": steps,
+                "verdict": "TCP 通了但 TLS 握手失败，多半是中间设备（企业"
+                           "网关、杀毒软件）在拦截或替换证书。"}
+
+    result = api_check()
+    steps.append({"name": "调用模型接口", "ok": bool(result.get("ok")),
+                  "ms": None,
+                  "detail": (f"模型 {result.get('model')} 响应正常"
+                             if result.get("ok")
+                             else str(result.get("error"))[:200])})
+    if result.get("ok"):
+        verdict = "全部通过，可以去「对话」页开始用了。"
+    else:
+        verdict = ("网络这一层没问题（DNS/TCP/TLS 都通），问题出在接口"
+                   "本身——看上面最后一行的说明，通常是密钥或模型名。")
+    slow = [s for s in steps if s.get("ms") and s["ms"] > 4000]
+    if slow and result.get("ok"):
+        verdict += f"　注意：{slow[0]['name']} 用了 {slow[0]['ms']}ms，" \
+                   "首次连接偏慢属正常，但偶发超时也源于此。"
+    return {"ok": bool(result.get("ok")), "host": host, "port": port,
+            "steps": steps, "verdict": verdict}
 
 
 def api_chat(message: str) -> dict[str, Any]:
@@ -338,10 +483,13 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/config":
                 write_config(str(doc.get("api_key") or "").strip(),
                              str(doc.get("base_url") or "").strip(),
-                             str(doc.get("model") or "").strip())
+                             str(doc.get("model") or "").strip(),
+                             str(doc.get("proxy") or "").strip())
                 self._send({"ok": True, **read_config()})
             elif route == "/api/check":
                 self._send(api_check())
+            elif route == "/api/diagnose":
+                self._send(api_diagnose())
             elif route == "/api/chat":
                 self._send(api_chat(str(doc.get("message") or "")))
             elif route == "/api/approve":
@@ -362,247 +510,405 @@ PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ThermoForge 控制台</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--line:#e2e5ea;--fg:#1b1f24;--muted:#6b7280;
---accent:#2563eb;--ok:#0f9d58;--warn:#b45309;--err:#b91c1c;}
-@media(prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1c2027;
---line:#2c313a;--fg:#e6e8eb;--muted:#9aa3af;--accent:#60a5fa;}}
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --sunk:#eef1f5; --line:#dfe3e9;
+  --fg:#12161c; --muted:#66707d; --accent:#2f6feb; --accent-fg:#ffffff;
+  --ok:#0b7a48; --ok-bg:#e6f5ed; --err:#b3261e; --err-bg:#fdecea;
+  --warn:#8a5a00; --warn-bg:#fdf3e2; --radius:10px;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#101318; --panel:#181c23; --sunk:#12151b; --line:#2a2f39;
+  --fg:#e8eaee; --muted:#98a2b0; --accent:#5b8cf7; --accent-fg:#0b0e13;
+  --ok:#5fd39b; --ok-bg:#12291f; --err:#f2837c; --err-bg:#2c1614;
+  --warn:#e0b256; --warn-bg:#2b2213;
+}}
 *{box-sizing:border-box}
-body{margin:0;font:15px/1.6 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;
-background:var(--bg);color:var(--fg)}
-header{padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card);
-display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-header h1{font-size:16px;margin:0;font-weight:650}
-.tabs{display:flex;gap:4px;margin-left:auto}
-.tabs button{padding:6px 14px;border:1px solid var(--line);background:transparent;
-color:var(--fg);border-radius:7px;cursor:pointer;font-size:14px}
-.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
-main{max-width:960px;margin:0 auto;padding:20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:18px;margin-bottom:16px}
-.card h2{font-size:15px;margin:0 0 12px}
-label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
-input,textarea,select{width:100%;padding:9px 11px;border:1px solid var(--line);
-border-radius:7px;background:var(--bg);color:var(--fg);font:inherit}
-textarea{resize:vertical;min-height:76px}
-button.act{margin-top:12px;padding:9px 18px;border:0;border-radius:7px;
-background:var(--accent);color:#fff;font:inherit;cursor:pointer}
-button.act:disabled{opacity:.5;cursor:default}
-.hint{font-size:13px;color:var(--muted);margin-top:8px}
-.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;
-border:1px solid var(--line)}
-.pill.ok{color:var(--ok);border-color:var(--ok)}
-.pill.no{color:var(--err);border-color:var(--err)}
-#log{height:52vh;overflow-y:auto;border:1px solid var(--line);border-radius:8px;
-padding:14px;background:var(--bg)}
-.msg{margin-bottom:14px}
-.msg .who{font-size:12px;color:var(--muted);margin-bottom:3px}
-.msg .body{white-space:pre-wrap;word-break:break-word}
-.msg.me .body{background:var(--accent);color:#fff;padding:9px 12px;
-border-radius:9px;display:inline-block;max-width:88%}
-.msg.ai .body{background:var(--card);border:1px solid var(--line);
-padding:9px 12px;border-radius:9px}
-.calls{font-size:12px;color:var(--muted);margin-top:5px;font-family:ui-monospace,
-Consolas,monospace}
-pre{white-space:pre-wrap;word-break:break-word;font:13px/1.5 ui-monospace,
-Consolas,monospace;margin:0}
-.row{display:flex;gap:10px;align-items:flex-end}
-.row textarea{flex:1}
-.approve{border:1px solid var(--warn);border-radius:8px;padding:10px;margin-top:10px}
-.presets{display:flex;gap:8px;flex-wrap:wrap}
-.presets button{padding:6px 12px;border:1px solid var(--line);background:transparent;
-color:var(--fg);border-radius:7px;cursor:pointer;font:inherit;font-size:13px}
-.presets button:hover{border-color:var(--accent);color:var(--accent)}
-.result{margin-top:12px;padding:10px 12px;border-radius:7px;font-size:14px;display:none}
-.result.show{display:block}
-.result.ok{background:rgba(15,157,88,.12);border:1px solid var(--ok);color:var(--ok)}
-.result.bad{background:rgba(185,28,28,.10);border:1px solid var(--err);color:var(--err)}
-.result.busy{background:var(--bg);border:1px solid var(--line);color:var(--muted)}
-.result .detail{font-size:12px;opacity:.75;margin-top:6px;font-family:ui-monospace,
-Consolas,monospace;word-break:break-all}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.65 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+
+/* ── 侧栏 ───────────────────────────────── */
+.side{background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:18px 14px;gap:6px}
+.brand{font-weight:680;font-size:15px;padding:0 8px 14px;letter-spacing:.2px}
+.brand small{display:block;font-weight:400;font-size:12px;color:var(--muted);
+  letter-spacing:0}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:9px 10px;border:0;border-radius:8px;background:transparent;
+  color:var(--fg);font:inherit;font-size:14px;cursor:pointer}
+.nav button:hover{background:var(--sunk)}
+.nav button.on{background:var(--accent);color:var(--accent-fg);font-weight:560}
+.nav .ico{width:18px;text-align:center;opacity:.9}
+.side .foot{margin-top:auto;padding:10px 8px 0;border-top:1px solid var(--line);
+  font-size:12px;color:var(--muted);line-height:1.5}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--muted);margin-right:6px;vertical-align:middle}
+.dot.ok{background:var(--ok)} .dot.no{background:var(--err)}
+
+/* ── 内容 ───────────────────────────────── */
+.main{padding:26px 30px;overflow:auto}
+.wrap{max-width:820px;margin:0 auto}
+h2.title{font-size:19px;margin:0 0 4px;font-weight:640}
+p.sub{margin:0 0 20px;color:var(--muted);font-size:14px}
+.card{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card h3{font-size:14px;margin:0 0 4px;font-weight:620}
+.card .desc{font-size:13px;color:var(--muted);margin:0 0 14px}
+label{display:block;font-size:13px;color:var(--muted);margin:14px 0 5px}
+label:first-of-type{margin-top:0}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);
+  border-radius:8px;background:var(--sunk);color:var(--fg);font:inherit}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);
+  outline-offset:-1px;background:var(--panel)}
+textarea{resize:vertical;min-height:78px}
+.hint{font-size:12.5px;color:var(--muted);margin-top:6px}
+.btns{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+button.b{padding:9px 17px;border-radius:8px;font:inherit;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+button.b:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+button.b.primary{background:var(--accent);color:var(--accent-fg);
+  border-color:var(--accent)}
+button.b.primary:hover:not(:disabled){opacity:.9;color:var(--accent-fg)}
+button.b:disabled{opacity:.55;cursor:default}
+.note{margin-top:14px;padding:11px 13px;border-radius:8px;font-size:13.5px;
+  display:none;border:1px solid var(--line)}
+.note.show{display:block}
+.note.ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.note.bad{background:var(--err-bg);border-color:var(--err);color:var(--err)}
+.note.busy{background:var(--sunk);color:var(--muted)}
+.note .mono{margin-top:7px;font:12px/1.5 ui-monospace,Consolas,monospace;
+  opacity:.8;word-break:break-all}
+
+/* 分层自检 */
+.steps{margin-top:14px;display:none}
+.steps.show{display:block}
+.step{display:flex;align-items:baseline;gap:10px;padding:8px 11px;
+  border:1px solid var(--line);border-radius:8px;margin-bottom:6px;
+  background:var(--sunk);font-size:13.5px}
+.step .mk{font-weight:700;width:16px;flex:none}
+.step.ok .mk{color:var(--ok)} .step.bad .mk{color:var(--err)}
+.step .nm{font-weight:560;flex:none;min-width:150px}
+.step .dt{color:var(--muted);word-break:break-all;flex:1}
+.step .ms{color:var(--muted);font-size:12px;flex:none}
+.verdict{margin-top:10px;padding:11px 13px;border-radius:8px;font-size:13.5px;
+  background:var(--warn-bg);border:1px solid var(--warn);color:var(--warn)}
+
+/* ── 对话 ───────────────────────────────── */
+.chatwrap{display:flex;flex-direction:column;height:calc(100vh - 52px);
+  max-width:820px;margin:0 auto}
+#log{flex:1;overflow-y:auto;padding:4px 2px 12px}
+.msg{margin-bottom:18px;display:flex;flex-direction:column}
+.msg .who{font-size:12px;color:var(--muted);margin-bottom:4px}
+.msg .bubble{padding:11px 14px;border-radius:11px;white-space:pre-wrap;
+  word-break:break-word;max-width:86%}
+.msg.me{align-items:flex-end}
+.msg.me .bubble{background:var(--accent);color:var(--accent-fg)}
+.msg.ai .bubble{background:var(--panel);border:1px solid var(--line)}
+.msg.sys .bubble{background:var(--sunk);color:var(--muted);font-size:13.5px;
+  max-width:100%}
+.tools{margin-top:7px;font:12px/1.7 ui-monospace,Consolas,monospace;
+  color:var(--muted)}
+.tools span{display:inline-block;padding:1px 7px;border:1px solid var(--line);
+  border-radius:99px;margin:0 5px 4px 0}
+.tools span.no{color:var(--err);border-color:var(--err)}
+.composer{border-top:1px solid var(--line);padding-top:12px;background:var(--bg)}
+.composer .row{display:flex;gap:10px;align-items:flex-end}
+.composer textarea{flex:1;min-height:52px;max-height:180px}
+.approve{border:1px solid var(--warn);background:var(--warn-bg);color:var(--warn);
+  border-radius:9px;padding:12px;margin:0 0 16px}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.chips button{padding:5px 11px;font-size:12.5px;border:1px dashed var(--line);
+  background:transparent;color:var(--muted);border-radius:99px;cursor:pointer}
+.chips button:hover{border-style:solid;border-color:var(--accent);
+  color:var(--accent)}
+pre.data{font:12.5px/1.6 ui-monospace,Consolas,monospace;white-space:pre-wrap;
+  word-break:break-all;margin:0}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  .side{flex-direction:row;align-items:center;overflow-x:auto;
+    border-right:0;border-bottom:1px solid var(--line);padding:10px}
+  .brand,.side .foot{display:none}
+  .nav{flex-direction:row}
+  .main{padding:18px 14px}
+  .chatwrap{height:auto;min-height:60vh}
+}
 </style></head><body>
-<header>
-  <h1>ThermoForge 控制台</h1>
-  <span id="cfgpill" class="pill">检查中…</span>
-  <div class="tabs">
-    <button data-tab="chat" class="on">对话</button>
-    <button data-tab="setup">设置</button>
-    <button data-tab="status">状态</button>
-  </div>
-</header>
-<main>
-  <section id="tab-chat">
-    <div class="card">
-      <div id="log"></div>
-      <div class="row" style="margin-top:12px">
-        <textarea id="msg" placeholder="用大白话说要做什么，例如：把 WX_2025_HVAC 里两路总管流量求和、温度取一，派生一个新数据集"></textarea>
-      </div>
-      <button class="act" id="send">发送</button>
-      <button class="act" id="clear" style="background:transparent;color:var(--muted);border:1px solid var(--line)">清空会话</button>
-      <div class="hint">Agent 会自己调用系统工具（导入、派生、建目标、跑实验、发布），每一步都有记录。</div>
-    </div>
-  </section>
+<div class="app">
+  <aside class="side">
+    <div class="brand">ThermoForge<small>自主建模研究系统</small></div>
+    <nav class="nav">
+      <button data-v="chat" class="on"><span class="ico">💬</span>对话</button>
+      <button data-v="setup"><span class="ico">🔑</span>模型设置</button>
+      <button data-v="data"><span class="ico">📊</span>数据与状态</button>
+    </nav>
+    <div class="foot"><span id="dot" class="dot"></span><span id="dotText">检查中…</span></div>
+  </aside>
 
-  <section id="tab-setup" hidden>
-    <div class="card">
-      <h2>API 密钥</h2>
-      <div class="hint" id="cfgnote"></div>
-      <label>先选服务商（会自动填好地址和模型名）</label>
-      <div class="presets">
-        <button data-url="https://api.deepseek.com" data-model="deepseek-chat">DeepSeek</button>
-        <button data-url="https://api.moonshot.cn/v1" data-model="kimi-k2-0905-preview">Moonshot / Kimi</button>
-        <button data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+  <main class="main">
+    <!-- 对话 -->
+    <section id="v-chat">
+      <div class="chatwrap">
+        <div id="log"></div>
+        <div class="composer">
+          <div class="chips">
+            <button data-q="现在有哪些数据集？每个的质量怎么样？">看看有哪些数据</button>
+            <button data-q="用 WX_SIX_PARAM 数据集，目标 total_power，输入用两侧供回水温、两侧流量和运行台数，先做可建模性检查再跑一组实验">跑一组实验</button>
+            <button data-q="把最近几次实验的结果对比一下，告诉我哪个最好、为什么">对比实验结果</button>
+          </div>
+          <div class="row">
+            <textarea id="msg" placeholder="用大白话说要做什么。Ctrl+Enter 发送。"></textarea>
+            <button class="b primary" id="send">发送</button>
+          </div>
+          <div class="hint">Agent 会自己调用系统工具（导入、派生、建目标、跑实验、发布），每步都有记录。
+            <a href="#" id="clear" style="color:var(--muted)">清空会话</a></div>
+        </div>
       </div>
-      <label>API Key（留空表示不修改）</label>
-      <input id="key" type="password" placeholder="sk-...">
-      <label>接口地址 Base URL</label>
-      <input id="baseurl">
-      <label>模型名</label>
-      <input id="model">
-      <div>
-        <button class="act" id="save">保存</button>
-        <button class="act" id="test" style="background:transparent;color:var(--fg);border:1px solid var(--line)">测试连通性</button>
-      </div>
-      <div id="testout" class="result"></div>
-      <div class="hint">密钥写入 <code>pi/agent.toml</code>，该文件已在 .gitignore 中，不会提交。
-      任何 OpenAI 兼容端点都可用。</div>
-    </div>
-  </section>
+    </section>
 
-  <section id="tab-status" hidden>
-    <div class="card"><h2>数据集</h2><pre id="datasets">载入中…</pre></div>
-    <div class="card"><h2>研究状态</h2><pre id="status">载入中…</pre></div>
-  </section>
-</main>
+    <!-- 设置 -->
+    <section id="v-setup" hidden>
+      <div class="wrap">
+        <h2 class="title">模型设置</h2>
+        <p class="sub">任何 OpenAI 兼容的接口都能用。下拉里是常见服务商的地址，选完仍可以随意改。</p>
+
+        <div class="card">
+          <h3>接口配置</h3>
+          <p class="desc">改完记得点保存，然后用「网络自检」确认能通。</p>
+
+          <label for="prov">服务商</label>
+          <select id="prov"></select>
+          <div class="hint" id="provNote"></div>
+
+          <label for="key">API Key</label>
+          <input id="key" type="password" placeholder="留空 = 不修改已保存的密钥" autocomplete="off">
+
+          <label for="baseurl">接口地址 Base URL</label>
+          <input id="baseurl" placeholder="https://api.example.com/v1" spellcheck="false">
+
+          <label for="model">模型名</label>
+          <input id="model" list="modelList" placeholder="选一个或直接填" spellcheck="false">
+          <datalist id="modelList"></datalist>
+          <div class="hint">下拉里的模型名只是候选，服务商随时会更新，以对方文档为准。</div>
+
+          <label for="proxy">代理（可选，公司网络常需要）</label>
+          <input id="proxy" placeholder="http://127.0.0.1:7890　留空表示不用代理" spellcheck="false">
+
+          <div class="btns">
+            <button class="b primary" id="save">保存</button>
+            <button class="b" id="test">测试连通性</button>
+            <button class="b" id="diag">网络自检</button>
+          </div>
+          <div class="note" id="note"></div>
+          <div class="steps" id="steps"></div>
+        </div>
+
+        <div class="card">
+          <h3>密钥存在哪</h3>
+          <p class="desc" id="cfgPath"></p>
+          <div class="hint">该文件已在 .gitignore 中，不会被提交。环境变量
+            <code>TF_AGENT_API_KEY</code> 优先级更高，设了就会覆盖这里的值。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据 -->
+    <section id="v-data" hidden>
+      <div class="wrap">
+        <h2 class="title">数据与状态</h2>
+        <p class="sub">当前工作区里的数据集、研究目标、实验和已发布的模型。</p>
+        <div class="card"><h3>数据集</h3><pre class="data" id="datasets">载入中…</pre></div>
+        <div class="card"><h3>研究状态</h3><pre class="data" id="status">载入中…</pre></div>
+        <div class="btns"><button class="b" id="reload">刷新</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
 <script>
 const $=s=>document.querySelector(s);
-const api=(p,o)=>fetch(p,o).then(r=>r.json());
-const post=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify(b||{})});
+const jget=p=>fetch(p).then(r=>r.json());
+const jpost=(p,b)=>fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify(b||{})}).then(r=>r.json());
+let PROVIDERS=[];
 
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+/* ── 导航 ── */
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
-  ['chat','setup','status'].forEach(t=>$('#tab-'+t).hidden = t!==b.dataset.tab);
-  if(b.dataset.tab==='status') loadStatus();
+  ['chat','setup','data'].forEach(v=>$('#v-'+v).hidden = v!==b.dataset.v);
+  if(b.dataset.v==='data') loadData();
 });
 
-function addMsg(who,text,calls){
-  const d=document.createElement('div');
-  d.className='msg '+(who==='me'?'me':'ai');
-  const label=who==='me'?'你':'Agent';
-  d.innerHTML='<div class="who">'+label+'</div><div class="body"></div>';
-  d.querySelector('.body').textContent=text;
-  if(calls&&calls.length){
-    const c=document.createElement('div');c.className='calls';
-    c.textContent='调用：'+calls.map(x=>x.tool+(x.ok?' ✓':' ✗')).join('  ');
-    d.appendChild(c);
+/* ── 通用：按钮忙碌态 + 错误一定可见 ── */
+function note(kind,text,mono){
+  const n=$('#note'); n.className='note show '+kind; n.textContent=text;
+  if(mono){const d=document.createElement('div');d.className='mono';
+    d.textContent=mono;n.appendChild(d);}
+}
+async function busy(btn,label,fn){
+  const old=btn.textContent; btn.disabled=true; btn.textContent=label;
+  try{ await fn(); }
+  catch(e){ note('bad','请求没送到本机服务：'+e+
+    '　启动窗口可能被关了，重新双击 启动网页版.bat。'); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
+
+/* ── 设置 ── */
+function fillProviders(cfg){
+  const sel=$('#prov'); sel.innerHTML='';
+  PROVIDERS.forEach(p=>{const o=document.createElement('option');
+    o.value=p.id; o.textContent=p.name; sel.appendChild(o);});
+  const hit=PROVIDERS.find(p=>p.base_url&&p.base_url===cfg.base_url);
+  sel.value=hit?hit.id:'custom';
+  applyProvider(false);
+}
+function applyProvider(overwrite){
+  const p=PROVIDERS.find(x=>x.id===$('#prov').value);
+  if(!p) return;
+  $('#provNote').textContent=p.note||'';
+  const dl=$('#modelList'); dl.innerHTML='';
+  (p.models||[]).forEach(m=>{const o=document.createElement('option');
+    o.value=m; dl.appendChild(o);});
+  if(overwrite&&p.id!=='custom'){
+    $('#baseurl').value=p.base_url;
+    if(p.models&&p.models.length) $('#model').value=p.models[0];
+  }
+}
+$('#prov').onchange=()=>applyProvider(true);
+
+$('#save').onclick=()=>busy($('#save'),'保存中…',async()=>{
+  const r=await jpost('/api/config',{api_key:$('#key').value,
+    base_url:$('#baseurl').value.trim(),model:$('#model').value.trim(),
+    proxy:$('#proxy').value.trim()});
+  if(r.ok){ $('#key').value=''; note('ok','已保存。接着点「测试连通性」确认能用。');
+    loadConfig(); }
+  else note('bad','保存失败：'+(r.error||'未知原因'));
+});
+
+$('#test').onclick=()=>busy($('#test'),'测试中…',async()=>{
+  $('#steps').className='steps'; note('busy','正在调用模型接口…');
+  const r=await jpost('/api/check');
+  if(r.ok) note('ok','连通正常，模型 '+r.model+'。可以去「对话」页了。');
+  else note('bad',r.error||'连不上',r.detail);
+});
+
+$('#diag').onclick=()=>busy($('#diag'),'自检中…',async()=>{
+  note('busy','正在逐层测试 DNS → TCP → TLS → 接口…');
+  const r=await jpost('/api/diagnose');
+  const box=$('#steps'); box.className='steps show'; box.innerHTML='';
+  (r.steps||[]).forEach(s=>{
+    const d=document.createElement('div');
+    d.className='step '+(s.ok?'ok':'bad');
+    d.innerHTML='<span class="mk">'+(s.ok?'✓':'✗')+'</span>'+
+      '<span class="nm"></span><span class="dt"></span><span class="ms"></span>';
+    d.querySelector('.nm').textContent=s.name;
+    d.querySelector('.dt').textContent=s.detail||'';
+    d.querySelector('.ms').textContent=s.ms==null?'':s.ms+'ms';
+    box.appendChild(d);
+  });
+  if(r.verdict){const v=document.createElement('div');v.className='verdict';
+    v.textContent=r.verdict;box.appendChild(v);}
+  note(r.ok?'ok':'bad',r.ok?'自检通过。':'自检发现问题，看下面每一层的结果。');
+});
+
+async function loadConfig(){
+  try{
+    const c=await jget('/api/config');
+    PROVIDERS=c.providers||[];
+    $('#baseurl').value=c.base_url; $('#model').value=c.model;
+    $('#proxy').value=c.proxy||'';
+    $('#cfgPath').textContent=c.config_path;
+    fillProviders(c);
+    $('#dot').className='dot '+(c.configured?'ok':'no');
+    $('#dotText').textContent=c.configured
+      ? (c.from_env?'密钥来自环境变量':'密钥已配置 '+c.api_key_masked)
+      : '未配置密钥';
+    if(c.from_env) $('#provNote').textContent=
+      '注意：环境变量 TF_AGENT_API_KEY 已设置，优先级高于这里保存的值。';
+  }catch(e){
+    $('#dot').className='dot no'; $('#dotText').textContent='连不上本机服务';
+  }
+}
+
+/* ── 对话 ── */
+function bubble(who,text,tools){
+  const d=document.createElement('div'); d.className='msg '+who;
+  const label={me:'你',ai:'Agent',sys:'系统'}[who];
+  d.innerHTML='<div class="who">'+label+'</div><div class="bubble"></div>';
+  d.querySelector('.bubble').textContent=text;
+  if(tools&&tools.length){
+    const t=document.createElement('div'); t.className='tools';
+    tools.forEach(x=>{const s=document.createElement('span');
+      s.textContent=x.tool+(x.ok?' ✓':' ✗'); if(!x.ok)s.className='no';
+      t.appendChild(s);});
+    d.appendChild(t);
   }
   $('#log').appendChild(d); $('#log').scrollTop=$('#log').scrollHeight;
   return d;
 }
-
-function addApproval(p){
+function approval(p){
   const d=document.createElement('div'); d.className='approve';
-  d.innerHTML='<b>需要你确认</b><div class="hint">Agent 请求执行 <code>'+p.tool+
-    '</code>：'+(p.reason||'')+'</div>';
-  const b=document.createElement('button'); b.className='act'; b.textContent='批准并执行';
+  d.innerHTML='<b>需要你确认</b><div style="font-size:13px;margin-top:5px">Agent 想执行 <code>'
+    +p.tool+'</code>：'+(p.reason||'')+'</div>';
+  const b=document.createElement('button'); b.className='b'; b.textContent='批准并执行';
+  b.style.marginTop='10px';
   b.onclick=async()=>{b.disabled=true;
-    const r=await post('/api/approve',{tool:p.tool,arguments:p.arguments});
-    d.appendChild(Object.assign(document.createElement('div'),
-      {className:'hint',textContent:r.ok?'已以 human 身份执行完成':'失败：'+r.error}));};
+    const r=await jpost('/api/approve',{tool:p.tool,arguments:p.arguments});
+    const s=document.createElement('div'); s.style.marginTop='8px';
+    s.style.fontSize='13px';
+    s.textContent=r.ok?'已以 human 身份执行完成。':'失败：'+r.error;
+    d.appendChild(s);};
   d.appendChild(b); $('#log').appendChild(d);
+  $('#log').scrollTop=$('#log').scrollHeight;
 }
-
 async function send(){
   const t=$('#msg').value.trim(); if(!t) return;
   $('#msg').value=''; $('#send').disabled=true;
-  addMsg('me',t);
-  const thinking=addMsg('ai','思考中…');
+  bubble('me',t);
+  const wait=bubble('sys','思考中…（会自己调用工具，复杂任务要等一会）');
   try{
-    const r=await post('/api/chat',{message:t});
-    thinking.remove();
-    if(!r.ok){ addMsg('ai','出错了：'+r.error);
-      if(r.need_config) addMsg('ai','请先到「设置」页填 API key。'); }
-    else{ addMsg('ai',r.reply,r.tool_calls);
-      (r.pending_approvals||[]).forEach(addApproval); }
-  }catch(e){ thinking.remove(); addMsg('ai','请求失败：'+e); }
+    const r=await jpost('/api/chat',{message:t});
+    wait.remove();
+    if(!r.ok){
+      bubble('sys','出错了：'+r.error);
+      if(r.need_config) bubble('sys','去左边「模型设置」填好 API Key，再回来。');
+    }else{
+      bubble('ai',r.reply,r.tool_calls);
+      (r.pending_approvals||[]).forEach(approval);
+    }
+  }catch(e){ wait.remove(); bubble('sys','请求失败：'+e); }
   $('#send').disabled=false; $('#msg').focus();
 }
 $('#send').onclick=send;
 $('#msg').addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)) send();});
-$('#clear').onclick=async()=>{await post('/api/reset');$('#log').innerHTML='';
-  addMsg('ai','会话已清空。');};
+  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();send();}});
+document.querySelectorAll('.chips button').forEach(b=>b.onclick=()=>{
+  $('#msg').value=b.dataset.q; $('#msg').focus();});
+$('#clear').onclick=async e=>{e.preventDefault(); await jpost('/api/reset');
+  $('#log').innerHTML=''; bubble('sys','会话已清空。');};
 
-async function loadConfig(){
-  const pill=$('#cfgpill');
+/* ── 数据 ── */
+async function loadData(){
   try{
-    const c=await api('/api/config');
-    $('#baseurl').value=c.base_url; $('#model').value=c.model;
-    pill.textContent=c.configured?('密钥已配置 '+c.api_key_masked):'未配置密钥';
-    pill.className='pill '+(c.configured?'ok':'no');
-    $('#cfgnote').textContent=c.from_env
-      ? '当前生效的密钥来自环境变量 TF_AGENT_API_KEY，优先级高于这里保存的值。'
-      : '密钥保存在 '+c.config_path;
-  }catch(e){
-    pill.textContent='连不上本机服务'; pill.className='pill no';
-    $('#cfgnote').textContent='启动窗口可能已关闭，重新双击 启动网页版.bat。';
-  }
-}
-function say(kind,text,detail){
-  const box=$('#testout');
-  box.className='result show '+kind;
-  box.textContent=text;
-  if(detail){const d=document.createElement('div');d.className='detail';
-    d.textContent=detail;box.appendChild(d);}
-}
-
-document.querySelectorAll('.presets button').forEach(b=>b.onclick=()=>{
-  $('#baseurl').value=b.dataset.url; $('#model').value=b.dataset.model;
-  say('busy','已填入 '+b.textContent+' 的地址和模型名，接着填 API Key 再保存。');
-});
-
-// 每个异步动作都要有可见的开始/结束状态；静默失败会被当成「按钮坏了」
-async function guard(btn,busyText,fn){
-  const old=btn.textContent; btn.disabled=true; btn.textContent=busyText;
-  say('busy',busyText+'…');
-  try{ await fn(); }
-  catch(e){ say('bad','请求没能送到本机服务：'+e+
-    '。可能是启动窗口被关了，重新双击 启动网页版.bat 再试。'); }
-  finally{ btn.disabled=false; btn.textContent=old; }
-}
-
-$('#save').onclick=()=>guard($('#save'),'保存中',async()=>{
-  const r=await post('/api/config',{api_key:$('#key').value,
-    base_url:$('#baseurl').value,model:$('#model').value});
-  $('#key').value='';
-  if(r.ok){ say('ok','已保存到 pi/agent.toml。现在点「测试连通性」确认能用。');
-    loadConfig(); }
-  else say('bad','保存失败：'+(r.error||'未知原因'));
-});
-
-$('#test').onclick=()=>guard($('#test'),'测试中',async()=>{
-  const r=await post('/api/check');
-  if(r.ok) say('ok','连通正常，模型 '+r.model+'。可以去「对话」页了。');
-  else say('bad',r.error||'连不上',r.detail);
-});
-
-async function loadStatus(){
-  try{
-    const d=await api('/api/datasets');
-    $('#datasets').textContent=d.datasets.map(x=>
-      x.ref+'   '+x.variable_count+' 个变量   对象：'+x.objects.slice(0,6).join(', ')
-      +(x.objects.length>6?' …共'+x.objects.length+' 个':'')).join('\n')||'还没有数据集';
-    const s=await api('/api/status');
+    const d=await jget('/api/datasets');
+    $('#datasets').textContent=(d.datasets||[]).map(x=>
+      x.ref+'\n    '+x.variable_count+' 个变量 · 对象 '+x.objects.length+' 个：'
+      +x.objects.slice(0,8).join(', ')+(x.objects.length>8?' …':'')
+    ).join('\n\n')||'还没有数据集。';
+    const s=await jget('/api/status');
     $('#status').textContent=JSON.stringify(s,null,2);
   }catch(e){
     $('#datasets').textContent='连不上本机服务：'+e;
     $('#status').textContent='重新双击 启动网页版.bat 再试。';
   }
 }
+$('#reload').onclick=loadData;
 
 loadConfig();
-addMsg('ai','你好。先在「设置」里填好 API key，然后就可以直接说要做什么了。');
+bubble('sys','先在左边「模型设置」里配好接口，然后回来直接说要做什么。');
 </script></body></html>
 """
 
