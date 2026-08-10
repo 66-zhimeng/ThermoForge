@@ -36,6 +36,18 @@ from pydantic import ValidationError
 from thermoforge_core.contracts.experiment import Experiment
 from thermoforge_core.contracts.research_goal import ResearchGoal
 from thermoforge_core.timeutil import parse_timestamp
+from thermoforge_data.derive import (
+    DeriveError,
+    DeriveRule,
+    apply_rules,
+    build_dataset as build_derived_dataset,
+    build_object_model,
+    build_registry as build_derive_registry,
+    divergence_report,
+    lineage as derive_lineage,
+    resolve_metadata,
+    to_columns as derive_to_columns,
+)
 from thermoforge_data.importer import TfomRegistry, default_registry, import_parsed, import_xlsx
 from thermoforge_data.legacy import convert_legacy_tables, load_workbook_model
 from thermoforge_data.preprocess import (
@@ -495,6 +507,93 @@ def tf_dataset_materialize(
         artifacts=[_artifact(mv.path / "data.parquet", "view_data"),
                    _artifact(mv.path / "view.json", "view_definition")],
     ))
+
+
+def _derived_model_id(object_id: str) -> str:
+    """object_id → 合法的 object_model_id（`^[a-z][a-z0-9_]*\\.v[0-9]+$`）。"""
+    slug = "".join(c if c.isalnum() else "_" for c in object_id.lower())
+    slug = slug.strip("_") or "derived"
+    if not slug[0].isalpha():
+        slug = f"d_{slug}"
+    return f"{slug}.v1"
+
+
+def tf_dataset_derive(
+    ctx: ToolContext,
+    source_ref: str,
+    *,
+    dataset_id: str,
+    object_id: str,
+    rules: Sequence[Mapping[str, Any]],
+    object_model: str | None = None,
+    object_name: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """按声明式规则派生新数据集并落 vault，返回稳定 `dataset_id@rev_NNNN`。
+
+    跨对象聚合（「两路总管流量之和」「运行设备功率之和」）既不能用单机
+    物模型表达，也不在 Dataset View 的长表机制内（implementation-notes
+    §3.3），此前只能写一次性脚本。本工具把它变成可由 Agent 调用的参数化
+    能力：算子取自 `thermoforge_data.derive.OPS` 白名单，**不接受自由
+    代码**；产出走标准导入管线并记录完整派生谱系（I-49）。
+    """
+    tool = "tf_dataset_derive"
+    inputs = {"source_ref": source_ref, "dataset_id": dataset_id,
+              "object_id": object_id, "rule_count": len(rules)}
+    try:
+        parsed = [DeriveRule.parse(r) for r in rules]
+        source_vars = ctx.vault.load_variables(source_ref)
+        units, dtypes = resolve_metadata(parsed, source_vars)
+        df = ctx.vault.load_data(source_ref).to_pandas()
+        frame = apply_rules(df, parsed)
+        divergence = divergence_report(df, parsed)
+        model_id = object_model or _derived_model_id(object_id)
+        model = build_object_model(model_id, parsed, units, dtypes)
+        dataset = build_derived_dataset(
+            dataset_id, object_id, model_id, parsed, units, dtypes,
+            _read_json(_rev_dir(ctx, source_ref) / "manifest.json") or {},
+            object_name, description)
+        result = import_parsed(
+            dataset, frame["timestamp"].tolist(),
+            derive_to_columns(frame, object_id, dtypes),
+            registry=build_derive_registry(model, ctx.tfom_registry),
+            degradations=[f"派生自 {source_ref}（{len(parsed)} 条规则）"])
+    except (DeriveError, VaultError, ValueError, KeyError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+
+    diagnostics = diagnostic_dicts(result.diagnostics)
+    if not result.ok:
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="FAILED", inputs=inputs,
+            summary={"error": "派生结果未通过 TFDC 校验，未写入 vault"},
+            diagnostics=diagnostics))
+    try:
+        ref = ctx.vault.store(
+            result, lineage=derive_lineage(source_ref, parsed, divergence))
+    except VaultError as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+
+    table = result.table
+    assert table is not None
+    non_null = {
+        rule.property_code: int(
+            table.column(f"{object_id}.{rule.property_code}").length()
+            - table.column(f"{object_id}.{rule.property_code}").null_count)
+        for rule in parsed
+    }
+    return _finish(ctx, make_envelope(
+        tool, ok=True, id=ref,
+        status="DERIVED_WITH_WARNINGS" if diagnostics else "DERIVED",
+        inputs=inputs,
+        summary={
+            "rows": table.num_rows,
+            "properties": {r.property_code: r.spec_text() for r in parsed},
+            "units": dict(units),
+            "non_null_counts": non_null,
+            "redundancy_check": divergence,
+            "derived_from": source_ref,
+        },
+        diagnostics=diagnostics))
 
 
 def tf_dataset_compare(ctx: ToolContext, ref_a: str, ref_b: str) -> dict[str, Any]:
@@ -1329,6 +1428,7 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_sample": tf_dataset_sample,
     "tf_dataset_materialize": tf_dataset_materialize,
     "tf_dataset_compare": tf_dataset_compare,
+    "tf_dataset_derive": tf_dataset_derive,
     "tf_dataset_modelability": tf_dataset_modelability,
     "tf_goal_create": tf_goal_create,
     "tf_research_status": tf_research_status,
