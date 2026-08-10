@@ -96,20 +96,64 @@ flowchart LR
 | [实现细则与已知陷阱](docs/implementation-notes.md) | 库行为差异、边界情况、泄漏路径与测试基线 |
 | [术语表](docs/glossary.md) | 缩写、ID 前缀、枚举值速查 |
 
+## 本地控制台
+
+不想用命令行的话，双击 `启动网页版.bat`（或 `.venv/Scripts/python tools/webui.py`），
+浏览器打开 <http://127.0.0.1:8765>：
+
+| 页面 | 做什么 |
+|---|---|
+| **AI 助手** | **提问就行**：它查数据、给结论，并把你带到该看的页面、选好该看的实验 |
+| 数据 | 数据集/修订版浏览、变量表（实测 vs 派生）、画像、原始时序 |
+| 数据质量 | 语义门禁体检 → 人话解释 → 处方；能由规则库解决的一键生成提案，由人以 `actor=human` 审批 |
+| AI 研究 | 建目标与视图，让 AI 跑 `假设 → 实验 → 证据 → 新假设` 循环；自动或逐轮审批两种模式，实时看进度 |
+| 实验结果 | 指标卡、预测/实测时序、散点、残差分布、切分时间轴、物理检查、原始预测点下载、多实验对比 |
+| 模型 | 注册表、版本状态机、发布门禁结果 |
+| 报告导出 | 自包含 HTML / Markdown+PNG / PDF |
+
+界面**只监听 127.0.0.1**：它能改密钥、跑实验、批准预处理规则，不对同网段开放。
+
+侧栏任何页面都有「问 AI」输入框。副驾有全部工具权限（查数据、体检、建目标、
+跑实验、比模型、发布），**唯一必须你亲自点的是预处理规则审批**——那一步要求
+`actor=human`，Ledger 里记的必须是人。
+
+## 用外部 Agent 驱动（MCP）
+
+同一套工具也能暴露给 Claude Code、Claude Desktop 或任何 MCP 客户端，
+共用同一份工件，不存在第二条数据通路。注册一次：
+
+```bash
+claude mcp add thermoforge -- <仓库绝对路径>/.venv/Scripts/python -m thermoforge_mcp
+```
+
+之后在 Claude Code 里直接问「ThermoForge 最新实验怎么样」，它会自己调
+`tf_status`、`tf_model_compare`、`tf_experiment_report` 等 24 个工具。
+审批类工具**不**经 MCP 暴露，理由同上。
+
 ## 仓库结构
 
-当前仓库只包含文档与示例数据；代码目录按 [architecture.md §7](docs/architecture.md) 规划。
+代码分层见 [architecture.md §7](docs/architecture.md)。
 
 ```text
 ThermoForge/
-├── docs/              # 现有 · 设计文档与契约说明
-├── data/              # 现有 · 示例与研究数据
-├── contracts/         # 规划 · TFOM / TFDC / Research Goal / Experiment / Model Package Schema
-├── src/               # 规划 · thermoforge_core | _data | _research | _models | _runtime
-├── pi/                # 规划 · Agent extensions / skills / prompts
-├── tests/             # 规划
-├── examples/          # 规划 · 冷水机端到端示例
+├── docs/              # 设计文档与契约说明
+├── data/              # 示例与研究数据
+├── contracts/         # TFOM / TFDC / Research Goal / Experiment / Model Package Schema
+├── src/
+│   ├── thermoforge_core/      # 契约 + 规范化 JSON、指纹、ID、单位、时间、错误码
+│   ├── thermoforge_data/      # 导入器、Data Vault、Dataset View、预处理规则库
+│   ├── thermoforge_models/    # 线性基线、冷机物理模型、残差混合模型
+│   ├── thermoforge_research/  # Ledger、实验 Runner、切分、指标、门禁、编排器、工具注册表
+│   ├── thermoforge_runtime/   # 模型包构建/校验、注册表、发布门禁、部署绑定、在线推理
+│   ├── thermoforge_cli/       # `tf` 命令行
+│   ├── thermoforge_agent/     # 内置对话 Agent（OpenAI 兼容 + function calling）
+│   ├── thermoforge_webui/     # 本地 Web 控制台（Streamlit）
+│   └── thermoforge_mcp/       # MCP 服务端（stdio），把同一套工具给外部 Agent
+├── pi/                # Agent extensions / prompts / tools.json
+├── tests/             # 约 510 个测试
+├── examples/          # 冷水机端到端示例
 ├── research/          # 运行产物 · Research Ledger（默认不入库）
+├── models/            # 运行产物 · 模型注册表（默认不入库）
 └── vault/             # 运行产物 · Data Vault（默认不入库）
 ```
 
@@ -125,7 +169,7 @@ ThermoForge/
 | Phase 0 | 契约定稿：TFOM / TFDC / Research Goal / Experiment / Model Package Schema | ✅ 完成（`contracts/` + `thermoforge_core`） |
 | Phase 1 | 数据底座：导入器、指纹、Parquet、Dataset View | ✅ 完成（`thermoforge_data`） |
 | Phase 2 | 确定性研究内核：Ledger、Runner、验证套件 | ✅ 完成（`thermoforge_research` / `thermoforge_models`） |
-| Phase 3 | Pi/Agent 编排：工具接口、预算与停止条件 | ✅ 完成（22 个工具 + CLI + 编排器） |
+| Phase 3 | Pi/Agent 编排：工具接口、预算与停止条件 | ✅ 完成（23 个工具 + CLI + 编排器 + Web 控制台 + MCP） |
 | Phase 4 | 模型注册与部署：Model Package、发布门禁、绑定 | ✅ 完成（`thermoforge_runtime`） |
 | Phase 5 | 系统化扩展：容器、队列、多站点、多 Agent | 未开始 |
 
@@ -133,7 +177,12 @@ ThermoForge/
 
 首个目标垂直切片为**冷水机输入功率模型**。数据探查后已修订输入定义与验证方式（见 [DD-12](docs/design-decisions.md)）：原候选输入中的制冷量实为电流百分比的重标定，用它建模构成循环论证。
 
-**下一步**：确认 `data/` 中的工作簿是仿真生成还是现场采集（[Q10](docs/open-questions.md)），并解决实测 COP 中位数 9.99~11.31 超出物理范围的量纲问题。两者都会影响后续所有精度结论。
+两个 P0 数据问题已于 2026-08-09 由数据提供方回答（[Q10](docs/open-questions.md)、[I-48](docs/issues.md)），结论直接塑造了建模方式：
+
+- 工作簿的驱动序列是**现场实测**，但其中约 296 万个单元格是 Excel 内的派生计算。因此建模输入必须区分 `source_kind`（measured / derived），派生列不得进入候选输入白名单（[DD-16](docs/design-decisions.md)）。
+- COP 9~11 对这个高温离心式站点是**物理有效**的，不是量纲错误——物理建模路线因此解除阻塞。
+
+**下一步**：Phase 5（容器、队列、多站点、多 Agent）；以及示例数据的公开授权与脱敏范围确认。
 
 ## 参与贡献
 

@@ -1,13 +1,13 @@
 # 实验报告：运行冷机总功率模型（首个垂直切片）
 
-生成：2026-08-09 08:30:34 UTC · 耗时 57s · 种子 20260808 · 子进程隔离执行
+生成：2026-08-10 01:35:54 UTC · 耗时 18s · 种子 20260808 · 子进程隔离执行
 
 ## 数据与谱系
 
 - 源数据集：`WX_2025_HVAC@rev_0001`（43MB 旧格式工作簿，legacy 适配器导入）
 - 派生数据集：`WX_2025_PLANT@rev_0001`（系统级 PLANT 对象，规则见下）
-- Dataset View：`VIEW-0001`（filter `any_running=true`）
-- Research Goal：`RG-0001`
+- Dataset View：`VIEW-0005`（filter `any_running=true`）
+- Research Goal：`RG-0007`
 
 ### 目标构造（跨对象聚合的落点）
 
@@ -42,16 +42,16 @@
 
 | 模型 | 实验 | 面 | n | RMSE | MAE | MAPE | CVRMSE | NMBE |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| baseline_ridge | EXP-0001 | validate | 2236 | 138.37 | 109.07 | 0.0714 | 0.0874 | +0.0437 |
-| baseline_ridge | EXP-0001 | A | 2239 | 122.30 | 96.05 | 0.1002 | 0.1216 | -0.0132 |
-| physics_cop | EXP-0002 | validate | 2236 | 1492.01 | 1359.18 | 0.8722 | 0.9430 | -0.8590 |
-| physics_cop | EXP-0002 | A | 2239 | 1183.31 | 1168.90 | 1.2505 | 1.1765 | -1.1622 |
-| physics_doe2_v2 | EXP-0003 | validate | 2236 | 166.92 | 133.04 | 0.0842 | 0.1055 | +0.0732 |
-| physics_doe2_v2 | EXP-0003 | A | 2239 | 154.94 | 117.43 | 0.1101 | 0.1541 | +0.0990 |
-| hybrid_residual | EXP-0004 | validate | 2236 | 160.82 | 123.13 | 0.0834 | 0.1016 | +0.0233 |
-| hybrid_residual | EXP-0004 | A | 2239 | 166.44 | 131.58 | 0.1457 | 0.1655 | -0.0193 |
-| hybrid_residual_v2 | EXP-0005 | validate | 2236 | 121.57 | 95.15 | 0.0634 | 0.0768 | +0.0298 |
-| hybrid_residual_v2 | EXP-0005 | A | 2239 | 116.74 | 89.72 | 0.0899 | 0.1161 | +0.0215 |
+| baseline_ridge | EXP-0009 | validate | 2236 | 138.37 | 109.07 | 0.0714 | 0.0874 | +0.0437 |
+| baseline_ridge | EXP-0009 | A | 2239 | 122.30 | 96.05 | 0.1002 | 0.1216 | -0.0132 |
+| physics_cop | EXP-0010 | validate | 2236 | 1492.01 | 1359.18 | 0.8722 | 0.9430 | -0.8590 |
+| physics_cop | EXP-0010 | A | 2239 | 1183.31 | 1168.90 | 1.2505 | 1.1765 | -1.1622 |
+| physics_doe2_v2 | EXP-0011 | validate | 2236 | 166.92 | 133.04 | 0.0842 | 0.1055 | +0.0732 |
+| physics_doe2_v2 | EXP-0011 | A | 2239 | 154.94 | 117.43 | 0.1101 | 0.1541 | +0.0990 |
+| hybrid_residual | EXP-0012 | validate | 2236 | 160.82 | 123.13 | 0.0834 | 0.1016 | +0.0233 |
+| hybrid_residual | EXP-0012 | A | 2239 | 166.44 | 131.58 | 0.1457 | 0.1655 | -0.0193 |
+| hybrid_residual_v2 | EXP-0013 | validate | 2236 | 121.57 | 95.15 | 0.0634 | 0.0768 | +0.0298 |
+| hybrid_residual_v2 | EXP-0013 | A | 2239 | 116.74 | 89.72 | 0.0899 | 0.1161 | +0.0215 |
 
 面 A = 已见对象 × 未来时段（本数据单系统级对象，无留一设备面）。
 混合模型的 DD-07 配套（物理主干单独指标 / 残差占比）见各实验 metrics.json 的 `physics_only` / `residual_share`。
@@ -135,7 +135,7 @@ COP 9~11 物理合理，物理路线正式参评。
 - 阈值依据：Q9 初始建议 CVRMSE ≤ 0.10 是基于探查期 OLS 估计（≈0.12）的期望；首轮实测最优诚实模型为线性基线（面 A CVRMSE=0.1216），无诚实模型达到 0.10，故按「最优诚实模型 + 合理
   余量」修订为 0.13（Ledger 决策留痕）。F6 撤销后物理路线参评，
   阈值待更多工况数据积累后再评估收紧。
-- 发布：`plant-power@1.1.0`（模型 hybrid_residual_v2）→ PRODUCTION
+- 发布：`plant-power@1.1.1`（模型 hybrid_residual_v2）→ PRODUCTION
 
 ### 发布门禁（TFM-10xx）
 
@@ -144,6 +144,6 @@ COP 9~11 物理合理，物理路线正式参评。
 | integrity | 文件齐全且校验和一致（14 个文件） |
 | signature_tfom | 签名与 plant.v1 兼容 |
 | acceptance | 硬性验收条件全部满足（6 项指标） |
-| latency | p99=2.934 ms <= 5.0 ms |
+| latency | p99=1.771 ms <= 5.0 ms |
 | smoke | 冷加载 + golden 比对通过（n=15, max_rel_error=0） |
-| rollback_recorded | 首个生产版本，无回滚目标（已记录） |
+| rollback_recorded | 回滚目标: 1.1.0 |

@@ -14,10 +14,32 @@ dependencies = [
     "pyyaml>=6.0",
     "numpy>=2.0",
     "openai>=1.0",
+    # Web 控制台（tools/webui.py → thermoforge_webui）：
+    # streamlit 提供页面与实时刷新；plotly 画交互图（界面 + 自包含 HTML
+    # 报告）；matplotlib 只负责把同一份绘图数据静态化成 PNG，供 Markdown
+    # 与 PDF 用；reportlab 用内置 STSong-Light CID 字体排中文 PDF（不依赖
+    # 浏览器或系统字体）；jinja2 渲染 HTML 报告模板。
+    #
+    # 为什么静态图不用 plotly 自己的 to_image：那条路要 kaleido。
+    # kaleido 0.2.1 在本机 Windows 上 to_image 无限阻塞（plotly 6.0.1 与
+    # 6.9.0 均复现），而 kaleido 1.x 改为驱动本机 Chrome、需额外下载浏览
+    # 器，违背「双击 .bat 就能用」。因此两种渲染器共用 charts/series.py
+    # 的绘图数据准备，只有最后一层画法不同。
+    # >=1.49：用的是 width="stretch"，旧的 use_container_width 官方宣布
+    # 2025-12-31 之后移除（该日期已过），不再使用
+    "streamlit>=1.49",
+    "plotly>=5.24",
+    "matplotlib>=3.9",
+    "reportlab>=4.2",
+    "jinja2>=3.1",
+    # MCP server：把工具注册表暴露给外部 Agent（Claude Code 等）。
+    # 封顶在 <3：2.0 刚把 FastMCP 改名成 MCPServer，API 还在动。
+    "mcp>=2.0,<3",
 ]
 
 [project.scripts]
 tf = "thermoforge_cli.main:main"
+thermoforge-mcp = "thermoforge_mcp.server:main"
 
 [dependency-groups]
 dev = [
@@ -38,6 +60,8 @@ packages = [
     "src/thermoforge_runtime",
     "src/thermoforge_cli",
     "src/thermoforge_agent",
+    "src/thermoforge_webui",
+    "src/thermoforge_mcp",
 ]
 
 [tool.pytest.ini_options]

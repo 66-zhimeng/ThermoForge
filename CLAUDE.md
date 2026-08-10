@@ -14,12 +14,14 @@ Python 3.12+, dependencies managed with `uv`. On Windows the console entry point
 
 ```bash
 uv sync                                   # create .venv and install deps
-.venv/Scripts/python -m pytest            # full suite (~440 tests, slow ones deselected)
+.venv/Scripts/python -m pytest            # full suite (~510 tests, slow ones deselected)
 .venv/Scripts/python -m pytest tests/test_importer.py::test_name -x   # single test
 .venv/Scripts/python -m pytest -m slow    # slow integration tests (43MB real workbook import)
 .venv/Scripts/python scripts/export_schemas.py       # regenerate contracts/*/schema.json
 .venv/Scripts/python examples/chiller_power/run_demo.py   # end-to-end vertical slice (~1–2 min)
 .venv/Scripts/tf status                   # human-readable panel (--json for machines)
+.venv/Scripts/python tools/webui.py       # Streamlit console on http://127.0.0.1:8765
+.venv/Scripts/python -m thermoforge_mcp   # MCP server over stdio (for Claude Code et al.)
 ```
 
 `pyproject.toml` pins `--basetemp=.pytest_basetemp` (the system pytest temp dir has restricted ACLs on this machine) and `-m "not slow"`.
@@ -33,10 +35,12 @@ There is no configured formatter/linter in the repo; `docs/implementation-notes.
 | `thermoforge_core` | Contracts (Pydantic v2) + cross-cutting primitives: canonical JSON, fingerprints, sequential IDs, naming regexes, units, time, error registry |
 | `thermoforge_data` | TFDC-XLSX importer/validator, immutable Data Vault (Parquet + DuckDB index), Dataset Views, legacy-workbook adapter, preprocessing rule library |
 | `thermoforge_models` | Model implementations: linear baseline, chiller physics (Q·COP), residual hybrid (physics + XGBoost), feature scaler |
-| `thermoforge_research` | Research kernel: Ledger, Experiment Runner (subprocess-isolated), splits/leakage, metrics, physics checks, modelability report, whitelist enforcement, orchestrator, and the 22-tool registry + envelope |
+| `thermoforge_research` | Research kernel: Ledger, Experiment Runner (subprocess-isolated), splits/leakage, metrics, physics checks, modelability report, whitelist enforcement, orchestrator, and the 23-tool registry + envelope |
 | `thermoforge_runtime` | Model Package build/verify, model registry + release gates, deployment binding, online inference |
 | `thermoforge_cli` | `tf` CLI — one subcommand per tool, envelope JSON on stdout |
 | `thermoforge_agent` | Built-in conversational agent (OpenAI-compatible chat completions + function calling) over the same tool registry |
+| `thermoforge_webui` | Streamlit console (`tools/webui.py` launches it): AI copilot (asks → analyses → navigates), data browser, quality diagnosis→prescription, AI research loop with live progress, experiment result charts, model registry, report export (HTML/Markdown/PDF) |
+| `thermoforge_mcp` | MCP server (`python -m thermoforge_mcp`, stdio) exposing the same tool registry to external agents (Claude Code etc.) — 24 tools = 23 registry − `tf_preprocess_approve` (`EXCLUDED_TOOLS`, approval requires `actor=human`) + `tf_status` / `tf_experiment_report` (`EXTRA_TOOLS`, MCP-only convenience wrappers) |
 
 Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, experiments, agent sessions), `models/` (registry). They are configurable via `tf --vault-root/--research-root/--models-root` and `ToolContext`.
 
@@ -44,7 +48,7 @@ Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, exper
 
 These are enforced by code and tests, not just documented. Breaking them breaks the suite.
 
-**Agent never touches raw data.** All agent-facing capability goes through `thermoforge_research.tools.TOOL_REGISTRY` (22 tools), each returning the envelope from `envelope.py`: `ok/tool/id/status/inputs/summary/diagnostics/artifacts/truncated`. Hard limits: 32 KB response body (overflow spills to an artifact and sets `truncated`), `tf_dataset_sample` ≤ 200 rows, fixed profile quantile points. Known errors (`VaultError` / `ResearchError` / `ModelRegistryError` / contract validation) are converted to `ok=False` envelopes, never raised. Side-effecting tools must return a stable ID (`dataset@rev_NNNN`, `RG-`, `H-`, `EXP-`, `VIEW-`, `model@version`).
+**Agent never touches raw data.** All agent-facing capability goes through `thermoforge_research.tools.TOOL_REGISTRY` (23 tools), each returning the envelope from `envelope.py`: `ok/tool/id/status/inputs/summary/diagnostics/artifacts/truncated`. Hard limits: 32 KB response body (overflow spills to an artifact and sets `truncated`), `tf_dataset_sample` ≤ 200 rows, fixed profile quantile points. Known errors (`VaultError` / `ResearchError` / `ModelRegistryError` / contract validation) are converted to `ok=False` envelopes, never raised. Side-effecting tools must return a stable ID (`dataset@rev_NNNN`, `RG-`, `H-`, `EXP-`, `VIEW-`, `model@version`).
 
 **CLI exit codes are not success signals.** `exit 0` means the command ran — including tool-level failure (`ok=false` in the envelope). `exit 2` means CLI-level error (bad args, malformed JSON). Callers must read `ok`.
 
@@ -92,4 +96,6 @@ Development happens on Windows; these bite here and not on Linux (`implementatio
 
 Phase 0–4 are implemented and validated end-to-end by `examples/chiller_power/`; Phase 5 (containers, queues, multi-site, multi-agent) is not started.
 
-Two P0 data questions were answered on 2026-08-09 (`docs/open-questions.md` Q10, `docs/issues.md` I-48) and the answers shape modeling: the workbook's driver series are field-measured but ~2.96M cells are Excel-derived, hence the mandatory `source_kind` measured/derived split; and the COP 9–11 range is physically valid for this high-temperature centrifugal site, which un-blocked the physics route. `README.md` §项目状态 and the I-01/I-02 rows in the `docs/issues.md` priority table still carry the pre-answer wording — trust `open-questions.md` / the I-48 detail section over them.
+Two P0 data questions were answered on 2026-08-09 (`docs/open-questions.md` Q10, `docs/issues.md` I-48) and the answers shape modeling: the workbook's driver series are field-measured but ~2.96M cells are Excel-derived, hence the mandatory `source_kind` measured/derived split; and the COP 9–11 range is physically valid for this high-temperature centrifugal site, which un-blocked the physics route. The I-01/I-02 rows in the `docs/issues.md` priority table still carry the pre-answer wording — trust `open-questions.md` / the I-48 detail section over them.
+
+`tests/test_agent.py::test_agent_check_ok` fails on this machine for reasons predating any current change (the mock endpoint returns 502) — do not treat it as a regression.

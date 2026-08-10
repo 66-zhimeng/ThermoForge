@@ -1,0 +1,219 @@
+"""副驾与 MCP server 的测试。
+
+副驾用 stub client 注入，不触网：验证的是「模型说要跳到某页」之后，
+界面这一侧有没有正确记下意图、非法页面会不会被挡、需要人批的动作会不会
+真的把后台线程卡住等人点。
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from typing import Any
+
+import pytest
+
+from thermoforge_agent.client import ChatResult, ToolCallRequest
+from thermoforge_agent.config import AgentConfig
+from thermoforge_webui.services.copilot import UI_GOTO_TOOL, CopilotSession
+
+
+class StubClient:
+    """按脚本逐轮返回结果的假模型。"""
+
+    def __init__(self, script: list[ChatResult]) -> None:
+        self.script = list(script)
+        self.calls: list[list[dict[str, Any]]] = []
+        self.schemas: list[dict[str, Any]] = []
+
+    def chat(self, messages, tools=None, on_content_delta=None) -> ChatResult:
+        self.calls.append(list(messages))
+        self.schemas = list(tools or [])
+        return self.script.pop(0)
+
+
+def _config() -> AgentConfig:
+    return AgentConfig(api_key="sk-test", base_url="http://localhost/v1",
+                       model="stub")
+
+
+def _wait_idle(session: CopilotSession, timeout: float = 10.0) -> None:
+    deadline = time.time() + timeout
+    while session.busy and time.time() < deadline:
+        time.sleep(0.02)
+
+
+def _tool_call(name: str, arguments: dict[str, Any]) -> ChatResult:
+    return ChatResult(
+        content=None,
+        tool_calls=[ToolCallRequest(id="c1", name=name, arguments=arguments)],
+        raw_message={"role": "assistant", "content": None})
+
+
+# ---------------------------------------------------------------- 界面工具
+
+
+def test_ui_goto_records_navigation_intent() -> None:
+    session = CopilotSession(client=StubClient([
+        _tool_call(UI_GOTO_TOOL, {"page": "results", "note": "看这次",
+                                  "experiment_id": "EXP-0013"}),
+        ChatResult(content="EXP-0013 最好，已经带你过去了。"),
+    ]))
+    session.ask("哪次实验最好", _config())
+    _wait_idle(session)
+
+    assert session.nav_intent is not None
+    assert session.nav_intent["page"] == "results"
+    assert session.nav_intent["selections"]["experiment_id"] == "EXP-0013"
+    messages, _, state = session.snapshot()
+    assert state == "idle"
+    assert messages[-1].role == "assistant"
+    assert "EXP-0013" in messages[-1].content
+
+
+def test_ui_goto_rejects_unknown_page() -> None:
+    """模型会编页面名。编了就得挡住，并把可选项回给它。"""
+    session = CopilotSession(client=StubClient([
+        _tool_call(UI_GOTO_TOOL, {"page": "dashboard", "note": "x"}),
+        ChatResult(content="抱歉，换一页。"),
+    ]))
+    session.ask("随便问问", _config())
+    _wait_idle(session)
+
+    assert session.nav_intent is None
+    # 失败信封回给了模型，里面带可选页面清单
+    tool_message = session._agent.messages[-2]
+    envelope = json.loads(tool_message["content"])
+    assert envelope["ok"] is False
+    assert "results" in envelope["summary"]["error"]
+
+
+def test_ui_goto_schema_is_exposed_to_the_model() -> None:
+    stub = StubClient([ChatResult(content="好的")])
+    session = CopilotSession(client=stub)
+    session.ask("你好", _config())
+    _wait_idle(session)
+    names = [schema["function"]["name"] for schema in stub.schemas]
+    assert UI_GOTO_TOOL in names
+    # 数据工具也还在——副驾既能查也能跳
+    assert "tf_research_status" in names
+
+
+def test_tool_calls_are_recorded_as_events() -> None:
+    session = CopilotSession(client=StubClient([
+        _tool_call("tf_dataset_list", {}),
+        ChatResult(content="共 3 个数据集。"),
+    ]))
+    session.ask("有哪些数据集", _config())
+    _wait_idle(session)
+    _, events, _ = session.snapshot()
+    kinds = [event.kind for event in events]
+    assert "tool" in kinds and "answer" in kinds
+    assert any(event.text == "tf_dataset_list" for event in events)
+
+
+def test_error_is_surfaced_not_swallowed() -> None:
+    class Boom:
+        def chat(self, *args, **kwargs):
+            raise RuntimeError("接口挂了")
+
+    session = CopilotSession(client=Boom())
+    session.ask("在吗", _config())
+    _wait_idle(session)
+    assert session.state == "error"
+    assert "接口挂了" in (session.error or "")
+
+
+# ---------------------------------------------------------------- 审批闸门
+
+
+def test_human_approval_blocks_until_decided() -> None:
+    """需要人批的动作必须真的把那一轮卡住，而不是先跑了再问。"""
+    session = CopilotSession()
+    approved: list[bool] = []
+
+    worker = threading.Thread(target=lambda: approved.append(
+        session._on_approval("tf_preprocess_approve", {"ruleset_id": "X"},
+                             "需要批准清洗规则")))
+    worker.start()
+    for _ in range(200):
+        if session.pending_approval is not None:
+            break
+        time.sleep(0.01)
+    assert session.pending_approval is not None
+    assert session.state == "awaiting_approval"
+
+    session.decide_approval(True)
+    worker.join(timeout=5)
+    assert approved == [True]
+    assert session.pending_approval is None
+
+
+def test_human_approval_rejection_returns_false() -> None:
+    session = CopilotSession()
+    decided: list[bool] = []
+    worker = threading.Thread(target=lambda: decided.append(
+        session._on_approval("tf_preprocess_approve", {}, "理由")))
+    worker.start()
+    for _ in range(200):
+        if session.pending_approval is not None:
+            break
+        time.sleep(0.01)
+    session.decide_approval(False)
+    worker.join(timeout=5)
+    assert decided == [False]
+
+
+# ---------------------------------------------------------------- MCP
+
+
+def test_mcp_exposes_registry_without_approval_tool() -> None:
+    import asyncio
+
+    from thermoforge_mcp.server import EXCLUDED_TOOLS, build_server
+
+    tools = asyncio.run(build_server().list_tools())
+    names = {tool.name for tool in tools}
+    assert "tf_dataset_list" in names
+    assert "tf_status" in names and "tf_experiment_report" in names
+    # 审批要 actor=human，经 MCP 调用会让留痕失真，所以不暴露
+    assert EXCLUDED_TOOLS.isdisjoint(names)
+
+
+def test_mcp_tool_schema_hides_ctx_and_keeps_params() -> None:
+    import asyncio
+
+    from thermoforge_mcp.server import build_server
+
+    tools = asyncio.run(build_server().list_tools())
+    tool = next(t for t in tools if t.name == "tf_dataset_modelability")
+    properties = tool.input_schema["properties"]
+    assert "ctx" not in properties          # 控制面参数不给外部 Agent
+    assert "ref" in properties              # 业务参数保留
+    assert tool.input_schema["required"] == ["ref"]
+    assert tool.description                 # 中文说明来自 docstring 首段
+
+
+def test_mcp_wrapper_returns_envelope_json() -> None:
+    from thermoforge_mcp.server import make_wrapper
+
+    def fake_tool(ctx, ref: str) -> dict[str, Any]:
+        """假工具。"""
+        return {"ok": True, "tool": "fake", "summary": {"ref": ref,
+                                                        "note": "中文不转义"}}
+
+    wrapper = make_wrapper("fake_tool", fake_tool)
+    payload = json.loads(wrapper(ref="D@rev_0001"))
+    assert payload["summary"]["ref"] == "D@rev_0001"
+    assert "中文不转义" in payload["summary"]["note"]
+
+
+@pytest.mark.parametrize("key", ["overview", "data", "quality", "research",
+                                 "results", "models", "report", "settings"])
+def test_navigation_catalog_covers_every_page(key: str) -> None:
+    """副驾靠这份清单决定往哪跳，漏一个它就永远跳不到那一页。"""
+    from thermoforge_webui.navigation import PAGE_BY_KEY
+
+    assert key in PAGE_BY_KEY
+    assert PAGE_BY_KEY[key].purpose
