@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -28,6 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SEED = 20260808
 DEFAULT_ACCEPTANCE = {"cvrmse_max": 0.13, "inference_latency_ms_max": 5.0}
 LINE = "=" * 58
+# 常见的「设备在运行」标志位名;用于把它和故障/维护标志区分开
+RUN_FLAGS = ("status_run", "any_running", "running", "run", "is_running")
 
 
 def _setup_console() -> None:
@@ -219,24 +222,107 @@ def _choose_filter(own: list[dict]) -> dict[str, Any]:
     flags = [v for v in own if v["dtype"] == "boolean"]
     if not flags:
         return {}
+    # 状态位里既有运行标志也有故障/维护标志,选错方向就把数据筛反了。
+    # 把常见的运行标志排前面并标注,不靠使用者猜。
+    flags.sort(key=lambda v: (v["property_code"] not in RUN_FLAGS,
+                              v["property_code"]))
     print("\n【第 3 步】要不要只用设备「运行中」的时段?")
     print("  停机时段的目标值接近 0,混在一起会让误差指标失真、甚至算不出来。")
     options: list[dict | None] = [*flags, None]
-    picked = _pick(options,
-                   lambda v: (v["property_code"] if v
-                              else "不过滤,所有时段都用"),
-                   "选一个状态字段(一般选第 1 个)")
+
+    def _label(v: dict | None) -> str:
+        if v is None:
+            return "不过滤,所有时段都用"
+        tag = "  ← 这个是运行标志" if v["property_code"] in RUN_FLAGS else ""
+        return f"{v['property_code']}{tag}"
+
+    picked = _pick(options, _label, "选一个表示「设备在运行」的字段")
     if picked is None:
         return {}
     print(f"  只保留 {picked['property_code']} = 是 的时段")
     return {picked["property_code"]: True}
 
 
+def _blocked_inputs(env: dict) -> dict[str, str]:
+    """从可建模性报告里挑出「该去掉哪个输入」及人话原因。
+
+    信封只带摘要(「4/4 个对象存在发现」),具体是哪个变量在 artifact
+    里,不读它就只能让人瞎猜。
+    """
+    out: dict[str, str] = {}
+    for artifact in env.get("artifacts", []):
+        path = Path(artifact["path"])
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        if not path.exists():
+            continue
+        with open(path, encoding="utf-8") as fp:
+            doc = json.load(fp)
+        for check in doc.get("checks", []):
+            if check.get("level") != "blocker":
+                continue
+            for obj in (check.get("evidence") or {}).get("per_object", []):
+                evidence = obj.get("evidence") or {}
+                for corr in evidence.get("target_correlations", []):
+                    name = corr.get("candidate")
+                    if not name:
+                        continue
+                    r = abs(float(corr.get("r", 0)))
+                    old = out.get(name, "")
+                    detail = f"和目标的相关系数 {r:.4f}，几乎是同一个量"
+                    if not old or r > 0:
+                        out[name] = detail
+    return out
+
+
+def _pass_gate(ctx, ref: str, obj: dict, target_prop: str,
+               input_props: list[str]) -> list[str] | None:
+    """建 Goal 之前先过可建模性门禁,不通过就地调整。
+
+    门禁支持不带 goal_id 直接检查,所以反复试不会在 Ledger 里留下
+    一串废弃 Goal。返回可用的输入清单;放弃时返回 None。
+    """
+    from thermoforge_research.tools import tf_dataset_modelability
+
+    while True:
+        print(f"\n【第 4 步】检查这 {len(input_props)} 个变量能不能支撑目标……")
+        env = tf_dataset_modelability(
+            ctx, ref, target=target_prop, candidate_inputs=input_props,
+            object_model=obj["object_model_id"])
+        for c in env["summary"].get("checks", []):
+            mark = {"blocker": "✗", "warning": "!"}.get(c["level"], "·")
+            print(f"  {mark} {c['name']}: {c['summary'][:80]}")
+        if env["status"] != "FAIL":
+            return input_props
+
+        blocked = {k: v for k, v in _blocked_inputs(env).items()
+                   if k in input_props}
+        if not blocked:
+            print("\n检查没通过,而且不是某一个输入变量的问题。")
+            print("常见原因：可用样本太少,或目标变量长期不变。")
+            return None
+
+        print("\n这几个变量不能用来预测目标：")
+        for name, why in blocked.items():
+            print(f"  - {name}：{why}")
+        print("  用它们预测能得到虚高的精度,但换到实际场景没有价值。")
+
+        remaining = [p for p in input_props if p not in blocked]
+        if not remaining:
+            print("\n去掉之后就没有输入变量了——这台设备在这份数据里")
+            print("建不出诚实的模型。建议换一个数据集或设备再试。")
+            return None
+        print(f"\n去掉后还剩 {len(remaining)} 个：{', '.join(remaining)}")
+        if not _ask_yes("去掉它们,用剩下的继续吗?"):
+            return None
+        input_props = remaining
+
+
 def train_model() -> None:
     from thermoforge_research.runner import current_environment_lock
     from thermoforge_research.tools import (
-        tf_dataset_materialize, tf_dataset_modelability, tf_experiment_plan,
-        tf_experiment_run, tf_goal_create, tf_hypothesis_create,
+        tf_dataset_materialize, tf_experiment_plan, tf_experiment_run,
+        tf_goal_create, tf_hypothesis_create,
     )
 
     ctx = _ctx()
@@ -277,6 +363,28 @@ def train_model() -> None:
 
     target_prop = target["property_code"]
     input_props = [v["property_code"] for v in inputs]
+
+    # 派生量必被白名单(DD-16)拒绝,不必等建 Goal 才发现
+    derived = [v["property_code"] for v in inputs
+               if v["source_kind"] == "derived"]
+    if derived:
+        print(f"\n这几个是派生量,系统不允许：{', '.join(derived)}")
+        print("  它们由别的变量算出来,用来预测等于「用答案算答案」。")
+        if not _ask_yes("自动去掉它们继续吗?"):
+            return
+        input_props = [p for p in input_props if p not in derived]
+        if not input_props:
+            print("去掉之后一个输入都不剩,回到菜单。")
+            return
+
+    passed = _pass_gate(ctx, ref, obj, target_prop, input_props)
+    if passed is None:
+        return
+    input_props = passed
+    if len(input_props) < 2:
+        print("\n  提醒：只剩 1 个输入变量,模型大概率不会准。")
+        print("  这说明这份数据里,能独立解释目标的测量量太少了。")
+
     print(f"\n准备训练：用 {len(input_props)} 个变量预测 {target_prop}")
     print(f"  输入：{', '.join(input_props)}")
     if not _ask_yes("开始吗?"):
@@ -292,23 +400,9 @@ def train_model() -> None:
         "acceptance": dict(DEFAULT_ACCEPTANCE),
     }, dataset_ref=ref)
     if not goal["ok"]:
-        print("\n目标没能建立。系统的说法：")
-        print(f"  {goal['summary'].get('error')}")
-        print("\n多半是某个输入变量是派生量(用它预测等于循环论证)。")
-        print("回到第 2 步,把带 ⚠derived 的变量去掉再试。")
+        print(f"\n目标没能建立：{goal['summary'].get('error')}")
         return
     print(f"  研究目标已建立：{goal['id']}")
-
-    print("\n【第 4 步】先检查这份数据能不能支撑这个目标……")
-    check = tf_dataset_modelability(ctx, ref, goal_id=goal["id"])
-    for c in check["summary"].get("checks", []):
-        mark = {"blocker": "✗", "warning": "!"}.get(c["level"], "·")
-        print(f"  {mark} {c['name']}: {c['summary'][:80]}")
-    if check["status"] == "FAIL":
-        print("\n检查没通过,不能继续训练。上面标 ✗ 的就是原因。")
-        print("常见情况：某个输入和目标其实是同一个东西(比如电流和功率),")
-        print("用它预测能得到虚高的精度,但没有任何实际价值。")
-        return
 
     view = tf_dataset_materialize(ctx, {
         "dataset": ref,
