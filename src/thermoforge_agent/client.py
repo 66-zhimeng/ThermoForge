@@ -37,7 +37,9 @@ class ChatClient:
 
         self.config = config
         self._client = OpenAI(api_key=config.api_key,
-                              base_url=config.base_url)
+                              base_url=config.base_url,
+                              timeout=config.timeout_seconds,
+                              max_retries=config.max_retries)
 
     def chat(
         self,
@@ -96,9 +98,15 @@ class ChatClient:
         return ChatResult(content=content, tool_calls=calls,
                           raw_message=raw)
 
-    def check(self) -> dict[str, Any]:
-        """最小连通性验证（`tf agent --check`）。"""
-        response = self._client.chat.completions.create(
+    def check(self, timeout: float = 20.0) -> dict[str, Any]:
+        """最小连通性验证（`tf agent --check`）。
+
+        排障用途，超时比正常对话更短——等 60 秒才知道「端点不通」对
+        使用者没有价值。
+        """
+        response = self._client.with_options(
+            timeout=timeout, max_retries=0
+        ).chat.completions.create(
             model=self.config.model,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,

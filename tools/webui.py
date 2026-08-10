@@ -191,6 +191,31 @@ def api_datasets() -> dict[str, Any]:
     return {"datasets": out}
 
 
+def diagnose(exc: Exception, config: Any) -> str:
+    """把 SDK 异常翻译成能照着做的话。
+
+    「APIConnectionError: Connection error.」对使用者没有信息量——它
+    到底是网络不通、key 不对，还是模型名写错，处理方式完全不同。
+    """
+    name = type(exc).__name__
+    text = str(exc)
+    if "Connection" in name or "Timeout" in name:
+        return (f"连不上 {config.base_url}。这不是密钥的问题——请求根本没"
+                f"到达服务器。检查：网络能否访问该域名、是否需要代理、"
+                f"接口地址有没有写错（多写或少写 /v1 都会出问题）。")
+    if "Authentication" in name or "401" in text:
+        return "密钥被拒绝（401）。检查 key 是否复制完整、是否属于这个服务商。"
+    if "NotFound" in name or "404" in text:
+        return (f"接口或模型不存在（404）。当前模型名 “{config.model}”，"
+                f"接口地址 “{config.base_url}”。DeepSeek 的模型名是 "
+                f"deepseek-chat，接口地址 https://api.deepseek.com。")
+    if "PermissionDenied" in name or "403" in text:
+        return "密钥没有访问该模型的权限（403）。"
+    if "RateLimit" in name or "429" in text:
+        return "被限流或余额不足（429）。"
+    return f"{name}: {text[:300]}"
+
+
 def api_check() -> dict[str, Any]:
     from thermoforge_agent.client import ChatClient
 
@@ -200,7 +225,8 @@ def api_check() -> dict[str, Any]:
     try:
         return ChatClient(config).check()
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "error": diagnose(exc, config),
+                "detail": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 def api_chat(message: str) -> dict[str, Any]:
@@ -382,6 +408,17 @@ Consolas,monospace;margin:0}
 .row{display:flex;gap:10px;align-items:flex-end}
 .row textarea{flex:1}
 .approve{border:1px solid var(--warn);border-radius:8px;padding:10px;margin-top:10px}
+.presets{display:flex;gap:8px;flex-wrap:wrap}
+.presets button{padding:6px 12px;border:1px solid var(--line);background:transparent;
+color:var(--fg);border-radius:7px;cursor:pointer;font:inherit;font-size:13px}
+.presets button:hover{border-color:var(--accent);color:var(--accent)}
+.result{margin-top:12px;padding:10px 12px;border-radius:7px;font-size:14px;display:none}
+.result.show{display:block}
+.result.ok{background:rgba(15,157,88,.12);border:1px solid var(--ok);color:var(--ok)}
+.result.bad{background:rgba(185,28,28,.10);border:1px solid var(--err);color:var(--err)}
+.result.busy{background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.result .detail{font-size:12px;opacity:.75;margin-top:6px;font-family:ui-monospace,
+Consolas,monospace;word-break:break-all}
 </style></head><body>
 <header>
   <h1>ThermoForge 控制台</h1>
@@ -409,17 +446,25 @@ Consolas,monospace;margin:0}
     <div class="card">
       <h2>API 密钥</h2>
       <div class="hint" id="cfgnote"></div>
+      <label>先选服务商（会自动填好地址和模型名）</label>
+      <div class="presets">
+        <button data-url="https://api.deepseek.com" data-model="deepseek-chat">DeepSeek</button>
+        <button data-url="https://api.moonshot.cn/v1" data-model="kimi-k2-0905-preview">Moonshot / Kimi</button>
+        <button data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+      </div>
       <label>API Key（留空表示不修改）</label>
       <input id="key" type="password" placeholder="sk-...">
       <label>接口地址 Base URL</label>
       <input id="baseurl">
       <label>模型名</label>
       <input id="model">
-      <button class="act" id="save">保存</button>
-      <button class="act" id="test" style="background:transparent;color:var(--fg);border:1px solid var(--line)">测试连通性</button>
-      <div class="hint" id="testout"></div>
+      <div>
+        <button class="act" id="save">保存</button>
+        <button class="act" id="test" style="background:transparent;color:var(--fg);border:1px solid var(--line)">测试连通性</button>
+      </div>
+      <div id="testout" class="result"></div>
       <div class="hint">密钥写入 <code>pi/agent.toml</code>，该文件已在 .gitignore 中，不会提交。
-      任何 OpenAI 兼容端点都可用（Moonshot/Kimi、DeepSeek、OpenAI…）。</div>
+      任何 OpenAI 兼容端点都可用。</div>
     </div>
   </section>
 
@@ -490,35 +535,70 @@ $('#clear').onclick=async()=>{await post('/api/reset');$('#log').innerHTML='';
   addMsg('ai','会话已清空。');};
 
 async function loadConfig(){
-  const c=await api('/api/config');
-  $('#baseurl').value=c.base_url; $('#model').value=c.model;
   const pill=$('#cfgpill');
-  pill.textContent=c.configured?('密钥已配置 '+c.api_key_masked):'未配置密钥';
-  pill.className='pill '+(c.configured?'ok':'no');
-  $('#cfgnote').textContent=c.from_env
-    ? '当前生效的密钥来自环境变量 TF_AGENT_API_KEY，优先级高于此处保存的值。'
-    : '密钥保存在 '+c.config_path;
+  try{
+    const c=await api('/api/config');
+    $('#baseurl').value=c.base_url; $('#model').value=c.model;
+    pill.textContent=c.configured?('密钥已配置 '+c.api_key_masked):'未配置密钥';
+    pill.className='pill '+(c.configured?'ok':'no');
+    $('#cfgnote').textContent=c.from_env
+      ? '当前生效的密钥来自环境变量 TF_AGENT_API_KEY，优先级高于这里保存的值。'
+      : '密钥保存在 '+c.config_path;
+  }catch(e){
+    pill.textContent='连不上本机服务'; pill.className='pill no';
+    $('#cfgnote').textContent='启动窗口可能已关闭，重新双击 启动网页版.bat。';
+  }
 }
-$('#save').onclick=async()=>{
+function say(kind,text,detail){
+  const box=$('#testout');
+  box.className='result show '+kind;
+  box.textContent=text;
+  if(detail){const d=document.createElement('div');d.className='detail';
+    d.textContent=detail;box.appendChild(d);}
+}
+
+document.querySelectorAll('.presets button').forEach(b=>b.onclick=()=>{
+  $('#baseurl').value=b.dataset.url; $('#model').value=b.dataset.model;
+  say('busy','已填入 '+b.textContent+' 的地址和模型名，接着填 API Key 再保存。');
+});
+
+// 每个异步动作都要有可见的开始/结束状态；静默失败会被当成「按钮坏了」
+async function guard(btn,busyText,fn){
+  const old=btn.textContent; btn.disabled=true; btn.textContent=busyText;
+  say('busy',busyText+'…');
+  try{ await fn(); }
+  catch(e){ say('bad','请求没能送到本机服务：'+e+
+    '。可能是启动窗口被关了，重新双击 启动网页版.bat 再试。'); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
+
+$('#save').onclick=()=>guard($('#save'),'保存中',async()=>{
   const r=await post('/api/config',{api_key:$('#key').value,
     base_url:$('#baseurl').value,model:$('#model').value});
   $('#key').value='';
-  $('#testout').textContent=r.ok?'已保存。建议点一下「测试连通性」。':('保存失败：'+r.error);
-  loadConfig();
-};
-$('#test').onclick=async()=>{
-  $('#testout').textContent='测试中…';
+  if(r.ok){ say('ok','已保存到 pi/agent.toml。现在点「测试连通性」确认能用。');
+    loadConfig(); }
+  else say('bad','保存失败：'+(r.error||'未知原因'));
+});
+
+$('#test').onclick=()=>guard($('#test'),'测试中',async()=>{
   const r=await post('/api/check');
-  $('#testout').textContent=r.ok?('连通正常，模型 '+r.model):('连不上：'+r.error);
-};
+  if(r.ok) say('ok','连通正常，模型 '+r.model+'。可以去「对话」页了。');
+  else say('bad',r.error||'连不上',r.detail);
+});
 
 async function loadStatus(){
-  const d=await api('/api/datasets');
-  $('#datasets').textContent=d.datasets.map(x=>
-    x.ref+'   '+x.variable_count+' 个变量   对象：'+x.objects.slice(0,6).join(', ')
-    +(x.objects.length>6?' …共'+x.objects.length+' 个':'')).join('\n')||'还没有数据集';
-  const s=await api('/api/status');
-  $('#status').textContent=JSON.stringify(s,null,2);
+  try{
+    const d=await api('/api/datasets');
+    $('#datasets').textContent=d.datasets.map(x=>
+      x.ref+'   '+x.variable_count+' 个变量   对象：'+x.objects.slice(0,6).join(', ')
+      +(x.objects.length>6?' …共'+x.objects.length+' 个':'')).join('\n')||'还没有数据集';
+    const s=await api('/api/status');
+    $('#status').textContent=JSON.stringify(s,null,2);
+  }catch(e){
+    $('#datasets').textContent='连不上本机服务：'+e;
+    $('#status').textContent='重新双击 启动网页版.bat 再试。';
+  }
 }
 
 loadConfig();

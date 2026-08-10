@@ -36,6 +36,10 @@ class AgentConfig:
     stream: bool = False
     tools_exclude: tuple[str, ...] = DEFAULT_TOOLS_EXCLUDE
     max_tool_rounds: int = 16  # 单轮提问允许的最大工具调用轮数（防失控循环）
+    # openai SDK 默认超时 600s、重试 2 次：端点不通时要等十分钟才报错，
+    # 界面上和「卡死」无法区分。收紧到可感知的量级。
+    timeout_seconds: float = 60.0
+    max_retries: int = 1
 
     @classmethod
     def load(
