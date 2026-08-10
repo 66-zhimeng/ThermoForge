@@ -69,6 +69,29 @@ def test_cvrmse_undefined_when_mean_near_zero():
     assert "CVRMSE" in report.undefined and "NMBE" in report.undefined
 
 
+def test_r2_perfect_and_mean_predictor():
+    y = [1.0, 2.0, 3.0, 4.0]
+    assert compute_metrics(y, y, ["R2"]).metrics["R2"] == pytest.approx(1.0)
+    # 常数均值预测：SS_res == SS_tot，R² 恰为 0
+    mean_pred = [2.5] * 4
+    assert compute_metrics(y, mean_pred, ["R2"]).metrics["R2"] == pytest.approx(0.0)
+
+
+def test_r2_negative_is_not_clamped():
+    """R² < 0（比均值预测还差）是有信息量的结论，不截断（data-survey §5）。"""
+    y = [1.0, 2.0, 3.0, 4.0]
+    p = [10.0, -5.0, 12.0, -3.0]
+    value = compute_metrics(y, p, ["R2"]).metrics["R2"]
+    assert value is not None and value < -1.0
+
+
+def test_r2_undefined_when_target_is_constant():
+    y = [5.0, 5.0, 5.0]
+    report = compute_metrics(y, [5.0, 4.0, 6.0], ["R2"])
+    assert report.metrics["R2"] is None
+    assert "R2" in report.undefined
+
+
 def test_per_object_breakdown_and_micro_default():
     y = [10.0, 20.0, 100.0, 200.0]
     p = [11.0, 19.0, 100.0, 200.0]

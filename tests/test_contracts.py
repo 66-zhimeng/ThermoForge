@@ -227,8 +227,8 @@ def test_experiment_valid():
     [
         # 切分比例之和必须为 1
         lambda d: d["validation"]["temporal_split"].update(test=0.2),
-        # 指标不在登记表
-        lambda d: d["metrics"].append("R2"),
+        # 指标不在登记表（R² 自 I-54 起已登记，改用真正未登记的 SMAPE）
+        lambda d: d["metrics"].append("SMAPE"),
         # hybrid 必须声明 physics + residual
         lambda d: d.update(model={"category": "hybrid", "physics": "cooling_balance_v2"}),
         lambda d: d.update(experiment_id="EXP-42"),

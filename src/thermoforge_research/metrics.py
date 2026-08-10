@@ -1,6 +1,6 @@
 """指标模块（implementation-notes.md §5、research-loop.md §7、DD-14）。
 
-RMSE / MAE / MAPE / CVRMSE / NMBE 的**单一实现**，比率制（非百分比）。
+RMSE / MAE / MAPE / CVRMSE / NMBE / R2 的**单一实现**，比率制（非百分比）。
 所有实验的指标必须由本模块计算，禁止各建模脚本自行实现（§5.3）。
 
 口径约定：
@@ -9,9 +9,13 @@ RMSE / MAE / MAPE / CVRMSE / NMBE 的**单一实现**，比率制（非百分比
 - MAPE 剔除 `|y| < y_floor` 的样本并报告 `mape_valid_fraction`；
   `y_floor` 默认取 `0.05 * max(|y|)`（额定功率 5% 的代理，[草案]，§5.1）。
   有效样本比例 < `min_valid_fraction`（默认 0.8）报 **TFX-905**。
-- CVRMSE / NMBE 在 `mean(y) ≈ 0` 时未定义，值记为 None 并给出说明，
-  不产生一个看似正常的数字。
+- CVRMSE / NMBE 在 `mean(y) ≈ 0` 时未定义，R2 在 `var(y) ≈ 0` 时未定义；
+  三者一律记为 None 并给出说明，不产生一个看似正常的数字。
 - 输入中的 NaN 属于缺陷（conventions §4.2），直接报错而不是静默剔除。
+
+R2 是 data-survey.md 通篇用来表达结论的指标（§F1 的同源判定、§5 的
+模型对比都以 R² 陈述），但实现层此前缺席，导致报告里的 R² 无法被实验
+产物复现校验——补齐见 issues.md I-54。
 """
 
 from __future__ import annotations
@@ -24,11 +28,12 @@ import numpy as np
 
 from .errors import ResearchError
 
-METRIC_NAMES = ("RMSE", "MAE", "MAPE", "CVRMSE", "NMBE")
+METRIC_NAMES = ("RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2")
 
 DEFAULT_MIN_VALID_FRACTION = 0.8  # §5.1 [草案：80%]
 DEFAULT_Y_FLOOR_RATIO = 0.05  # §5.1 [草案：额定功率的 5%]
 _MEAN_EPS = 1e-12  # mean(y) ≈ 0 的判定阈值（相对 max|y|）
+_VAR_EPS = 1e-24  # var(y) ≈ 0 的判定阈值（相对 max(y)²）
 
 
 def _as_array(values: Sequence[float], name: str) -> np.ndarray:
@@ -82,6 +87,22 @@ def nmbe(y_true: np.ndarray, y_pred: np.ndarray) -> float | None:
     if abs(mean_y) <= _MEAN_EPS * max(scale, 1.0):
         return None
     return float(np.sum(y_true - y_pred) / (len(y_true) * mean_y))
+
+
+def r2(y_true: np.ndarray, y_pred: np.ndarray) -> float | None:
+    """R² = 1 − SS_res / SS_tot；`var(y) ≈ 0` 时未定义。
+
+    取值可以为负（模型比常数均值预测还差），这是有信息量的结果而不是
+    错误——data-survey §5 里冷冻水侧单独建模的 R² = −8.47 正是靠这一点
+    读出来的，因此不做任何截断。
+    """
+    mean_y = float(np.mean(y_true))
+    ss_tot = float(np.sum((y_true - mean_y) ** 2))
+    scale = float(np.max(np.abs(y_true))) if len(y_true) else 0.0
+    if ss_tot <= _VAR_EPS * len(y_true) * max(scale * scale, 1.0):
+        return None
+    ss_res = float(np.sum((y_true - y_pred) ** 2))
+    return 1.0 - ss_res / ss_tot
 
 
 @dataclass(frozen=True)
@@ -162,6 +183,10 @@ def compute_metrics(
             values[name] = nmbe(y, yhat)
             if values[name] is None:
                 undefined[name] = "mean(y) ≈ 0，NMBE 未定义（§5）"
+        elif name == "R2":
+            values[name] = r2(y, yhat)
+            if values[name] is None:
+                undefined[name] = "var(y) ≈ 0，R² 未定义（目标为常数）"
 
     per_object: dict[str, dict[str, Any]] = {}
     if object_ids is not None:

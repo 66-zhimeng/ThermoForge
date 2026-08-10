@@ -319,7 +319,8 @@
           "MAE",
           "MAPE",
           "CVRMSE",
-          "NMBE"
+          "NMBE",
+          "R2"
         ],
         "type": "string"
       },

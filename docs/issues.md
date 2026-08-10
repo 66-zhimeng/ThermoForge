@@ -68,6 +68,7 @@
 | I-48 | ~~F6 COP 量纲问题~~已撤销：站点为高温离心式冷机，COP 9~11 物理合理；遗留两种制冷量口径偏差的核对 | 数据 | 数据 | 已解决 | [data-survey §F6](./data-survey.md)（2026-08-09 需求方确认） |
 | I-49 | 数据预处理需由 Agent 自主完成（目前清洗规则由人工给出、脚本由人工触发），预处理能力需工具化进编排层 | 需求 | 设计 | 待设计 | 2026-08-09 需求方确认 |
 | I-53 | 预处理错误码 TFPP-001~006 暂登记在 `thermoforge_data.preprocess` 模块内，conventions §7 无预处理小节 | 契约 | 设计 | 待决策 | I-49 实现发现 |
+| I-54 | 指标集扩充 R²：data-survey 通篇以 R² 陈述结论，但 `metrics.py` 与 Experiment 契约此前无此指标 | 契约 | 设计 | 已实现 | 2026-08-10 Web 控制台重做 |
 
 ---
 
@@ -294,6 +295,20 @@
 **背景**：I-49 的实现需要预处理域错误码（规则类型未注册、未审批作用于正式导入、规则集不存在、目标不存在、同版本内容冲突、非 human 审批），但 conventions §7 错误码表是冻结文档且 Phase 0 的 `tests/test_errors.py` 逐条比对注册表与文档原文，无法在不改文档的前提下扩充 `ERROR_REGISTRY`。
 
 **Phase 1.5 的处理**：`TFPP-001`~`TFPP-006` 登记在 `thermoforge_data.preprocess` 模块内（模块级常量 + `PreprocessError.code`），信封诊断以自由码形式携带（与 tools.py 既有 `CHILD_ERROR` 同一模式）。**需要决策**：conventions §7 增补预处理小节（如 `TFPP-11xx` 号段）后并入注册表。
+
+---
+
+### I-54 指标集扩充 R²
+
+**背景**：`data-survey.md` 的核心结论全部以 R² 表达——§F1 判定 `load` 与 `current_percent` 同源用的是「两者 R² 完全相同（0.96633）」，§5 的模型对比表首列是 R²，§141 「冷冻水侧单独使用 R² 为 −8.47，加入冷却水温度后跳到 0.79」也是这条口径。但 `research/metrics.py` 的 `METRIC_NAMES` 与 Experiment 契约的 `metrics` 枚举此前只有 RMSE/MAE/MAPE/CVRMSE/NMBE，导致**文档结论无法被实验产物复现校验**：报告里写 R²，实验 `metrics.json` 里没有。
+
+**处理**：按「指标只有一份实现」的不变量，把 R² 正式加进 `metrics.py`（`r2()` + `METRIC_NAMES`）与 Experiment 契约的 `Literal` 枚举，重新导出 `contracts/experiment/schema.json`。约定：
+
+- `var(y) ≈ 0`（目标为常数）时返回 `None` 并记入 `undefined`，与 CVRMSE/NMBE 的零均值处理同调，不给一个看似正常的数字。
+- **不截断负值**。R² < 0 表示模型比常数均值预测更差，这是有信息量的结论（§5 的 −8.47 正是靠它读出来的）。
+- 属 MINOR 契约演进（新增可选枚举值），既有实验产物不受影响；旧实验的 R² 由 Web 控制台读 `predictions.parquet` 调同一 `r2()` 现算补齐，不改写历史产物。
+
+**与 conventions 的关系**：R² 不涉及错误码表，`docs/conventions.md` 无需改动，因此不受 I-53 的冻结文档约束。`implementation-notes.md §5` 的指标表在下次修订时应补一行。
 
 ---
 

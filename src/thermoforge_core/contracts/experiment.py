@@ -15,7 +15,7 @@ from ..naming import is_property_code
 SET_SEMANTIC_FIELDS: frozenset[str] = frozenset({"metrics"})
 
 EXPERIMENT_ID_PATTERN = r"^EXP-[0-9]{4,}$"
-METRICS = ("RMSE", "MAE", "MAPE", "CVRMSE", "NMBE")
+METRICS = ("RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2")
 
 
 class ModelSpec(BaseModel):
@@ -134,7 +134,7 @@ class Experiment(BaseModel):
     model: ModelSpec
     target: str
     validation: Validation
-    metrics: list[Literal["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE"]] = Field(
+    metrics: list[Literal["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2"]] = Field(
         min_length=1, json_schema_extra={"x-tf-set-semantics": True}
     )
     physics_tests: PhysicsTests = Field(default_factory=PhysicsTests)

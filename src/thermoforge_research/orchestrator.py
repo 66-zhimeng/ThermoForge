@@ -70,7 +70,7 @@ STOP_REASONS = (
 )
 
 _DEFAULT_SPLIT = {"train": 0.70, "validate": 0.15, "test": 0.15}
-_ALL_METRICS = ["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE"]
+_ALL_METRICS = ["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2"]
 
 Planner = Callable[[int, Mapping[str, Any]], Mapping[str, Any] | None]
 
