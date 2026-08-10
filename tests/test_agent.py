@@ -232,6 +232,10 @@ def test_config_api_key_env_alias(tmp_path, monkeypatch):
 
 def test_config_missing_key_guidance(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("TF_AGENT_API_KEY", raising=False)
+    # CLI 分支不传 config_path，会落到模块默认的 pi/agent.toml；使用者一旦
+    # 真的配了密钥，这个「无 key」用例就会被真实配置污染。改指临时路径。
+    monkeypatch.setattr("thermoforge_agent.config.CONFIG_PATH",
+                        tmp_path / "none.toml")
     config = AgentConfig.load(config_path=tmp_path / "none.toml")
     assert config is None
     text = config_guidance()

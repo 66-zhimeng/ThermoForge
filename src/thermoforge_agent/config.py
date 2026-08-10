@@ -40,6 +40,9 @@ class AgentConfig:
     # 界面上和「卡死」无法区分。收紧到可感知的量级。
     timeout_seconds: float = 60.0
     max_retries: int = 1
+    # 出网需要代理的环境（公司网络、受限网络）：形如
+    # http://127.0.0.1:7890。留空则沿用 httpx 默认的环境变量行为。
+    proxy: str = ""
 
     @classmethod
     def load(
@@ -70,6 +73,8 @@ class AgentConfig:
                    or file_doc.get("model") or DEFAULT_MODEL),
             stream=bool(stream) if stream is not None else False,
             tools_exclude=exclude,
+            proxy=str(os.environ.get("TF_AGENT_PROXY")
+                      or file_doc.get("proxy") or ""),
         )
 
 

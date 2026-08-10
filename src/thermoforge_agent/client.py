@@ -33,13 +33,25 @@ class ChatClient:
     """openai SDK 薄封装（OpenAI 兼容端点：Moonshot/Kimi/OpenAI/DeepSeek…）。"""
 
     def __init__(self, config: AgentConfig):
+        import httpx
         from openai import OpenAI
 
         self.config = config
+        # SDK 默认 connect=5s。实测首次 TLS 握手可能就要 5s（冷启动），
+        # 正好卡在边界上，表现为「时通时不通」——单独放宽连接阶段。
+        timeout = httpx.Timeout(
+            config.timeout_seconds,
+            connect=max(20.0, min(config.timeout_seconds, 30.0)),
+        )
+        kwargs: dict[str, Any] = {}
+        if config.proxy:  # 受限网络：显式代理优先于 httpx 的环境变量行为
+            kwargs["http_client"] = httpx.Client(proxy=config.proxy,
+                                                 timeout=timeout)
         self._client = OpenAI(api_key=config.api_key,
                               base_url=config.base_url,
-                              timeout=config.timeout_seconds,
-                              max_retries=config.max_retries)
+                              timeout=timeout,
+                              max_retries=config.max_retries,
+                              **kwargs)
 
     def chat(
         self,
@@ -98,19 +110,34 @@ class ChatClient:
         return ChatResult(content=content, tool_calls=calls,
                           raw_message=raw)
 
-    def check(self, timeout: float = 20.0) -> dict[str, Any]:
+    def check(self, timeout: float = 25.0) -> dict[str, Any]:
         """最小连通性验证（`tf agent --check`）。
 
         排障用途，超时比正常对话更短——等 60 秒才知道「端点不通」对
-        使用者没有价值。
+        使用者没有价值。连接类失败自动重试一次：首次 TLS 握手慢是常态，
+        第一次点「测试」就报连不上会让人以为配错了。鉴权/模型名一类的
+        错误立即抛出，不做无谓重试。
         """
-        response = self._client.with_options(
-            timeout=timeout, max_retries=0
-        ).chat.completions.create(
-            model=self.config.model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
+        import httpx
+
+        client = self._client.with_options(
+            timeout=httpx.Timeout(timeout, connect=timeout), max_retries=0)
+        last: Exception | None = None
+        for _attempt in (1, 2):
+            try:
+                response = client.chat.completions.create(
+                    model=self.config.model,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=1,
+                )
+                break
+            except Exception as exc:
+                if type(exc).__name__ not in ("APIConnectionError",
+                                              "APITimeoutError"):
+                    raise
+                last = exc
+        else:
+            raise last  # type: ignore[misc]
         return {
             "ok": True,
             "model": self.config.model,
