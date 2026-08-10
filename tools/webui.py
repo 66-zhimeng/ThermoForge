@@ -605,9 +605,36 @@ button.b:disabled{opacity:.55;cursor:default}
   word-break:break-word;max-width:86%}
 .msg.me{align-items:flex-end}
 .msg.me .bubble{background:var(--accent);color:var(--accent-fg)}
-.msg.ai .bubble{background:var(--panel);border:1px solid var(--line)}
+.msg.ai .bubble{background:var(--panel);border:1px solid var(--line);
+  max-width:100%;white-space:normal}
 .msg.sys .bubble{background:var(--sunk);color:var(--muted);font-size:13.5px;
   max-width:100%}
+
+/* Agent 回复的 Markdown 渲染 */
+.md>*:first-child{margin-top:0} .md>*:last-child{margin-bottom:0}
+.md h1,.md h2,.md h3,.md h4{margin:18px 0 8px;font-weight:640;line-height:1.35}
+.md h1{font-size:17px} .md h2{font-size:16px}
+.md h3{font-size:15px} .md h4{font-size:14px}
+.md p{margin:0 0 10px}
+.md ul,.md ol{margin:0 0 10px;padding-left:22px}
+.md li{margin:3px 0}
+.md li>ul,.md li>ol{margin:3px 0}
+.md code{background:var(--sunk);border:1px solid var(--line);padding:1px 5px;
+  border-radius:5px;font:12.5px/1.5 ui-monospace,Consolas,monospace}
+.md pre{background:var(--sunk);border:1px solid var(--line);padding:12px 14px;
+  border-radius:8px;overflow-x:auto;margin:0 0 10px}
+.md pre code{background:none;border:0;padding:0;font-size:12.5px}
+.md hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.md blockquote{margin:0 0 10px;padding:2px 0 2px 12px;
+  border-left:3px solid var(--line);color:var(--muted)}
+.md a{color:var(--accent)}
+.md strong{font-weight:640}
+.tablebox{overflow-x:auto;margin:0 0 10px}
+.md table{border-collapse:collapse;font-size:13.5px;min-width:100%}
+.md th,.md td{border:1px solid var(--line);padding:7px 11px;text-align:left;
+  white-space:nowrap}
+.md th{background:var(--sunk);font-weight:620}
+.md tbody tr:nth-child(even){background:color-mix(in srgb,var(--sunk) 45%,transparent)}
 .tools{margin-top:7px;font:12px/1.7 ui-monospace,Consolas,monospace;
   color:var(--muted)}
 .tools span{display:inline-block;padding:1px 7px;border:1px solid var(--line);
@@ -833,12 +860,110 @@ async function loadConfig(){
   }
 }
 
+/* ── Markdown 渲染 ────────────────────────
+   Agent 的回复是 Markdown，直接当文本显示满屏都是 ### 和 |---|。
+   自己写而不引 CDN：这个页面要能离线用，CSP 也不该为渲染开口子。
+   安全前提：**先整体转义 HTML**，之后只插入自己生成的标签，
+   工具返回的内容永远不会被当作 HTML 执行。 */
+function esc(s){
+  return String(s).replace(/[&<>"']/g,c=>(
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function inlineMd(s){
+  return s
+    .replace(/`([^`]+)`/g,(m,c)=>'<code>'+c+'</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+    .replace(/~~([^~]+)~~/g,'<del>$1</del>')
+    // 只放行 http/https，避免 javascript: 之类的伪协议
+    .replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+function mdToHtml(src){
+  const lines=esc(src).replace(/\r\n?/g,'\n').split('\n');
+  const out=[]; let i=0;
+  const listStack=[];               // 每层记 {tag, indent}
+  function closeLists(toIndent){
+    while(listStack.length &&
+          listStack[listStack.length-1].indent>=toIndent){
+      out.push('</'+listStack.pop().tag+'>');
+    }
+  }
+  function closeAll(){ while(listStack.length) out.push('</'+listStack.pop().tag+'>'); }
+
+  while(i<lines.length){
+    const raw=lines[i], line=raw.trim();
+
+    if(/^```/.test(line)){                                   // 代码块
+      closeAll(); const buf=[]; i++;
+      while(i<lines.length && !/^```/.test(lines[i].trim())) buf.push(lines[i++]);
+      i++; out.push('<pre><code>'+buf.join('\n')+'</code></pre>'); continue;
+    }
+    if(!line){ closeAll(); i++; continue; }                   // 空行
+    if(/^(-{3,}|\*{3,}|_{3,})$/.test(line)){                  // 分隔线
+      closeAll(); out.push('<hr>'); i++; continue;
+    }
+    const h=line.match(/^(#{1,6})\s+(.*)$/);                  // 标题
+    if(h){ closeAll();
+      const lv=Math.min(h[1].length,4);
+      out.push('<h'+lv+'>'+inlineMd(h[2])+'</h'+lv+'>'); i++; continue; }
+
+    // 表格：当前行像表格行，且下一行是 |---|---| 分隔行
+    if(line.startsWith('|') && i+1<lines.length &&
+       /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
+      closeAll();
+      const cells=r=>r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const head=cells(line); i+=2;
+      const body=[];
+      while(i<lines.length && lines[i].trim().startsWith('|')) body.push(cells(lines[i++]));
+      out.push('<div class="tablebox"><table><thead><tr>'+
+        head.map(c=>'<th>'+inlineMd(c)+'</th>').join('')+'</tr></thead><tbody>'+
+        body.map(r=>'<tr>'+r.map(c=>'<td>'+inlineMd(c)+'</td>').join('')+'</tr>').join('')+
+        '</tbody></table></div>');
+      continue;
+    }
+    // 引用：此时 > 已被 esc() 变成 &gt;，必须按转义后的形态匹配
+    if(/^&gt;\s?/.test(line)){
+      closeAll(); const buf=[];
+      while(i<lines.length && /^&gt;\s?/.test(lines[i].trim()))
+        buf.push(lines[i++].trim().replace(/^&gt;\s?/,''));
+      out.push('<blockquote>'+inlineMd(buf.join(' '))+'</blockquote>'); continue;
+    }
+
+    const li=raw.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);      // 列表（含嵌套）
+    if(li){
+      const indent=li[1].length, ordered=/\d/.test(li[2]);
+      const tag=ordered?'ol':'ul';
+      closeLists(indent+1);
+      const top=listStack[listStack.length-1];
+      if(!top || top.indent<indent){
+        listStack.push({tag,indent}); out.push('<'+tag+'>');
+      }
+      out.push('<li>'+inlineMd(li[3])+'</li>'); i++; continue;
+    }
+
+    closeAll();                                               // 普通段落
+    const buf=[lines[i++]];
+    while(i<lines.length){
+      const nxt=lines[i].trim();
+      if(!nxt || /^(#{1,6}\s|```|&gt;|\||-{3,})/.test(nxt) ||
+         /^(\s*)([-*+]|\d+[.)])\s+/.test(lines[i])) break;
+      buf.push(lines[i++]);
+    }
+    out.push('<p>'+inlineMd(buf.join(' '))+'</p>');
+  }
+  closeAll();
+  return out.join('');
+}
+
 /* ── 对话 ── */
 function bubble(who,text,tools){
   const d=document.createElement('div'); d.className='msg '+who;
   const label={me:'你',ai:'Agent',sys:'系统'}[who];
   d.innerHTML='<div class="who">'+label+'</div><div class="bubble"></div>';
-  d.querySelector('.bubble').textContent=text;
+  const body=d.querySelector('.bubble');
+  if(who==='ai'){ body.className='bubble md'; body.innerHTML=mdToHtml(text); }
+  else body.textContent=text;
   if(tools&&tools.length){
     const t=document.createElement('div'); t.className='tools';
     tools.forEach(x=>{const s=document.createElement('span');
