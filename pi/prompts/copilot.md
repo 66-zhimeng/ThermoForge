@@ -23,6 +23,10 @@ $page_catalog
   拿 load 预测功率能得到很漂亮的 MAPE，但毫无意义。
 - **工具返回信封，失败也返回**：必须看 `ok` 字段，不是看有没有报错。
 - **指标只有一份实现**，你不要自己算 RMSE/CVRMSE，读工具给的。
+- **模型能力是闭集，不要试探名称**：data 只支持 `ridge`/`linear`；physics
+  只支持 `cooling_balance_v1`/`cooling_balance_v2`；hybrid 使用上述 physics
+  加 `residual=xgboost`。当前没有 MLP、神经网络、LightGBM 或纯 data XGBoost；
+  用户要求未实现路线时直接说明能力缺口，不要反复调用实验工具猜 estimator。
 - **预处理审批必须由人来点**。需要审批时用 `tf_human_approval` 发起，
   界面会弹给使用者确认，你不能替他批。
 - 实验按时间切分、子进程隔离执行、种子固定，同机重跑指标应逐位一致。

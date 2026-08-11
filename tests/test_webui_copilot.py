@@ -125,6 +125,49 @@ def test_error_is_surfaced_not_swallowed() -> None:
     assert "接口挂了" in (session.error or "")
 
 
+def test_tool_round_limit_finishes_copilot_without_error() -> None:
+    stub = StubClient([
+        _tool_call("tf_dataset_list", {}),
+        ChatResult(content="工具预算用完，先根据现有数据给出结论。"),
+    ])
+    config = AgentConfig(api_key="sk-test", base_url="http://localhost/v1",
+                         model="stub", max_tool_rounds=1)
+    session = CopilotSession(client=stub)
+
+    session.ask("做一个很长的调查", config)
+    _wait_idle(session)
+
+    assert session.state == "idle"
+    assert session.error is None
+    assert "给出结论" in session.messages[-1].content
+
+
+def test_tool_exception_does_not_poison_copilot_history() -> None:
+    stub = StubClient([
+        _tool_call(UI_GOTO_TOOL, {"page": "results"}),
+        ChatResult(content="工具失败了，但对话还能继续。"),
+    ])
+    session = CopilotSession(client=stub)
+
+    def broken_ui_tool(*args, **kwargs):
+        raise RuntimeError("navigation failed")
+
+    session._ui_goto = broken_ui_tool
+    session.ask("带我去结果页", _config())
+    _wait_idle(session)
+
+    assert session.state == "idle"
+    tool_message = session._agent.messages[-2]
+    envelope = json.loads(tool_message["content"])
+    assert envelope["ok"] is False
+    assert "RuntimeError: navigation failed" in envelope["summary"]["error"]
+    second_request = stub.calls[1]
+    assistant_index = next(
+        i for i, message in enumerate(second_request)
+        if message.get("role") == "assistant" and message.get("tool_calls"))
+    assert second_request[assistant_index + 1]["tool_call_id"] == "c1"
+
+
 # ---------------------------------------------------------------- 审批闸门
 
 

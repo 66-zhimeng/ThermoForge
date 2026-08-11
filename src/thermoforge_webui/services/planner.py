@@ -188,8 +188,12 @@ def parse_plan(text: str) -> dict[str, Any]:
             raise PlannerError(f"JSON 解析失败：{exc}") from exc
 
 
-def validate_plan(plan: Mapping[str, Any], context: PlannerContext,
-                  round_index: int) -> tuple[dict[str, Any] | None, str | None]:
+def validate_plan(
+    plan: Mapping[str, Any],
+    context: PlannerContext,
+    round_index: int,
+    evidence: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
     """本地校验。返回 (可用计划, 错误说明)；两者必有其一为 None。
 
     校验的是「编排器和契约一定会拒绝的东西」——提前拒能给出人话报错，
@@ -219,8 +223,24 @@ def validate_plan(plan: Mapping[str, Any], context: PlannerContext,
         return None, error
 
     basis = [str(item) for item in (plan.get("basis") or [])]
-    if round_index > 0 and not basis:
-        return None, "非首轮假设必须给 basis（引用已有实验或发现 ID）"
+    has_basis_catalog = (
+        evidence is not None and "basis_candidates" in evidence)
+    basis_candidates = {
+        str(item.get("id")) if isinstance(item, Mapping) else str(item)
+        for item in ((evidence or {}).get("basis_candidates") or [])
+    }
+    basis_required = round_index > 0 or bool(
+        (evidence or {}).get("basis_required"))
+    if basis_required and not basis:
+        detail = (f"；可引用：{sorted(basis_candidates)}"
+                  if basis_candidates else "")
+        return None, (
+            "非首轮假设必须给 basis（引用已有实验或发现 ID）" + detail)
+    unknown_basis = sorted(set(basis) - basis_candidates)
+    if has_basis_catalog and unknown_basis:
+        return None, (
+            f"basis 包含不可用 ID：{unknown_basis}；"
+            f"可引用：{sorted(basis_candidates)}")
 
     result: dict[str, Any] = {
         "statement": statement,
@@ -287,7 +307,8 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
                 trace.error = str(exc)
                 continue
             trace.reasoning = str(raw.get("reasoning") or "")
-            plan, error = validate_plan(raw, context, round_index)
+            plan, error = validate_plan(
+                raw, context, round_index, evidence=evidence)
             if error is None:
                 trace.plan = dict(plan) if plan else None
                 trace.error = None

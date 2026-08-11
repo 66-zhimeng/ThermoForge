@@ -42,6 +42,11 @@ DECLINED_ENVELOPE = {
     "truncated": False,
 }
 
+TOOL_LIMIT_FINALIZE_PROMPT = """本轮工具调用预算已经用完。不要再调用任何工具。
+请只基于上面已经返回的工具结果，直接给用户一个诚实、可执行的中文答复：
+说明已经完成什么、还缺什么；如果任务尚未完成，明确建议用户继续追问以从当前上下文续做。
+不要声称未执行的动作已经完成。"""
+
 
 class PiAgent:
     """内置研发 Agent。
@@ -90,6 +95,7 @@ class PiAgent:
 
     def ask(self, text: str) -> str:
         """一轮用户提问；内部按需要执行多轮工具调用，返回最终回答。"""
+        self._repair_tool_history()
         self._append({"role": "user", "content": text})
         for _ in range(self.config.max_tool_rounds):
             result = self.client.chat(
@@ -98,20 +104,82 @@ class PiAgent:
             )
             if not isinstance(result, ChatResult):
                 raise TypeError("client.chat 必须返回 ChatResult")
-            self._append(result.raw_message
-                         or {"role": "assistant", "content": result.content})
+            self._append(_assistant_message(result))
             if not result.tool_calls:
                 return result.content or ""
             for call in result.tool_calls:
-                envelope = self._execute(call)
+                try:
+                    envelope = self._execute(call)
+                except Exception as exc:
+                    # Last-resort protocol guard: logging, approval callbacks,
+                    # and UI observers are also outside the tool's control.
+                    envelope = self._error_envelope(
+                        call.name, f"{type(exc).__name__}: {exc}")
                 self._append({
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": json.dumps(envelope, ensure_ascii=False),
+                    "content": _serialize_tool_result(call, envelope),
                 })
-        raise RuntimeError(
-            f"工具调用超过 {self.config.max_tool_rounds} 轮仍未收敛，已中止"
+        return self._finalize_after_tool_limit()
+
+    def _finalize_after_tool_limit(self) -> str:
+        """工具预算耗尽后关闭工具，再给模型一次总结机会。
+
+        `max_tool_rounds` 是防失控安全阀，不应把已经成功执行的整轮工作变成
+        UI 错误。最后一次 completion 不暴露工具，只允许基于现有结果收尾。
+        少数兼容端点即使没有 tools 仍可能返回 tool_calls；此时也要逐个补上
+        LIMIT_REACHED 结果，保持 Chat Completions 历史合法，再返回确定性提示。
+        """
+        limit = self.config.max_tool_rounds
+        self._log({"type": "tool_round_limit", "limit": limit})
+        final_messages = [
+            *self.messages,
+            {"role": "system", "content": TOOL_LIMIT_FINALIZE_PROMPT},
+        ]
+        try:
+            result = self.client.chat(
+                final_messages, None,
+                on_content_delta=self.on_content_delta,
+            )
+            if not isinstance(result, ChatResult):
+                raise TypeError("client.chat 必须返回 ChatResult")
+        except Exception as exc:
+            self._log({
+                "type": "tool_limit_finalize_error",
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            return self._append_tool_limit_fallback()
+
+        if not result.tool_calls:
+            answer = (result.content or "").strip()
+            if answer:
+                self._append(_assistant_message(result))
+                return answer
+            return self._append_tool_limit_fallback()
+
+        self._append(_assistant_message(result))
+        for call in result.tool_calls:
+            envelope = self._error_envelope(
+                call.name,
+                f"本轮已达到工具调用上限 {limit}，该调用未执行；"
+                "请在下一轮对话中继续。",
+            )
+            envelope["status"] = "LIMIT_REACHED"
+            self._append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": _serialize_tool_result(call, envelope),
+            })
+        return self._append_tool_limit_fallback()
+
+    def _append_tool_limit_fallback(self) -> str:
+        answer = (
+            f"本轮已完成 {self.config.max_tool_rounds} 轮工具调用，"
+            "但任务还需要更多步骤。已完成的结果和上下文都已保留；"
+            "请继续追问，我会从当前进度续做。"
         )
+        self._append({"role": "assistant", "content": answer})
+        return answer
 
     # ---------------------------------------------------------------- 工具执行
 
@@ -125,13 +193,18 @@ class PiAgent:
         else:
             try:
                 envelope = fn(self.ctx, **call.arguments)
-            except TypeError as exc:  # 参数不匹配：回给模型修正
-                envelope = self._error_envelope(call.name, str(exc))
+                if not isinstance(envelope, Mapping):
+                    raise TypeError(
+                        f"工具返回值必须是 Mapping，实际为 "
+                        f"{type(envelope).__name__}")
+                envelope = dict(envelope)
+            except Exception as exc:  # 所有工具异常都必须闭合 tool_call_id
+                envelope = self._error_envelope(
+                    call.name, f"{type(exc).__name__}: {exc}")
         self._log({"type": "tool_result", "tool": call.name,
                    "ok": envelope.get("ok"), "id": envelope.get("id"),
                    "status": envelope.get("status")})
-        if self.on_tool_call:
-            self.on_tool_call(call.name, bool(envelope.get("ok")))
+        self._notify_tool_call(call.name, bool(envelope.get("ok")))
         return envelope
 
     def _execute_approval(self, call: ToolCallRequest) -> dict[str, Any]:
@@ -142,24 +215,124 @@ class PiAgent:
         fn = TOOL_REGISTRY.get(target)
         approved = False
         if fn is not None and self.approval_handler is not None:
-            approved = bool(self.approval_handler(target, arguments, reason))
+            try:
+                approved = bool(
+                    self.approval_handler(target, arguments, reason))
+            except Exception as exc:
+                return self._error_envelope(
+                    target, f"{type(exc).__name__}: {exc}")
         self._log({"type": "approval", "tool": target,
                    "arguments": dict(arguments), "reason": reason,
                    "approved": approved})
         if fn is None:
             return self._error_envelope(target, f"未知工具: {target}")
         if not approved:
-            if self.on_tool_call:
-                self.on_tool_call(target, False)
+            self._notify_tool_call(target, False)
             return {**DECLINED_ENVELOPE, "tool": target,
                     "inputs": dict(arguments)}
         try:
             envelope = fn(self._human_ctx, **arguments)
-        except TypeError as exc:
-            envelope = self._error_envelope(target, str(exc))
-        if self.on_tool_call:
-            self.on_tool_call(target, bool(envelope.get("ok")))
+            if not isinstance(envelope, Mapping):
+                raise TypeError(
+                    f"工具返回值必须是 Mapping，实际为 "
+                    f"{type(envelope).__name__}")
+            envelope = dict(envelope)
+        except Exception as exc:
+            envelope = self._error_envelope(
+                target, f"{type(exc).__name__}: {exc}")
+        self._notify_tool_call(target, bool(envelope.get("ok")))
         return envelope
+
+    def _notify_tool_call(self, tool: str, ok: bool) -> None:
+        """UI observers must never break the assistant/tool message protocol."""
+        if self.on_tool_call is None:
+            return
+        try:
+            self.on_tool_call(tool, ok)
+        except Exception as exc:
+            self._log({
+                "type": "observer_error",
+                "tool": tool,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+
+    def _repair_tool_history(self) -> None:
+        """Close orphaned tool calls left by an interrupted previous turn.
+
+        Chat Completions requires every assistant ``tool_calls`` item to be
+        followed immediately by one matching tool message.  Repair happens
+        before appending the next user message so an already-failed Copilot
+        session can recover without forcing the user to reset the chat.
+        """
+        repaired: list[dict[str, Any]] = []
+        inserted: list[str] = []
+        dropped: list[str] = []
+        index = 0
+        while index < len(self.messages):
+            message = self.messages[index]
+            if message.get("role") == "tool":
+                dropped.append(str(message.get("tool_call_id") or ""))
+                index += 1
+                continue
+
+            normalized = dict(message)
+            calls = (normalized.get("tool_calls") or []) \
+                if normalized.get("role") == "assistant" else []
+            if not calls:
+                repaired.append(normalized)
+                index += 1
+                continue
+
+            expected: list[tuple[str, str]] = []
+            normalized_calls = []
+            for call_index, raw_call in enumerate(calls):
+                call = dict(raw_call)
+                call_id = str(call.get("id") or
+                              f"recovered-{index}-{call_index}")
+                call["id"] = call_id
+                function = call.get("function") or {}
+                expected.append((call_id, str(function.get("name") or "")))
+                normalized_calls.append(call)
+            normalized["tool_calls"] = normalized_calls
+            repaired.append(normalized)
+            index += 1
+
+            expected_ids = {call_id for call_id, _ in expected}
+            seen: set[str] = set()
+            while (index < len(self.messages)
+                   and self.messages[index].get("role") == "tool"):
+                tool_message = dict(self.messages[index])
+                call_id = str(tool_message.get("tool_call_id") or "")
+                if call_id in expected_ids and call_id not in seen:
+                    repaired.append(tool_message)
+                    seen.add(call_id)
+                else:
+                    dropped.append(call_id)
+                index += 1
+
+            names = dict(expected)
+            for call_id, _ in expected:
+                if call_id in seen:
+                    continue
+                envelope = self._error_envelope(
+                    names[call_id],
+                    "工具调用在上次执行中中断，副驾已自动补全失败结果；"
+                    "请基于当前状态继续。",
+                )
+                repaired.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": json.dumps(envelope, ensure_ascii=False),
+                })
+                inserted.append(call_id)
+
+        if inserted or dropped:
+            self.messages = repaired
+            self._log({
+                "type": "history_repaired",
+                "inserted_tool_call_ids": inserted,
+                "dropped_tool_call_ids": dropped,
+            })
 
     @staticmethod
     def _error_envelope(tool: str, message: str) -> dict[str, Any]:
@@ -172,15 +345,62 @@ class PiAgent:
     # ---------------------------------------------------------------- 留痕
 
     def _append(self, message: dict[str, Any]) -> None:
+        event = {"type": "message", "role": message.get("role"),
+                 "content": _summarize_content(message)}
+        if message.get("tool_calls"):
+            event["tool_calls"] = [
+                {
+                    "id": call.get("id"),
+                    "name": (call.get("function") or {}).get("name"),
+                }
+                for call in message["tool_calls"]
+            ]
+        if message.get("role") == "tool":
+            event["tool_call_id"] = message.get("tool_call_id")
+        self._log(event)
         self.messages.append(message)
-        self._log({"type": "message", "role": message.get("role"),
-                   "content": _summarize_content(message)})
 
     def _log(self, event: Mapping[str, Any]) -> None:
         record = {"at": datetime.now(timezone.utc).isoformat(), **event}
         with open(self._session_path, "a", encoding="utf-8",
                   newline="\n") as fp:
             fp.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _assistant_message(result: ChatResult) -> dict[str, Any]:
+    """Build one protocol-complete assistant message from a normalized result."""
+    message = dict(result.raw_message or {})
+    message["role"] = "assistant"
+    message["content"] = result.content
+    if result.tool_calls:
+        message["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(
+                        call.arguments, ensure_ascii=False, default=str),
+                },
+            }
+            for call in result.tool_calls
+        ]
+    else:
+        message.pop("tool_calls", None)
+    return message
+
+
+def _serialize_tool_result(
+    call: ToolCallRequest,
+    envelope: Mapping[str, Any],
+) -> str:
+    """Always produce a tool content string, even for a broken tool envelope."""
+    try:
+        return json.dumps(envelope, ensure_ascii=False)
+    except Exception as exc:
+        fallback = PiAgent._error_envelope(
+            call.name, f"工具结果序列化失败: {type(exc).__name__}: {exc}")
+        return json.dumps(fallback, ensure_ascii=False)
 
 
 def _summarize_content(message: Mapping[str, Any]) -> Any:

@@ -256,6 +256,34 @@ def test_validate_plan_requires_basis_after_first_round():
     assert result is None and "basis" in error
 
 
+def test_validate_plan_requires_real_basis_when_resuming_goal():
+    plan = {"statement": "继续优化", "view_id": "VIEW-0001", "basis": [],
+            "model": {"category": "data", "estimator": "ridge"}}
+    evidence = {
+        "basis_required": True,
+        "basis_candidates": [{"id": "EXP-0001", "kind": "experiment"}],
+    }
+    result, error = validate_plan(plan, _context(), 0, evidence=evidence)
+    assert result is None and "EXP-0001" in error
+
+    plan["basis"] = ["EXP-9999"]
+    result, error = validate_plan(plan, _context(), 0, evidence=evidence)
+    assert result is None and "不可用" in error
+
+    plan["basis"] = ["EXP-0001"]
+    result, error = validate_plan(plan, _context(), 0, evidence=evidence)
+    assert error is None and result["basis"] == ["EXP-0001"]
+
+
+def test_validate_plan_rejects_basis_when_catalog_is_empty():
+    plan = {"statement": "首轮", "view_id": "VIEW-0001",
+            "basis": ["EXP-9999"],
+            "model": {"category": "data", "estimator": "ridge"}}
+    evidence = {"basis_required": False, "basis_candidates": []}
+    result, error = validate_plan(plan, _context(), 0, evidence=evidence)
+    assert result is None and "EXP-9999" in error
+
+
 def test_validate_plan_accepts_hybrid_with_physics_and_residual():
     plan = {"statement": "物理主干 + 残差", "view_id": "VIEW-0001",
             "basis": ["EXP-0001"],

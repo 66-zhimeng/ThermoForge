@@ -441,6 +441,58 @@ class ResearchLedger:
         return [self._read_entity(e)
                 for e in finding["refs"].get("supported_by", [])]
 
+    def goal_basis_evidence(self, goal_id: str) -> dict[str, Any]:
+        """Return valid evidence IDs for the next hypothesis of a goal.
+
+        ``requires_basis`` follows the same goal-global rule as
+        :meth:`create_hypothesis`: once a goal has any hypothesis, every later
+        hypothesis must cite an existing experiment or finding. The compact
+        candidate summaries are safe to pass to a planner prompt.
+        """
+        self._require(goal_id, "RG-")
+        entities = self._entities()
+        hypotheses = [
+            entity for entity in entities
+            if entity["kind"] == "hypothesis"
+            and entity["refs"].get("goal_id") == goal_id
+        ]
+        hypothesis_ids = {h["id"] for h in hypotheses}
+        experiments = [
+            entity for entity in entities
+            if entity["kind"] == "experiment"
+            and entity["refs"].get("goal_id") == goal_id
+        ]
+        experiment_ids = {exp["id"] for exp in experiments}
+        findings = [
+            entity for entity in entities
+            if entity["kind"] == "finding"
+            and (
+                entity["refs"].get("hypothesis_id") in hypothesis_ids
+                or bool(experiment_ids.intersection(
+                    entity["refs"].get("supported_by", [])))
+            )
+        ]
+        candidates = [
+            {
+                "id": exp["id"],
+                "kind": "experiment",
+                "status": exp["status"],
+                "hypothesis_id": exp["refs"].get("hypothesis_id"),
+            }
+            for exp in experiments
+        ]
+        candidates.extend({
+            "id": finding["id"],
+            "kind": "finding",
+            "status": finding["status"],
+            "statement": finding.get("statement"),
+            "supported_by": list(finding["refs"].get("supported_by", [])),
+        } for finding in findings)
+        return {
+            "requires_basis": bool(hypotheses),
+            "candidates": candidates,
+        }
+
     def list_goals(self) -> list[dict[str, Any]]:
         """列出全部 Research Goal 实体（工具层 tf_research_status 用）。"""
         return self._entities("goal")

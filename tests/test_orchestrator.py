@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from thermoforge_research.orchestrator import (
@@ -21,6 +23,7 @@ from thermoforge_research.tools import (
     tf_dataset_materialize,
     tf_goal_create,
 )
+from thermoforge_webui.services.planner import PlannerContext, make_planner
 
 from phase2_helpers import FEATURES, TARGET, view_definition
 from phase34_helpers import make_ctx
@@ -82,6 +85,57 @@ def test_stop_acceptance_met(tmp_path):
                      "EXPERIMENT_RUNNING", "RESULT_ANALYSIS", "MODEL_REVIEW",
                      "PUBLISH"):
         assert expected in states
+
+
+def test_web_planner_resumes_goal_with_historical_basis(tmp_path):
+    ctx, ref = make_ctx(tmp_path)
+    goal_id = _goal(ctx)
+    view_id = _view(ctx, ref)
+    old_hypothesis = ctx.ledger.create_hypothesis(
+        goal_id, "historical hypothesis", actor=ctx.actor)
+    old_experiment_id = ctx.ledger.allocator.allocate("EXP-")
+    ctx.ledger.register_experiment({
+        "experiment_id": old_experiment_id,
+        "goal_id": goal_id,
+        "hypothesis_id": old_hypothesis["id"],
+        "dataset_view": view_id,
+    }, actor=ctx.actor)
+    old_finding = ctx.ledger.create_finding(
+        "historical finding", actor=ctx.actor,
+        supported_by=[old_experiment_id],
+        hypothesis_id=old_hypothesis["id"])
+
+    prompts = []
+
+    def ask(system, user):
+        prompts.append(user)
+        return json.dumps({
+            "statement": "continue from historical evidence",
+            "basis": [old_finding["id"]],
+            "view_id": view_id,
+            "model": {
+                "category": "data",
+                "estimator": "ridge",
+                "hyperparameters": {"alpha": 0.5},
+            },
+        })
+
+    goal = ctx.ledger.get(goal_id)
+    planner_context = PlannerContext(
+        goal={"id": goal_id, **goal["definition"]},
+        views=[ctx.ledger.get(view_id)],
+        dataset_ref=ref,
+    )
+    orchestrator = ResearchOrchestrator(
+        ctx, goal_id, make_planner(ask, planner_context),
+        dataset_ref=ref, max_rounds=1)
+    result = orchestrator.run()
+
+    assert result["ok"] is True
+    assert planner_context.traces[0].round_index == 0
+    assert old_experiment_id in prompts[0]
+    assert old_finding["id"] in prompts[0]
+    assert planner_context.traces[0].plan["basis"] == [old_finding["id"]]
 
 
 def test_stop_budget_exhausted_tfx906(tmp_path):

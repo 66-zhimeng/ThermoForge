@@ -115,6 +115,11 @@ def test_reference_queries(ledger):
     # 哪些实验支持某个结论（§8）
     supporters = ledger.experiments_supporting(finding["id"])
     assert [e["id"] for e in supporters] == [exp_id]
+    basis = ledger.goal_basis_evidence(goal["id"])
+    assert basis["requires_basis"] is True
+    assert {item["id"] for item in basis["candidates"]} == {
+        exp_id, finding["id"],
+    }
     # 哪些假设尚未验证（§8）
     assert [h["id"] for h in ledger.unverified_hypotheses()] == [hyp["id"]]
     ledger.transition(hyp["id"], "supported", reason="F-0001 支持",
@@ -160,6 +165,14 @@ def test_hypothesis_requires_evidence_after_first(ledger):
     with pytest.raises(ValueError, match="basis"):
         ledger.create_hypothesis(goal["id"], "无理由的第二个假设",
                                  actor=ACTOR)
+
+
+def test_new_goal_does_not_require_basis(ledger):
+    goal = ledger.create_goal("fresh goal", actor=ACTOR)
+    assert ledger.goal_basis_evidence(goal["id"]) == {
+        "requires_basis": False,
+        "candidates": [],
+    }
 
 
 def test_register_experiment_requires_existing_refs(ledger):

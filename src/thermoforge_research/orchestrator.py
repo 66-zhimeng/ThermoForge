@@ -131,7 +131,8 @@ class ResearchOrchestrator:
         if stop:
             return self._finish(stop)
 
-        for round_index in range(1, self.max_rounds + 1):
+        # Planner indices are zero-based. UI/event records remain one-based.
+        for round_index in range(self.max_rounds):
             stop = self._check_budget(definition)
             if stop:
                 return self._finish(stop)
@@ -288,6 +289,7 @@ class ResearchOrchestrator:
         self, round_index: int, definition: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         ledger = self.ctx.ledger
+        round_number = round_index + 1
         evidence = self._evidence()
         plan = self.planner(round_index, evidence)
         if plan is None:
@@ -301,7 +303,7 @@ class ResearchOrchestrator:
 
         ledger.transition(
             self.goal_id, "HYPOTHESIS_GENERATION",
-            reason=f"第 {round_index} 轮假设生成", actor=self.ctx.actor,
+            reason=f"第 {round_number} 轮假设生成", actor=self.ctx.actor,
         )
         hyp_env = tf_hypothesis_create(
             self.ctx, self.goal_id, str(plan["statement"]),
@@ -309,13 +311,13 @@ class ResearchOrchestrator:
         )
         if not hyp_env["ok"]:
             return self._record_failure(
-                round_index, None, None,
+                round_number, None, None,
                 f"假设创建失败: {hyp_env['summary'].get('error')}",
             )
 
         ledger.transition(
             self.goal_id, "EXPERIMENT_DESIGN",
-            reason=f"第 {round_index} 轮实验设计", actor=self.ctx.actor,
+            reason=f"第 {round_number} 轮实验设计", actor=self.ctx.actor,
         )
         exp_doc = {
             "goal_id": self.goal_id,
@@ -336,14 +338,14 @@ class ResearchOrchestrator:
         plan_env = tf_experiment_plan(self.ctx, exp_doc)
         if not plan_env["ok"]:
             return self._record_failure(
-                round_index, hyp_env["id"], None,
+                round_number, hyp_env["id"], None,
                 f"实验计划登记失败: {plan_env['summary'].get('error')}",
             )
 
         exp_id = plan_env["id"]
         ledger.transition(
             self.goal_id, "EXPERIMENT_RUNNING",
-            reason=f"第 {round_index} 轮实验执行: {exp_id}",
+            reason=f"第 {round_number} 轮实验执行: {exp_id}",
             actor=self.ctx.actor, outputs=[exp_id],
         )
         run_env = tf_experiment_run(
@@ -352,12 +354,12 @@ class ResearchOrchestrator:
         )
         ledger.transition(
             self.goal_id, "RESULT_ANALYSIS",
-            reason=f"第 {round_index} 轮结果分析: {exp_id}",
+            reason=f"第 {round_number} 轮结果分析: {exp_id}",
             actor=self.ctx.actor, inputs=[exp_id],
         )
         if not run_env["ok"]:
             return self._record_failure(
-                round_index, hyp_env["id"], exp_id,
+                round_number, hyp_env["id"], exp_id,
                 f"实验失败: {run_env['summary'].get('error_code')}",
                 duration=run_env["summary"].get("duration_seconds"),
             )
@@ -365,14 +367,14 @@ class ResearchOrchestrator:
         summary = run_env["summary"]
         primary = self._primary_metrics(summary)
         finding = ledger.create_finding(
-            f"第 {round_index} 轮 {exp_id}: "
+            f"第 {round_number} 轮 {exp_id}: "
             f"主测试面指标 {primary or '无可用指标'}",
             actor=self.ctx.actor, supported_by=[exp_id],
             hypothesis_id=hyp_env["id"],
             reason="编排器结构化发现（research-loop §3）",
         )
         record = {
-            "round": round_index,
+            "round": round_number,
             "hypothesis_id": hyp_env["id"],
             "experiment_id": exp_id,
             "finding_id": finding["id"],
@@ -385,7 +387,7 @@ class ResearchOrchestrator:
 
         ledger.transition(
             self.goal_id, "MODEL_REVIEW",
-            reason=f"第 {round_index} 轮模型评审: {exp_id}",
+            reason=f"第 {round_number} 轮模型评审: {exp_id}",
             actor=self.ctx.actor, inputs=[exp_id, finding["id"]],
         )
         acceptance = definition.get("acceptance") or {}
@@ -503,11 +505,14 @@ class ResearchOrchestrator:
 
     def _evidence(self) -> dict[str, Any]:
         """供 planner 的证据摘要（仅信封级信息，无原始数据）。"""
+        basis = self.ctx.ledger.goal_basis_evidence(self.goal_id)
         return {
             "goal_id": self.goal_id,
             "rounds": [dict(r) for r in self.rounds],
             "best_cvrmse": self.best_cvrmse,
             "no_gain_streak": self._no_gain_streak,
+            "basis_required": basis["requires_basis"],
+            "basis_candidates": basis["candidates"],
         }
 
     def _stop(

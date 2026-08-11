@@ -291,7 +291,7 @@ def test_orchestrator_gate_pass_allows_modeling(tmp_path):
     orch = ResearchOrchestrator(ctx, goal["id"], planner, dataset_ref=ref)
     result = orch.run()
     assert result["summary"]["stop"]["reason"] == "no_information_gain"
-    assert calls == [1]  # 到达 planner，门禁已通过
+    assert calls == [0]  # 到达 planner，门禁已通过（planner 使用零基索引）
     states = [t["to"] for t in ctx.ledger.transitions_of(goal["id"])]
     assert "MODELABILITY_ASSESSMENT" in states
     assert "BASELINE_MODELING" in states

@@ -91,6 +91,131 @@ def test_function_calling_loop(tmp_path):
     assert any(m.get("role") == "tool" for m in second)
 
 
+def test_tool_round_limit_disables_tools_and_requests_final_answer(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    stub = StubClient([
+        tool_call("tf_dataset_list", {}, call_id="call-1"),
+        tool_call("tf_dataset_list", {}, call_id="call-2"),
+        final("工具预算已用完；根据现有结果，当前有一个数据集。"),
+    ])
+    agent = PiAgent(_config(max_tool_rounds=2), ctx, client=stub,
+                    session_dir=tmp_path / "research")
+
+    answer = agent.ask("查清楚数据集")
+
+    assert "当前有一个数据集" in answer
+    assert len(_tool_messages(agent)) == 2
+    assert stub.calls[2]["tools"] is None
+    assert stub.calls[2]["messages"][-1]["role"] == "system"
+    assert "不要再调用任何工具" in stub.calls[2]["messages"][-1]["content"]
+
+
+def test_tool_round_limit_closes_unexpected_finalizer_tool_call(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    stub = StubClient([
+        tool_call("tf_dataset_list", {}, call_id="call-1"),
+        tool_call("tf_experiment_run", {"experiment_id": "EXP-9999"},
+                  call_id="call-2"),
+    ])
+    agent = PiAgent(_config(max_tool_rounds=1), ctx, client=stub,
+                    session_dir=tmp_path / "research")
+
+    answer = agent.ask("一直调用工具")
+
+    assert "请继续追问" in answer
+    limit_result = json.loads(_tool_messages(agent)[-1]["content"])
+    assert limit_result["status"] == "LIMIT_REACHED"
+    assert _tool_messages(agent)[-1]["tool_call_id"] == "call-2"
+    # Even a non-compliant endpoint leaves protocol-complete history.
+    assert [message["role"] for message in agent.messages[-3:]] == [
+        "assistant", "tool", "assistant",
+    ]
+
+
+def test_multiple_tool_calls_all_receive_matching_results(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    calls = [
+        ToolCallRequest("call-1", "tf_dataset_list", {}),
+        ToolCallRequest("call-2", "tf_dataset_list", {}),
+    ]
+    stub = StubClient([
+        # Deliberately omit raw tool_calls: PiAgent must reconstruct them from
+        # the normalized requests before the next Chat Completions call.
+        ChatResult(content=None, tool_calls=calls,
+                   raw_message={"role": "assistant", "content": None}),
+        final("done"),
+    ])
+    agent = PiAgent(_config(), ctx, client=stub,
+                    session_dir=tmp_path / "research")
+
+    assert agent.ask("list twice") == "done"
+    messages = stub.calls[1]["messages"]
+    assistant_index = next(
+        i for i, message in enumerate(messages)
+        if message.get("role") == "assistant" and message.get("tool_calls"))
+    assistant = messages[assistant_index]
+    tool_messages = messages[assistant_index + 1:assistant_index + 3]
+    assert [call["id"] for call in assistant["tool_calls"]] == [
+        "call-1", "call-2",
+    ]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call-1", "call-2",
+    ]
+
+
+def test_unexpected_tool_exception_is_returned_as_tool_result(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    stub = StubClient([tool_call("explode", {}), final("recovered")])
+    agent = PiAgent(_config(), ctx, client=stub,
+                    session_dir=tmp_path / "research")
+
+    def explode(_ctx):
+        raise RuntimeError("boom")
+
+    agent.dispatch["explode"] = explode
+    assert agent.ask("trigger") == "recovered"
+    tool_message = _tool_messages(agent)[0]
+    envelope = json.loads(tool_message["content"])
+    assert envelope["ok"] is False
+    assert "RuntimeError: boom" in envelope["summary"]["error"]
+    assert tool_message["tool_call_id"] == "call-1"
+
+
+def test_next_question_repairs_orphaned_tool_call_history(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    stub = StubClient([final("history repaired")])
+    agent = PiAgent(_config(), ctx, client=stub,
+                    session_dir=tmp_path / "research")
+    agent.messages.extend([
+        {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+                {"id": "call-1", "type": "function",
+                 "function": {"name": "one", "arguments": "{}"}},
+                {"id": "call-2", "type": "function",
+                 "function": {"name": "two", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "{}"},
+        # This user message was appended by the turn that received HTTP 400.
+        {"role": "user", "content": "previous retry"},
+    ])
+
+    assert agent.ask("retry now") == "history repaired"
+    messages = stub.calls[0]["messages"]
+    assistant_index = next(
+        i for i, message in enumerate(messages)
+        if message.get("role") == "assistant" and message.get("tool_calls"))
+    repaired_tools = messages[assistant_index + 1:assistant_index + 3]
+    assert [message["tool_call_id"] for message in repaired_tools] == [
+        "call-1", "call-2",
+    ]
+    repaired_envelope = json.loads(repaired_tools[1]["content"])
+    assert repaired_envelope["ok"] is False
+    assert messages[assistant_index + 3]["content"] == "previous retry"
+
+
 def test_multi_turn_history(tmp_path):
     ctx, _ = make_ctx(tmp_path, n_steps=100)
     stub = StubClient([final("回答一"), final("回答二")])
@@ -153,6 +278,27 @@ def test_schema_generation_and_whitelist():
     assert params["properties"]["n"] == {"type": "integer"}
     assert params["properties"]["variable_ids"]["type"] == "array"
     assert sample["function"]["description"]  # docstring 首段
+
+
+def test_experiment_plan_schema_exposes_contract_and_model_catalog():
+    schema = tool_schema(
+        "tf_experiment_plan", TOOL_REGISTRY["tf_experiment_plan"])
+    definition = schema["function"]["parameters"]["properties"]["definition"]
+
+    assert "experiment_id" not in definition["properties"]
+    assert set(definition["required"]) >= {
+        "goal_id", "hypothesis_id", "dataset_view", "model", "target",
+        "validation", "metrics", "runtime",
+    }
+    model = definition["properties"]["model"]
+    assert model["properties"]["estimator"]["enum"] == ["ridge", "linear"]
+    assert model["properties"]["physics"]["enum"] == [
+        "cooling_balance_v1", "cooling_balance_v2",
+    ]
+    assert model["properties"]["residual"]["enum"] == ["xgboost"]
+    temporal = definition["properties"]["validation"]["properties"][
+        "temporal_split"]
+    assert temporal["required"] == ["train", "validate", "test"]
 
 
 # ---------------------------------------------------------------- 审批交互

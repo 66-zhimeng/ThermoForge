@@ -6,11 +6,13 @@ docstring 首段。`ctx`（ToolContext）参数不暴露给模型。
 
 from __future__ import annotations
 
+import copy
 import inspect
 import types
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
+from thermoforge_core.contracts.experiment import Experiment
 from thermoforge_research.tools import TOOL_REGISTRY
 
 # 审批元工具：human-only 工具不直接暴露，模型通过它发起审批请求，
@@ -40,6 +42,78 @@ HUMAN_APPROVAL_SCHEMA = {
         },
     },
 }
+
+SUPPORTED_DATA_ESTIMATORS = ("ridge", "linear")
+SUPPORTED_PHYSICS_MODELS = ("cooling_balance_v1", "cooling_balance_v2")
+SUPPORTED_HYBRID_RESIDUALS = ("xgboost",)
+
+
+def _inline_local_refs(value: Any, definitions: Mapping[str, Any]) -> Any:
+    """Inline Pydantic's local ``#/$defs`` references for tool compatibility."""
+    if isinstance(value, list):
+        return [_inline_local_refs(item, definitions) for item in value]
+    if not isinstance(value, dict):
+        return value
+    ref = value.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        name = ref.rsplit("/", 1)[-1]
+        resolved = copy.deepcopy(definitions[name])
+        resolved.update({key: item for key, item in value.items()
+                         if key != "$ref"})
+        return _inline_local_refs(resolved, definitions)
+    return {
+        key: _inline_local_refs(item, definitions)
+        for key, item in value.items()
+        if key != "$defs"
+    }
+
+
+def _experiment_definition_schema() -> dict[str, Any]:
+    """Experiment contract specialized for calls made by an LLM.
+
+    The Pydantic contract intentionally accepts estimator names as strings;
+    execution supports a smaller closed catalog.  Expose that catalog here so
+    the Copilot cannot burn tool rounds guessing MLP/LightGBM names.  EXP-ID is
+    omitted because ``tf_experiment_plan`` allocates it itself.
+    """
+    raw = Experiment.model_json_schema(by_alias=True)
+    schema = _inline_local_refs(raw, raw.get("$defs", {}))
+    properties = schema["properties"]
+    properties.pop("experiment_id", None)
+    schema["required"] = [
+        name for name in schema.get("required", [])
+        if name != "experiment_id"
+    ]
+
+    model = properties["model"]
+    model["description"] = (
+        "可执行模型闭集：category=data 时 estimator 只能是 ridge/linear；"
+        "category=physics 时 physics 只能是 cooling_balance_v1/v2；"
+        "category=hybrid 时必须同时给 physics 和 residual=xgboost。"
+        "当前不支持 mlp、neural_network、lightgbm 或纯 data xgboost。"
+    )
+    model_properties = model["properties"]
+    model_properties["estimator"] = {
+        "type": "string",
+        "enum": list(SUPPORTED_DATA_ESTIMATORS),
+        "description": "仅用于 category=data。",
+    }
+    model_properties["physics"] = {
+        "type": "string",
+        "enum": list(SUPPORTED_PHYSICS_MODELS),
+        "description": "用于 category=physics 或 hybrid。",
+    }
+    model_properties["residual"] = {
+        "type": "string",
+        "enum": list(SUPPORTED_HYBRID_RESIDUALS),
+        "description": "仅用于 category=hybrid。",
+    }
+    model_properties["hyperparameters"]["description"] = (
+        "data: alpha；physics: rated_capacity_kw、rated_power_kw、inputs；"
+        "hybrid 还可用 n_estimators、max_depth、learning_rate、subsample、"
+        "colsample_bytree、monotone_constraints。"
+    )
+    return schema
 
 
 def _json_type(annotation: Any) -> dict[str, Any]:
@@ -76,8 +150,11 @@ def tool_schema(name: str, fn: Callable) -> dict[str, Any]:
     for param_name, param in signature.parameters.items():
         if param_name == "ctx":
             continue
-        properties[param_name] = _json_type(
-            hints.get(param_name, param.annotation))
+        if name == "tf_experiment_plan" and param_name == "definition":
+            properties[param_name] = _experiment_definition_schema()
+        else:
+            properties[param_name] = _json_type(
+                hints.get(param_name, param.annotation))
         if param.default is inspect.Parameter.empty:
             required.append(param_name)
     return {
