@@ -23,6 +23,7 @@ model_types:
   data: true
   hybrid: true
 acceptance:
+  evaluated_on: auto      # auto | C | A | validate | rolling_cv
   mape_max: 0.05
   physics_violation_rate_max: 0.001
   inference_latency_ms_max: 5
@@ -30,6 +31,15 @@ acceptance:
 ```
 
 目标还应记录计算预算、最长研究时间、最大实验数和需要人工审批的动作。
+
+`evaluated_on` 指定**门槛判在哪个口径上**，默认 `auto`（C→A→validate，§4.3）。
+它不是修饰项：面 A 是「训练截止后隔一段再考」，衡量的是**模型放着不重训
+会退化多少**；`rolling_cv` 每折用最近数据重训，衡量的是**定期重训下的精度**。
+同一个模型在两者上可以差数倍（实测冷机 hybrid：面 A 15.9%、滚动 4.9%）。
+
+**门槛从哪个口径的基线推出来，就必须判在哪个口径上**，否则是拿甲的尺子量乙。
+钉死判据面后**不回退**：该面没有指标即发布失败（`TFM-1003`），
+悄悄换一个面等于把门槛判在了另一件事上。
 
 `candidate_inputs` 是**封闭白名单**（[DD-16](./design-decisions.md)）：建模只允许使用其中列出的变量计算 `target`，Agent 不得引入物模型中的其他变量——即使它们在统计上表现更好（防泄漏，见 [data-survey §F1](./data-survey.md) 中 `load` 与电流百分比的重标定关系）。白名单条目可以来自不同设备对象（跨设备取数），以两层命名 `object.variable` 引用，例如用 `cooling_tower.supply_temp` 预测 `chiller.input_power`。新增或移除变量属于 Research Goal 变更，须留痕并记录理由。
 
