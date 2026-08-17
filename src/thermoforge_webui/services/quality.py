@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from thermoforge_data.preprocess import RULE_LIBRARY
+from ..envelope import entries
 
 Severity = Literal["blocker", "warning", "info"]
 
@@ -183,7 +184,7 @@ def from_profile(profile: dict[str, Any]) -> list[Finding]:
 
     high_missing = [
         (str(v.get("variable_id")), float(v.get("missing_rate") or 0.0))
-        for v in profile.get("variables") or []
+        for v in entries(profile.get("variables"))
         if float(v.get("missing_rate") or 0.0) >= MISSING_RATE_ALERT]
     if high_missing:
         high_missing.sort(key=lambda pair: pair[1], reverse=True)
@@ -204,7 +205,8 @@ def from_profile(profile: dict[str, Any]) -> list[Finding]:
             evidence={"variables": high_missing},
         ))
 
-    constant = [str(v.get("variable_id")) for v in profile.get("variables") or []
+    constant = [str(v.get("variable_id"))
+                for v in entries(profile.get("variables"))
                 if v.get("constant")]
     if constant:
         findings.append(Finding(

@@ -82,6 +82,11 @@
       "returns_id": "RG-NNNN"
     },
     {
+      "name": "tf_goal_get",
+      "entry": "thermoforge_research.tools:tf_goal_get",
+      "side_effect": false
+    },
+    {
       "name": "tf_research_status",
       "entry": "thermoforge_research.tools:tf_research_status",
       "side_effect": false

@@ -1,0 +1,150 @@
+# 冷机建模视图物模型（scripts/build_modeling_datasets.py 产出）。
+#
+# 这是「建模就绪」的对象：每台冷机每个 A 模式（仅冷机运行）时刻一行，
+# 标签与特征都已按 docs/data-processing-handbook.md §5.2/§5.3 的口径算好，
+# 让智能体不必再重做工况辨识与冷量拆分。
+#
+# source_kind 在数据集变量上标注：由测点直读的为 measured，经公式算出的为
+# estimated。`cooling_load` / `plr` / `lift` 属后者 —— 它们由冷却侧支路能量
+# 平衡导出，可作候选输入，但不得反过来用功耗去预测（DD-16）。
+contract: TFOM
+contract_version: "1.0"
+model_id: chiller_model
+version: "1.0"
+properties:
+  power:
+    name_zh: 输入功率
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 2000.0
+  cooling_load:
+    name_zh: 制冷量
+    unit: kW
+    dtype: float
+    role: state
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 12000.0
+  plr:
+    name_zh: 负荷率
+    unit: "1"
+    dtype: float
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 1.5
+  t_evap_out:
+    name_zh: 蒸发器出水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 0.0
+    max_value: 30.0
+  t_cond_in:
+    name_zh: 冷凝器进水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 0.0
+    max_value: 45.0
+  lift:
+    name_zh: 提升温差
+    unit: K
+    dtype: float
+    role: state
+    quantity_kind: temperature_difference
+    min_value: 0.0
+    max_value: 40.0
+  t_cw_tower_out:
+    name_zh: 冷却塔出水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 0.0
+    max_value: 45.0
+  t_chw_return:
+    name_zh: 冷冻水回水温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 0.0
+    max_value: 35.0
+  f_cw_branch:
+    name_zh: 支路冷却水流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 5000.0
+  f_chw_branch:
+    name_zh: 支路冷冻水流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 5000.0
+  cwp_frequency:
+    name_zh: 冷却水泵频率
+    unit: Hz
+    dtype: float
+    role: state
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  chwp_frequency:
+    name_zh: 冷冻水泵频率
+    unit: Hz
+    dtype: float
+    role: state
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  hx_run_count:
+    name_zh: 同时运行的板换台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  run_count:
+    name_zh: 运行冷机台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  ambient_t:
+    name_zh: 环境温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -40.0
+    max_value: 60.0
+  ambient_h:
+    name_zh: 环境相对湿度
+    unit: "%"
+    dtype: float
+    role: state
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
+  runtime_accum:
+    name_zh: 累计运行时长
+    unit: s
+    dtype: float
+    role: state
+    quantity_kind: time
+    min_value: 0.0
+    max_value: 1000000.0

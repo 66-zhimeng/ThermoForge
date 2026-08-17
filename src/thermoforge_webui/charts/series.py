@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ..services.experiments import ExperimentDetail, ExperimentSummary
+from ..envelope import entries
 
 # 预测时序图的点数上限。测试面一般一两千点，训练面上万，浏览器会卡。
 PREDICTION_MAX_POINTS = 3000
@@ -304,7 +305,7 @@ def prepare_missing_rates(profile: dict[str, Any],
                           *, top: int = 25) -> MissingRates | None:
     """缺失率排行（只画最高的若干条，宽表变量多了图会挤成一团）。"""
     rows = [(str(v.get("variable_id")), float(v.get("missing_rate") or 0.0))
-            for v in profile.get("variables") or []]
+            for v in entries(profile.get("variables"))]
     if not rows:
         return None
     rows.sort(key=lambda pair: pair[1], reverse=True)

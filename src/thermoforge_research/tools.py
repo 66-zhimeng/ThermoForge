@@ -4,7 +4,7 @@ architecture §6 工具清单的确定性实现，薄封装 Phase 1/2/4 能力�
 
 - 数据：tf_dataset_import / list / get / schema / profile / query /
   sample / materialize / compare
-- 研究：tf_goal_create / tf_research_status / tf_hypothesis_create /
+- 研究：tf_goal_create / tf_goal_get / tf_research_status / tf_hypothesis_create /
   tf_experiment_plan / tf_experiment_run / tf_experiment_get /
   tf_model_compare / tf_model_publish
 
@@ -72,7 +72,7 @@ from thermoforge_research.envelope import (
     make_envelope,
 )
 from thermoforge_research.ledger import ResearchLedger
-from thermoforge_research.runner import run_experiment
+from thermoforge_research.runner import current_environment_lock, run_experiment
 from thermoforge_research.splits import DEFAULT_EMBARGO_SECONDS
 from thermoforge_runtime.errors import ModelRegistryError
 from thermoforge_runtime.package import boundary_rows, build_model_package
@@ -107,10 +107,13 @@ class ToolContext:
         tfom_registry: TfomRegistry | None = None,
         actor: str = "agent",
     ):
-        self.vault_root = Path(vault_root)
-        self.research_root = Path(research_root)
+        # 一律解析为绝对路径：实验在子进程里跑，且 cwd 会被切到实验目录，
+        # 相对根会在子进程内被二次解析成 `<exp_dir>/<relative_root>/...`。
+        self.vault_root = Path(vault_root).resolve()
+        self.research_root = Path(research_root).resolve()
         self.models_root = (
-            Path(models_root) if models_root else self.research_root.parent / "models"
+            Path(models_root).resolve() if models_root
+            else self.research_root.parent / "models"
         )
         self.tfom_registry = tfom_registry
         self.actor = actor
@@ -755,6 +758,61 @@ def tf_goal_create(
     ))
 
 
+def tf_goal_get(ctx: ToolContext, goal_id: str) -> dict[str, Any]:
+    """读取 Research Goal 的完整定义（**含 candidate_inputs 白名单原文**）。
+
+    没有这个工具，Agent 就无法知道 DD-16 白名单里到底有哪些条目 —— 只能靠猜，
+    而猜错会在 `tf_experiment_plan` 阶段被机器拒绝，且拒绝信息只说"不在白名单内"，
+    不说白名单是什么。这是一条真实踩出来的死路（agent 会话
+    `research/agent_sessions/20260814T014407*.jsonl`）。
+
+    白名单条目有两种写法，语义不同：
+
+    - 裸 `property_code`（如 `cooling_load`）：范围内任意对象的该属性都允许
+    - `object_id.property_code`（如 `CH01.cooling_load`）：仅该对象的该属性允许，
+      **且要求实验视图的对象范围包含该对象**
+
+    实验的 `features` 一律填 `property_code`。若白名单用了带对象的写法而视图是
+    多对象长表，校验会失败 —— 此时应改用裸写法，或把视图过滤到该对象。
+    """
+    tool = "tf_goal_get"
+    try:
+        entity = ctx.ledger.get(goal_id)
+    except (KeyError, ResearchError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs={"goal_id": goal_id})
+    if entity is None:
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="NOT_FOUND", inputs={"goal_id": goal_id},
+            summary={"error": f"目标不存在: {goal_id}"},
+        ))
+    definition = dict(entity.get("definition") or {})
+    entries = [str(e) for e in (definition.get("candidate_inputs") or [])]
+    scoped = sorted({e.split(".", 1)[0] for e in entries if "." in e})
+    return _finish(ctx, make_envelope(
+        tool, id=goal_id, status="OK", inputs={"goal_id": goal_id},
+        summary={
+            "goal_id": goal_id,
+            "name": definition.get("name") or entity.get("name"),
+            "status": entity.get("status"),
+            "target": definition.get("target"),
+            "object_model": definition.get("object_model"),
+            "purpose": definition.get("purpose"),
+            "description": definition.get("description"),
+            "candidate_inputs": entries,
+            "whitelist_style": ("object_scoped" if scoped
+                                else "bare_property" if entries else "empty"),
+            "whitelist_objects": scoped,
+            "acceptance": definition.get("acceptance"),
+            "model_types": definition.get("model_types"),
+            "approval_required": definition.get("approval_required") or [],
+            "budgets": {
+                k: definition.get(k) for k in
+                ("max_experiments", "max_duration_days", "compute_budget_hours")
+            },
+        },
+    ))
+
+
 def tf_research_status(
     ctx: ToolContext,
     goal_id: str | None = None,
@@ -829,6 +887,26 @@ def tf_hypothesis_create(
     ))
 
 
+def _fill_environment_lock(doc: dict[str, Any]) -> None:
+    """`runtime.environment_lock` 缺省时填当前机器的真指纹。
+
+    环境指纹是机器算出来的（`current_environment_lock()`），调用方无从得知。
+    以前它是必填，于是 Agent 只能编一个（实测编出 `sim-2026-08-default`），
+    每次 run 都撞 TFX-901 —— 一个本该防「跨机复现」的门禁，退化成了对
+    「猜不中哈希」的惩罚。留空即声明「就在本机跑」，是唯一诚实的默认值。
+
+    刻意不补 `random_seed`：种子是**研究决策**，必须由调用方明确写下，
+    缺了就该报 TFX-902。两者看着都在 `runtime` 里，性质完全不同。
+    """
+    runtime = doc.get("runtime")
+    if not isinstance(runtime, Mapping):
+        return
+    if str(runtime.get("environment_lock") or "").strip():
+        return
+    doc["runtime"] = {**runtime,
+                      "environment_lock": current_environment_lock()[0]}
+
+
 def tf_experiment_plan(
     ctx: ToolContext,
     definition: Mapping[str, Any],
@@ -837,6 +915,7 @@ def tf_experiment_plan(
     tool = "tf_experiment_plan"
     doc = dict(definition)
     doc.setdefault("experiment_id", ctx.ledger.allocator.allocate("EXP-"))
+    _fill_environment_lock(doc)
     try:
         exp = Experiment(**doc)
         # DD-16 封闭白名单的机器校验：View 特征必须 ⊆ candidate_inputs，
@@ -873,6 +952,8 @@ def tf_experiment_plan(
             "model": exp.model.model_dump(mode="json"),
             "target": exp.target,
             "random_seed": exp.runtime.random_seed,
+            # 回报实际登记的指纹：填缺省时调用方要看得见填了什么
+            "environment_lock": exp.runtime.environment_lock,
         },
     ))
 
@@ -956,16 +1037,38 @@ def tf_experiment_run(
     ))
 
 
+def _fitted_parameters(exp_dir: Path) -> dict[str, Any] | None:
+    """读出物理模型辨识出的参数（`model/model.json` 的 `parameters`）。
+
+    必须进 summary：光有指标无法判断辨识是否成功 —— 参数贴死在边界
+    （该项不可辨识）或量级失控（模型被推到饱和区）都不会让 CVRMSE 变差，
+    只看指标会把这两种病症放过去。缺了它，「参数体检」这一步做不了，
+    Agent 只能如实说"读不到"（实测 EXP-0022 会话）。
+    """
+    path = exp_dir / "model" / "model.json"
+    if not path.is_file():
+        return None
+    try:
+        doc = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return None
+    params = doc.get("parameters")
+    if not isinstance(params, Mapping) or not params:
+        return None
+    return {"format": doc.get("format"), "values": dict(params),
+            "n_train": doc.get("n_train")}
+
+
 def tf_experiment_get(ctx: ToolContext, experiment_id: str) -> dict[str, Any]:
-    """实验结果查询（Ledger 状态 + report.json 摘要）。"""
+    """实验结果查询（Ledger 状态 + report.json 摘要 + 已辨识的物理参数）。"""
     tool = "tf_experiment_get"
     try:
         entity = ctx.ledger.get(experiment_id)
     except (KeyError, ValueError) as exc:
         return _error_envelope(ctx, tool, exc,
                                inputs={"experiment_id": experiment_id})
-    report_path = (ctx.research_root / "experiments" / experiment_id
-                   / "report.json")
+    exp_dir = ctx.research_root / "experiments" / experiment_id
+    report_path = exp_dir / "report.json"
     summary: dict[str, Any] = {
         "experiment_id": experiment_id,
         "status": entity["status"],
@@ -977,6 +1080,9 @@ def tf_experiment_get(ctx: ToolContext, experiment_id: str) -> dict[str, Any]:
         summary.update(_metrics_summary(report))
         summary["error_code"] = report.get("error_code")
         summary["conclusion"] = report.get("conclusion")
+        params = _fitted_parameters(exp_dir)
+        if params is not None:
+            summary["fitted_parameters"] = params
         artifacts = _experiment_artifacts(ctx, experiment_id)
     return _finish(ctx, make_envelope(
         tool, ok=entity["status"] != "failed", id=experiment_id,
@@ -1431,6 +1537,7 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_derive": tf_dataset_derive,
     "tf_dataset_modelability": tf_dataset_modelability,
     "tf_goal_create": tf_goal_create,
+    "tf_goal_get": tf_goal_get,
     "tf_research_status": tf_research_status,
     "tf_hypothesis_create": tf_hypothesis_create,
     "tf_experiment_plan": tf_experiment_plan,

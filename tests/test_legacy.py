@@ -101,3 +101,53 @@ def test_small_legacy_through_pipeline(small_legacy):
     assert status[5] is None  # 坏值被剔除
     # 幂等：导入结果的 TFDC-502 降级诊断仍在报告中
     assert any(d.code == "TFDC-502" for d in result.diagnostics)
+
+
+def _build_ragged_legacy(path: Path) -> Path:
+    """各表时间轴不等长：环境参数只覆盖后半段（前半段留空）。
+
+    对应 0723 版工作簿的真实情形——冷冻水泵表比其它表少 481 个时刻。
+    """
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    ws = wb.create_sheet("冷水主机")
+    ws.append(["设备类", "冷水主机", None, None, None])
+    ws.append(["设备名称", "chiller_01", None, None, None])
+    ws.append(["物模型", "chiller", None, None, None])
+    ws.append(["物模型属性", "power", "电流百分比", "status_run", "load"])
+    for i in range(N_ROWS):
+        current = 50.0 + i
+        ws.append([BASE + timedelta(minutes=15 * i), 300.0 + i, current, 1,
+                   current * 96.72])
+
+    # 只有后 6 个时刻有数据，且值随时刻递增，便于校验落位
+    ws = wb.create_sheet("环境参数")
+    ws.append(["设备类", "环境参数", None])
+    ws.append(["设备实例", "environment_parameters", None])
+    ws.append(["物模型", "environment_parameters", None])
+    ws.append(["物模型属性", "ambient_t", "ambient_h"])
+    for i in range(N_ROWS // 2, N_ROWS):
+        ws.append([BASE + timedelta(minutes=15 * i), float(i), 60.0])
+
+    wb.save(path)
+    return path
+
+
+def test_ragged_axes_align_by_timestamp(tmp_path):
+    """短表按时间戳落位，不能按表内行号——否则整列相对时间轴错位。"""
+    conv = convert_legacy_workbook(
+        _build_ragged_legacy(tmp_path / "legacy_ragged.xlsx"), default_registry()
+    )
+
+    assert len(conv.timestamps) == N_ROWS  # 并集时间轴取长表
+    ambient = conv.columns["environment_parameters.ambient_t"]
+    assert len(ambient) == N_ROWS
+
+    # 前半段无数据，后半段按时间戳对齐（值恰为该时刻的序号）
+    assert ambient[: N_ROWS // 2] == [None] * (N_ROWS // 2)
+    assert ambient[N_ROWS // 2 :] == [float(i) for i in range(N_ROWS // 2, N_ROWS)]
+
+    # 长表不受影响
+    power = conv.columns["chiller_01.power"]
+    assert power == [300.0 + i for i in range(N_ROWS)]

@@ -51,3 +51,26 @@ def test_app_entry_runs() -> None:
     app = AppTest.from_file("src/thermoforge_webui/app.py",
                             default_timeout=90).run()
     assert not app.exception, "\n".join(str(i.value) for i in app.exception)
+
+
+def test_frames_tolerate_truncation_marker():
+    """信封截断会在列表尾部追加字符串标记，表格渲染不能因此抛异常。"""
+    from thermoforge_webui.services import catalog
+
+    marker = "... (truncated, total=241)"
+
+    schema = {"variables": [
+        {"variable_id": "chiller_01.power", "source_kind": "measured"},
+        marker,
+    ]}
+    frame = catalog.variables_frame(schema)
+    assert len(frame) == 1
+    assert frame.iloc[0]["变量"] == "chiller_01.power"
+
+    profile = {"variables": [
+        {"variable_id": "chiller_01.power", "count": 33109},
+        marker,
+    ]}
+    frame = catalog.profile_frame(profile)
+    assert len(frame) == 1
+    assert frame.iloc[0]["有效样本"] == 33109

@@ -12,6 +12,7 @@ from .. import cache
 from ..charts import interactive, series
 from ..services import catalog
 from ..ui import copilot_banner, empty_state, fmt_time
+from ..envelope import entries
 
 # 默认预览的变量条数：一次画太多曲线看不清，也拖慢浏览器
 DEFAULT_PREVIEW_VARIABLES = 3
@@ -118,7 +119,8 @@ def _profile(profile: dict) -> None:
 
 
 def _series(ref: str, schema: dict) -> None:
-    variables = [str(v.get("variable_id")) for v in schema.get("variables") or []]
+    variables = [str(v.get("variable_id"))
+                 for v in entries(schema.get("variables"))]
     if not variables:
         st.info("没有可画的变量。")
         return

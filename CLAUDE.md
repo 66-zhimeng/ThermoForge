@@ -10,21 +10,25 @@ Docs and code comments are written in Chinese — match that when editing.
 
 ## Commands
 
-Python 3.12+, dependencies managed with `uv`. On Windows the console entry point is `.venv\Scripts\tf` (Bash: `.venv/Scripts/tf`).
+`requires-python = ">=3.12"`, but the local `.venv` runs 3.14 — check `.venv/Scripts/python --version` before blaming a version-sensitive failure. Dependencies are managed with `uv`. On Windows the console entry point is `.venv\Scripts\tf` (Bash: `.venv/Scripts/tf`).
 
 ```bash
 uv sync                                   # create .venv and install deps
-.venv/Scripts/python -m pytest            # full suite (~510 tests, slow ones deselected)
+.venv/Scripts/python -m pytest            # full suite (527 tests, 2 slow ones deselected)
 .venv/Scripts/python -m pytest tests/test_importer.py::test_name -x   # single test
 .venv/Scripts/python -m pytest -m slow    # slow integration tests (43MB real workbook import)
 .venv/Scripts/python scripts/export_schemas.py       # regenerate contracts/*/schema.json
 .venv/Scripts/python examples/chiller_power/run_demo.py   # end-to-end vertical slice (~1–2 min)
 .venv/Scripts/tf status                   # human-readable panel (--json for machines)
+.venv/Scripts/tf agent --check            # validate agent config + endpoint reachability
+.venv/Scripts/tf agent                    # conversational REPL (/tools, /exit)
 .venv/Scripts/python tools/webui.py       # Streamlit console on http://127.0.0.1:8765
 .venv/Scripts/python -m thermoforge_mcp   # MCP server over stdio (for Claude Code et al.)
 ```
 
 `pyproject.toml` pins `--basetemp=.pytest_basetemp` (the system pytest temp dir has restricted ACLs on this machine) and `-m "not slow"`.
+
+Non-CLI entry points: `启动.bat` → `tools/menu.py` (numeric menu over the envelope tools, single-object + linear-baseline path only), `启动网页版.bat` → the Streamlit console. These exist because the target user double-clicks — that constraint is load-bearing on dependency choices (see the `pyproject.toml` comment on why plotly static export goes through matplotlib instead of kaleido: kaleido 0.2.1 hangs forever on this machine, 1.x wants a downloaded Chrome).
 
 There is no configured formatter/linter in the repo; `docs/implementation-notes.md` §12 recommends ruff + mypy.
 
@@ -43,6 +47,19 @@ There is no configured formatter/linter in the repo; `docs/implementation-notes.
 | `thermoforge_mcp` | MCP server (`python -m thermoforge_mcp`, stdio) exposing the same tool registry to external agents (Claude Code etc.) — 24 tools = 23 registry − `tf_preprocess_approve` (`EXCLUDED_TOOLS`, approval requires `actor=human`) + `tf_status` / `tf_experiment_report` (`EXTRA_TOOLS`, MCP-only convenience wrappers) |
 
 Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, experiments, agent sessions), `models/` (registry). They are configurable via `tf --vault-root/--research-root/--models-root` and `ToolContext`.
+
+`thermoforge_webui` is the largest package and splits four ways: `screens/` (one Streamlit page each), `services/` (page-free logic — this is what `tests/test_webui_*.py` targets), `charts/` (`series.py` prepares plot data once; `interactive.py`/`static.py` are the two renderers), `export/` (HTML/Markdown/PDF).
+
+## Agent control plane (`pi/`)
+
+`pi/` declares *how an agent calls the deterministic tools* and holds no research logic (`architecture.md` §4/§8 — the harness stays light and replaceable; research facts live in contracts and the Ledger).
+
+- `pi/tools.json` — declarative tool name → Python entry manifest, kept in lockstep with `TOOL_REGISTRY` by `tests/test_tools.py`.
+- `pi/prompts/{system,planner,copilot}.md` — the built-in agent's, research planner's, and Web copilot's prompts. Behavior changes usually belong here, not in Python.
+- `pi/agent.toml` (gitignored; template `pi/agent.example.toml`) — OpenAI-compatible endpoint config. Precedence: CLI args > env (`TF_AGENT_API_KEY` / `TF_AGENT_BASE_URL` / `TF_AGENT_MODEL`) > TOML.
+- Tool schemas are generated from `TOOL_REGISTRY`, so a model never sees a hand-written schema. Human-only tools are withheld and reached via the `tf_human_approval` round-trip.
+- Session logs land in `research/agent_sessions/*.jsonl` — the first place to look when the agent misbehaves.
+- One user turn is bounded at `config.max_tool_rounds = 16`; exhausting the bound must degrade into a normal resumable answer, not a UI error. Every assistant message carrying `tool_calls` must be followed by exactly one tool result per call ID — Chat Completions rejects orphaned groups, and preserving those message groups across history trimming is why `agent.py` normalizes history rather than filtering it (commit `ae52b97`).
 
 ## Architectural invariants
 
@@ -91,11 +108,12 @@ Development happens on Windows; these bite here and not on Linux (`implementatio
 - Locking is platform-split (`msvcrt.locking` vs `fcntl.flock`) in `core/ids.py` and `research/ledger.py`.
 - Close DuckDB connections and file handles promptly, or `os.replace` fails on locked files.
 - Keep vault roots on shallow paths (260-char limit).
+- HTTP clients pointed at loopback must set `trust_env=False`. `httpx` takes proxies from `urllib.request.getproxies()`, which reads the registry system proxy but ignores the registry's `ProxyOverride` bypass list — so `127.0.0.1` requests get handed to a local proxy that refuses to forward to loopback. `agent/client.py` special-cases loopback/localhost `base_url` for this reason; it previously made `tests/test_agent.py::test_agent_check_ok` fail with a bogus 502.
 
 ## Current state
 
-Phase 0–4 are implemented and validated end-to-end by `examples/chiller_power/`; Phase 5 (containers, queues, multi-site, multi-agent) is not started.
+Phase 0–4 are implemented and validated end-to-end by `examples/chiller_power/`; Phase 5 (containers, queues, multi-site, multi-agent) is not started. `plan/active-plan.md` tracks the current work item — read it before starting, it states the assumptions in force.
 
 Two P0 data questions were answered on 2026-08-09 (`docs/open-questions.md` Q10, `docs/issues.md` I-48) and the answers shape modeling: the workbook's driver series are field-measured but ~2.96M cells are Excel-derived, hence the mandatory `source_kind` measured/derived split; and the COP 9–11 range is physically valid for this high-temperature centrifugal site, which un-blocked the physics route. The I-01/I-02 rows in the `docs/issues.md` priority table still carry the pre-answer wording — trust `open-questions.md` / the I-48 detail section over them.
 
-`tests/test_agent.py::test_agent_check_ok` fails on this machine for reasons predating any current change (the mock endpoint returns 502) — do not treat it as a regression.
+The full suite is green on this machine.

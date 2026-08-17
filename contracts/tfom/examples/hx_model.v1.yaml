@@ -1,0 +1,100 @@
+# 板换建模视图物模型（scripts/build_modeling_datasets.py 产出）。
+#
+# B 模式（仅板换运行）每时刻一行。标签 `heat_transfer` = 冷冻侧全部冷量
+# —— 该工况无冷机运行，板换承担全部负荷，因此标签**不依赖任何拆分假设**，
+# 是本项目最干净的标签（docs/data-processing-handbook.md §7.3）。
+#
+# 特征只含**入口端口值**：出口侧温度与流量相乘即等于标签，属泄漏。
+contract: TFOM
+contract_version: "1.0"
+model_id: hx_model
+version: "1.0"
+properties:
+  heat_transfer:
+    name_zh: 换热量
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 40000.0
+  t_chw_in:
+    name_zh: 冷冻侧进水温度（热侧进）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: 0.0
+    max_value: 35.0
+  t_cw_in:
+    name_zh: 冷却侧进水温度（冷侧进）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 45.0
+  drive_dt:
+    name_zh: 驱动温差
+    unit: K
+    dtype: float
+    role: state
+    quantity_kind: temperature_difference
+    min_value: -20.0
+    max_value: 40.0
+  f_chw:
+    name_zh: 冷冻水总流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 8000.0
+  f_cw:
+    name_zh: 冷却水总流量
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 8000.0
+  flow_ratio:
+    name_zh: 冷却/冷冻流量比
+    unit: "1"
+    dtype: float
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 5.0
+  chiller_run_count:
+    name_zh: 同时运行的冷机台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  run_count:
+    name_zh: 运行板换台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  ambient_t:
+    name_zh: 环境温度
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -40.0
+    max_value: 60.0
+  ambient_h:
+    name_zh: 环境相对湿度
+    unit: "%"
+    dtype: float
+    role: state
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0

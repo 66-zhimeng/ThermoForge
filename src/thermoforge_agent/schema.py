@@ -13,6 +13,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
 from thermoforge_core.contracts.experiment import Experiment
+from thermoforge_research.model_catalog import (
+    DATA_ESTIMATORS,
+    HYBRID_RESIDUALS,
+    MODEL_CATALOG_HINT,
+    PHYSICS_IDENTIFICATION,
+    PHYSICS_MODELS,
+)
 from thermoforge_research.tools import TOOL_REGISTRY
 
 # 审批元工具：human-only 工具不直接暴露，模型通过它发起审批请求，
@@ -43,9 +50,11 @@ HUMAN_APPROVAL_SCHEMA = {
     },
 }
 
-SUPPORTED_DATA_ESTIMATORS = ("ridge", "linear")
-SUPPORTED_PHYSICS_MODELS = ("cooling_balance_v1", "cooling_balance_v2")
-SUPPORTED_HYBRID_RESIDUALS = ("xgboost",)
+# 名单只有一份（research/model_catalog.py）。这里保留旧名字是为了不动
+# 已引用它们的调用方，值一律来自真源 —— 分叉过一次就够了。
+SUPPORTED_DATA_ESTIMATORS = DATA_ESTIMATORS
+SUPPORTED_PHYSICS_MODELS = PHYSICS_MODELS
+SUPPORTED_HYBRID_RESIDUALS = HYBRID_RESIDUALS
 
 
 def _inline_local_refs(value: Any, definitions: Mapping[str, Any]) -> Any:
@@ -86,12 +95,7 @@ def _experiment_definition_schema() -> dict[str, Any]:
     ]
 
     model = properties["model"]
-    model["description"] = (
-        "可执行模型闭集：category=data 时 estimator 只能是 ridge/linear；"
-        "category=physics 时 physics 只能是 cooling_balance_v1/v2；"
-        "category=hybrid 时必须同时给 physics 和 residual=xgboost。"
-        "当前不支持 mlp、neural_network、lightgbm 或纯 data xgboost。"
-    )
+    model["description"] = MODEL_CATALOG_HINT
     model_properties = model["properties"]
     model_properties["estimator"] = {
         "type": "string",
@@ -109,9 +113,14 @@ def _experiment_definition_schema() -> dict[str, Any]:
         "description": "仅用于 category=hybrid。",
     }
     model_properties["hyperparameters"]["description"] = (
-        "data: alpha；physics: rated_capacity_kw、rated_power_kw、inputs；"
+        "值必须是标量（字符串/数字），不能嵌套对象。"
+        "data: alpha；physics(" + "/".join(PHYSICS_MODELS[:2]) + "): "
+        "rated_capacity_kw、rated_power_kw、inputs；"
+        "physics(" + "/".join(PHYSICS_IDENTIFICATION) + "): inputs（必填）；"
         "hybrid 还可用 n_estimators、max_depth、learning_rate、subsample、"
         "colsample_bytree、monotone_constraints。"
+        "inputs 写成 \"逻辑名=列名;...\" 的单行字符串，"
+        "省略 = 视为同名映射。"
     )
     return schema
 

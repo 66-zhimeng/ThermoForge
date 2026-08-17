@@ -180,6 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
                        what="Goal 定义"),
         dataset_ref=a.dataset_ref, **x))
 
+    p = tool_cmd(g, "get", "读 Goal 完整定义（含白名单原文）")
+    p.add_argument("goal_id")
+    p.set_defaults(handler=lambda ctx, a, x: T["tf_goal_get"](
+        ctx, a.goal_id, **x))
+
     r = sub.add_parser("research").add_subparsers(dest="command",
                                                   required=True)
     p = tool_cmd(r, "status", "研究进展")

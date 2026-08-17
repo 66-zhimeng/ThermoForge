@@ -14,7 +14,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from thermoforge_agent.agent import PiAgent
-from thermoforge_agent.client import ChatResult, ToolCallRequest
+from thermoforge_agent.client import (
+    ChatResult,
+    ToolCallRequest,
+    _is_local_endpoint,
+)
 from thermoforge_agent.config import AgentConfig, config_guidance
 from thermoforge_agent.schema import (
     HUMAN_APPROVAL_TOOL,
@@ -22,6 +26,11 @@ from thermoforge_agent.schema import (
     tool_schema,
 )
 from thermoforge_cli.main import main as cli_main
+from thermoforge_research.model_catalog import (
+    DATA_ESTIMATORS,
+    HYBRID_RESIDUALS,
+    PHYSICS_MODELS,
+)
 from thermoforge_research.tools import TOOL_REGISTRY, tf_preprocess_propose
 
 from phase34_helpers import make_ctx
@@ -291,11 +300,11 @@ def test_experiment_plan_schema_exposes_contract_and_model_catalog():
         "validation", "metrics", "runtime",
     }
     model = definition["properties"]["model"]
-    assert model["properties"]["estimator"]["enum"] == ["ridge", "linear"]
-    assert model["properties"]["physics"]["enum"] == [
-        "cooling_balance_v1", "cooling_balance_v2",
-    ]
-    assert model["properties"]["residual"]["enum"] == ["xgboost"]
+    # 闭集来自 model_catalog（唯一真源），这里不再重抄一份名单 ——
+    # 抄一份就等于允许它与执行侧分叉，那正是本测试要防的事
+    assert model["properties"]["estimator"]["enum"] == list(DATA_ESTIMATORS)
+    assert model["properties"]["physics"]["enum"] == list(PHYSICS_MODELS)
+    assert model["properties"]["residual"]["enum"] == list(HYBRID_RESIDUALS)
     temporal = definition["properties"]["validation"]["properties"][
         "temporal_split"]
     assert temporal["required"] == ["train", "validate", "test"]
@@ -440,6 +449,33 @@ def test_agent_check_ok(tmp_path, monkeypatch, capsys, mock_server):
     assert out["ok"] is True and out["response_id"] == "chatcmpl-mock"
 
 
+@pytest.mark.parametrize("url, expected", [
+    ("http://127.0.0.1:8000/v1", True),
+    ("http://localhost:8000/v1", True),
+    ("http://[::1]:8000/v1", True),
+    ("https://api.deepseek.com", False),
+    ("http://192.168.1.10:8000/v1", False),
+    ("", False),
+])
+def test_is_local_endpoint(url, expected):
+    assert _is_local_endpoint(url) is expected
+
+
+def test_agent_check_ignores_proxy_for_local_endpoint(
+        tmp_path, monkeypatch, capsys, mock_server):
+    """本地端点必须直连：系统/环境代理不得劫持 127.0.0.1（否则代理回 502）。"""
+    monkeypatch.setenv("TF_AGENT_API_KEY", "sk-test")
+    monkeypatch.setenv("TF_AGENT_BASE_URL", mock_server)
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9/")   # 必定不可用
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9/")
+    code = cli_main(["--vault-root", str(tmp_path / "v"),
+                     "--research-root", str(tmp_path / "r"),
+                     "--models-root", str(tmp_path / "m"),
+                     "agent", "--check"])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
 def test_agent_check_connection_failure(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TF_AGENT_API_KEY", "sk-test")
     monkeypatch.setenv("TF_AGENT_BASE_URL", "http://127.0.0.1:9/v1")
@@ -464,3 +500,44 @@ def test_agent_single_message_with_stub(tmp_path, monkeypatch, capsys):
                      "agent", "-m", "你好"])
     assert code == 0
     assert "单轮回答" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- 技能装载
+
+def test_skills_are_bound_and_fingerprinted():
+    """技能装到研究位点、不装到副驾，且计入指纹。"""
+    from thermoforge_agent import prompts
+
+    expected = ["measurement-forensics", "system-identification"]
+    assert set(expected) <= set(prompts.available_skills())
+
+    bound = prompts.skill_registry()
+    assert bound["cli"] == expected          # 取证在前、建模在后
+    assert bound["planner"] == expected
+    assert bound["mcp"] == expected
+    assert bound["copilot"] == []      # 副驾负责导航，不指挥建模升级
+
+    cli = prompts.load("cli")
+    assert "系统辨识" in cli
+    assert "现场数据取证" in cli        # 两份技能都拼进去了
+    assert "gordon_ng" in cli
+    assert "朴素持续" in cli            # §1 的核心教训在位
+    # 副驾没装技能：直接比文件原文，不用「某个词不出现」当代理判据
+    # （提示词里正常提到「系统辨识族」就会误伤那种写法）
+    copilot_file = prompts.normalize(
+        prompts.prompt_path("copilot").read_text(encoding="utf-8"))
+    assert prompts.load("copilot") == copilot_file
+
+    # 指纹覆盖技能内容：位点摘要含技能，故两位点摘要不同
+    assert prompts.digest("cli") != prompts.digest("copilot")
+    assert len(prompts.fingerprint()) == 64
+
+
+def test_missing_skill_degrades_without_raising(monkeypatch):
+    """技能文件不存在时退化成「没装这项本事」，不炸。"""
+    from thermoforge_agent import prompts
+
+    monkeypatch.setitem(prompts.SKILL_BINDINGS, "cli", ("no-such-skill",))
+    text = prompts.load("cli")
+    assert text                        # 仍返回位点提示词本体
+    assert "no-such-skill" not in text

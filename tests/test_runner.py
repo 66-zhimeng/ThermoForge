@@ -142,3 +142,23 @@ def test_verify_reproducibility_detects_drift():
     # 容差内通过
     same = {"surfaces": {"A": {"metrics": {"RMSE": 1.0}}}}
     verify_reproducibility(metrics_a, same)
+
+
+def test_relative_research_root_does_not_double_experiment_path(tmp_path, monkeypatch):
+    """相对 research_root 不得让子进程把实验目录拼两遍。
+
+    子进程的 cwd 就是 exp_dir。若 spec 里的 `experiment_dir` 是相对路径，
+    子进程会把它再解析一次，得到 `<exp_dir>/<relative_root>/...` —— 目录不存在，
+    实验在写 seed_manifest.json 时就崩（实测 EXP-0005）。
+    """
+    from thermoforge_research.tools import ToolContext
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "vault").mkdir()
+    (tmp_path / "research").mkdir()
+
+    ctx = ToolContext(vault_root="vault", research_root="research",
+                      models_root="models")
+    for root in (ctx.vault_root, ctx.research_root, ctx.models_root):
+        assert root.is_absolute(), f"根目录必须是绝对路径: {root}"
+    assert ctx.research_root == (tmp_path / "research").resolve()

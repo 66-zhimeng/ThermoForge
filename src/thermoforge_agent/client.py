@@ -47,6 +47,13 @@ class ChatClient:
         if config.proxy:  # 受限网络：显式代理优先于 httpx 的环境变量行为
             kwargs["http_client"] = httpx.Client(proxy=config.proxy,
                                                  timeout=timeout)
+        elif _is_local_endpoint(config.base_url):
+            # 本地端点（Ollama/vLLM/测试用 mock）必须直连：Windows 上
+            # httpx 走 urllib.getproxies()，会读到注册表里的系统代理，而
+            # 注册表的 ProxyOverride（localhost;127.*）httpx 并不认，于是
+            # 本机请求被塞给代理，代理拒绝转发到 127.0.0.1 → 502。
+            kwargs["http_client"] = httpx.Client(timeout=timeout,
+                                                 trust_env=False)
         self._client = OpenAI(api_key=config.api_key,
                               base_url=config.base_url,
                               timeout=timeout,
@@ -144,6 +151,22 @@ class ChatClient:
             "base_url": self.config.base_url,
             "response_id": getattr(response, "id", None),
         }
+
+
+def _is_local_endpoint(base_url: str) -> bool:
+    """base_url 是否指向本机（回环地址或 localhost）。"""
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(base_url).hostname or "").strip("[]")
+    if not host:
+        return False
+    if host.lower() in ("localhost", "localhost.localdomain"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _make_call(call_id: str, name: str, arguments: str) -> ToolCallRequest:

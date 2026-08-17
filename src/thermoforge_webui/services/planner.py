@@ -23,6 +23,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
+from thermoforge_research.model_catalog import (
+    PHYSICS_BALANCE,
+    PHYSICS_IDENTIFICATION,
+    PHYSICS_MODELS,
+)
+
 logger = logging.getLogger(__name__)
 
 # 可用建模路线：与 `_child.py::_build_model` 的分派一一对应。写死在这里
@@ -33,15 +39,16 @@ MODEL_MENU = {
         "hyperparameters": {"alpha": "float，岭回归正则强度，默认 1.0"},
     },
     "physics": {
-        "physics": ["cooling_balance_v1", "cooling_balance_v2"],
+        "physics": list(PHYSICS_MODELS),
         "hyperparameters": {
-            "rated_capacity_kw": "float，额定制冷量",
+            "rated_capacity_kw": f"float，额定制冷量（{'/'.join(PHYSICS_BALANCE)} 必填）",
             "rated_power_kw": "float，额定功率",
-            "inputs": "字符串映射，形如 chw_flow=chw_flow;chw_supply_temp=…",
+            "inputs": ("字符串映射，形如 chw_flow=chw_flow;chw_supply_temp=…；"
+                       f"{'/'.join(PHYSICS_IDENTIFICATION)} 必填"),
         },
     },
     "hybrid": {
-        "physics": ["cooling_balance_v1", "cooling_balance_v2"],
+        "physics": list(PHYSICS_MODELS),
         "residual": ["xgboost"],
         "hyperparameters": {
             "n_estimators": "int", "max_depth": "int",

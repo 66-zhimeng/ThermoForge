@@ -128,7 +128,9 @@ def run_experiment(
     """
     research_root = Path(research_root)
     exp_id = experiment.experiment_id
-    exp_dir = research_root / "experiments" / exp_id
+    # 必须绝对：子进程的 cwd 就是 exp_dir，相对路径会在子进程内被二次解析，
+    # 拼成 `<exp_dir>/<relative_root>/experiments/<exp_id>/...` 而找不到目录。
+    exp_dir = (research_root / "experiments" / exp_id).resolve()
     exp_dir.mkdir(parents=True, exist_ok=True)
 
     if view_definition is None:

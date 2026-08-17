@@ -206,14 +206,17 @@ def convert_legacy_tables(
 
     # 并集时间轴 + 列对齐
     axis = sorted({t for ts, _ in per_sheet.values() for t in ts})
+    # 下标必须按并集时间轴取，不能用表内行号：各表时间轴不一定相同
+    # （某次导出里 冷冻水泵 表比其它表短 481 个时刻），用行号会让该表整列
+    # 相对时间轴错位，甚至越界。
+    axis_index = {t: i for i, t in enumerate(axis)}
     columns: dict[str, list[Any]] = {}
     for sheet, (ts, values) in per_sheet.items():
-        index = {t: i for i, t in enumerate(ts)}
         for vid, vals in values.items():
             aligned: list[Any] = [None] * len(axis)
             target = columns.setdefault(vid, aligned)
             for i, t in enumerate(ts):
-                target[index[t]] = vals[i]
+                target[axis_index[t]] = vals[i]
 
     # objects / variables
     object_records = [

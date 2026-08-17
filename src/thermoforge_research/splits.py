@@ -270,8 +270,18 @@ def rolling_origin_splits(
         k += 1
 
     if not folds:
+        # 报出具体数字：调用方（含 Agent）拿不到数据时间跨度，光说
+        # 「配置无效」它只能瞎调参数。写清楚跨度、原点、步长与剩余空间，
+        # 才知道该缩 initial_train_fraction 还是缩 horizon。
+        span_days = (t_end - t0) / 86400.0
+        left_days = (t_end - b0 - embargo_seconds) / 86400.0
         raise ValueError(
-            "滚动原点配置下没有任何有效 fold（初始窗口 + embargo 已覆盖全部数据）"
+            "滚动原点配置下没有任何有效 fold："
+            f"数据跨度 {span_days:.1f} 天（{_iso(t0)} ~ {_iso(t_end)}），"
+            f"初始训练窗结束于 {_iso(b0)}，加 embargo "
+            f"{embargo_seconds / 3600:.1f} h 后仅剩 {left_days:.1f} 天，"
+            f"装不下 horizon {horizon_seconds / 86400:.1f} 天。"
+            "调小 initial_train_fraction 或 horizon_seconds"
         )
     config = {
         "mode": mode,

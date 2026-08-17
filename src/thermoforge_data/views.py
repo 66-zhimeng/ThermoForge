@@ -118,7 +118,14 @@ def load_view_definition(path: str | Path) -> dict[str, Any]:
 
 def validate_view_definition(doc: Mapping[str, Any]) -> None:
     if "dataset" not in doc or "@" not in str(doc["dataset"]):
-        raise ValueError("View 必须引用完整版本 dataset@rev_NNNN（data-contract §6）")
+        # 回显入参：只说规则不说「你传的是什么」，调用方看不出差在哪
+        # （实测 Agent 连三轮都漏 @rev_NNNN，每次都得多花一轮才发现）
+        got = doc.get("dataset")
+        raise ValueError(
+            "View 必须引用完整版本 dataset@rev_NNNN（data-contract §6）；"
+            + (f"收到 {got!r}，缺版本号 —— 用 tf_dataset_list 查最新 rev"
+               if got else "定义里没有 dataset 字段")
+        )
     for key in ("features",):
         if key not in doc or not doc[key]:
             raise ValueError(f"View 缺少必需字段: {key}")

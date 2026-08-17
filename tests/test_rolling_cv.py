@@ -275,6 +275,75 @@ def test_runner_rolling_cv_reproducible(env):
         rb["rolling_cv"], sort_keys=True)
 
 
+def _late_start_env(tmp_path):
+    """造一个「对象晚投运」的 vault：CH-02 前半段全空。
+
+    真实建模集的时间轴是全部对象的并集，单对象视图在该对象投运之前
+    一行都没有 —— 这不是缺陷，是覆盖事实。
+    """
+    import phase2_helpers as ph
+    from thermoforge_data.importer import import_parsed
+    from thermoforge_data.vault import DataVault
+
+    n = ph.N_STEPS
+    manifest = ph.TfdcManifest(
+        contract="TFDC", contract_version="1.0", dataset_id="TEST02_LATE",
+        dataset_version=1, site_id="T02", timezone="Asia/Shanghai",
+        time_resolution="15min")
+    units = {"evap_chw_flow": "m3/h", "evap_chw_supply_temp": "Cel",
+             "evap_chw_return_temp": "Cel", "cw_supply_temp": "Cel",
+             "input_power": "kW"}
+    objects = [ph.ObjectRecord(object_id=o, object_model_id="chiller.v1")
+               for o in ph.OBJECTS]
+    variables = [
+        ph.VariableRecord(
+            variable_id=f"{o}.{p}", object_id=o, property_code=p, unit=u,
+            dtype="float", role="target" if p == ph.TARGET else "state",
+            source_kind="measured")
+        for o in ph.OBJECTS for p, u in units.items()]
+    ts = [ph.datetime(2026, 3, 1, tzinfo=UTC) + ph.timedelta(minutes=15 * i)
+          for i in range(n)]
+    columns = {}
+    for k, obj in enumerate(ph.OBJECTS):
+        for prop, values in ph._series(n, offset=20.0 * k).items():
+            # CH-02 前 60% 时间轴无数据（晚投运）
+            columns[f"{obj}.{prop}"] = (
+                [None] * (n * 6 // 10) + values[n * 6 // 10:]
+                if obj == "CH-02" else values)
+    result = import_parsed(
+        ph.TfdcDataset(manifest=manifest, objects=objects,
+                       variables=variables), ts, columns)
+    assert result.ok, result.diagnostics
+    ref = DataVault(tmp_path / "vault").store(result)
+    ledger = ResearchLedger(tmp_path / "research")
+    ledger.create_goal("g", actor=ACTOR)
+    view = view_definition(ref)
+    view["objects"] = ["CH-02"]          # 单对象视图：早期折必空
+    ledger.register_view(view, actor=ACTOR)
+    ledger.create_hypothesis("RG-0001", "h", actor=ACTOR)
+    return tmp_path, ledger
+
+
+def test_rolling_cv_skips_empty_folds_instead_of_aborting(tmp_path):
+    """早期折没有样本时跳过并入账，不让整个实验挂掉（TFX-905）。"""
+    env2 = _late_start_env(tmp_path)
+    report = _run(env2, "EXP-0001", rolling_cv={
+        "enabled": True, "mode": "expanding", "initial_train_fraction": 0.2,
+        "horizon_seconds": 6 * 3600, "step_seconds": 6 * 3600, "max_folds": 8,
+    })
+    assert report["status"] == "completed", report.get("error")
+    rolling = report["rolling_cv"]
+    assert rolling["n_folds_skipped"] > 0, "构造的数据本应产生空折"
+    assert rolling["n_folds_evaluated"] > 0
+    skipped = [f for f in rolling["folds"] if f.get("skipped")]
+    # 训练窗空与评估窗空都算空折，两者都不该产生指标
+    assert all(f["metrics"] is None for f in skipped)
+    assert all(f["n_train"] == 0 or f["n_eval"] == 0 for f in skipped)
+    # 聚合只统计跑过的折，不把空折算成 0 分
+    agg = rolling["aggregate"]["per_metric"]["CVRMSE"]
+    assert agg["n_defined"] == rolling["n_folds_evaluated"]
+
+
 def test_runner_without_rolling_cv_unchanged(env, tmp_path):
     """向后兼容：不配 rolling_cv 的旧定义行为不变（无 rolling 制品）。"""
     report = _run(env, "EXP-0001")

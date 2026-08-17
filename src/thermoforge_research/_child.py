@@ -26,6 +26,7 @@ from thermoforge_data.vault import DataVault
 from thermoforge_data.views import materialize_view
 from thermoforge_models.baseline import LinearBaseline
 from thermoforge_models.hybrid import ResidualHybrid
+from thermoforge_models.identification import EffectivenessNTU, GordonNgChiller
 from thermoforge_models.physics import (
     ChillerPhysicsModel,
     ChillerPhysicsV2,
@@ -72,14 +73,23 @@ def _parse_inputs(raw: Any) -> dict[str, str] | None:
     """physics 输入列映射字符串："chw_flow=evap_chw_flow;cw_supply_temp=..."。
 
     （Experiment 契约的 hyperparameters 只支持标量，映射以字符串编码。）
+
+    分隔符 `;` 与 `,` 都接受；条目省略 `=` 时视为**同名映射**
+    （`"cooling_load,t_cond_in"` ≡ `"cooling_load=cooling_load;t_cond_in=t_cond_in"`）。
+    容忍这两种写法是刻意的：列名与角色名相同是最常见的情形，强制写成
+    `a=a;b=b` 只会制造无谓的失败（实测 agent 连续三次栽在这里）。
     """
     if not raw:
         return None
     out: dict[str, str] = {}
-    for item in str(raw).split(";"):
-        key, _, col = item.partition("=")
-        out[key.strip()] = col.strip()
-    return out
+    for chunk in str(raw).replace(",", ";").split(";"):
+        item = chunk.strip()
+        if not item:
+            continue
+        key, sep, col = item.partition("=")
+        key, col = key.strip(), col.strip()
+        out[key] = col if (sep and col) else key
+    return out or None
 
 
 def _build_physics(hp: Mapping[str, Any],
@@ -87,6 +97,7 @@ def _build_physics(hp: Mapping[str, Any],
     """按方程版本分派（v1 保留兼容，v2 为 DOE-2 三曲线）。"""
     if "rated_capacity_kw" not in hp:
         raise ValueError("physics 模型缺少超参 rated_capacity_kw（额定参数必须显式声明）")
+    # 键必须与 model_catalog.PHYSICS_BALANCE 一致（test_model_catalog 校验）
     cls = {
         None: ChillerPhysicsModel,
         "cooling_balance_v1": ChillerPhysicsModel,
@@ -103,6 +114,24 @@ def _build_physics(hp: Mapping[str, Any],
     )
 
 
+# 系统辨识模型族：参数少、可解释、单调性由方程结构保证（identification.py）
+# 键必须与 model_catalog.PHYSICS_IDENTIFICATION 一致（test_model_catalog 校验）
+_IDENT_FAMILIES = {
+    "gordon_ng": GordonNgChiller,
+    "eps_ntu": EffectivenessNTU,
+}
+
+
+def _build_identification(physics: str, hp: Mapping[str, Any]):
+    cls = _IDENT_FAMILIES[physics]
+    kwargs: dict[str, Any] = {"inputs": _parse_inputs(hp.get("inputs")) or None}
+    if physics == "gordon_ng" and "q_floor" in hp:
+        kwargs["q_floor"] = float(hp["q_floor"])
+    if physics == "eps_ntu":
+        kwargs["n_units"] = hp.get("n_units", "run_count") or None
+    return cls(**kwargs)
+
+
 def _build_model(model_spec: Mapping[str, Any], seed: int):
     category = model_spec["category"]
     hp = model_spec.get("hyperparameters", {})
@@ -113,7 +142,10 @@ def _build_model(model_spec: Mapping[str, Any], seed: int):
                                   alpha=float(hp.get("alpha", 1.0)))
         raise ResearchError("TFX-902", f"未支持的 data estimator: {estimator!r}")
     if category == "physics":
-        return _build_physics(hp, model_spec.get("physics"))
+        physics = model_spec.get("physics")
+        if physics in _IDENT_FAMILIES:
+            return _build_identification(str(physics), hp)
+        return _build_physics(hp, physics)
     if category == "hybrid":
         xgb_params = {
             k: hp[k] for k in
@@ -121,8 +153,12 @@ def _build_model(model_spec: Mapping[str, Any], seed: int):
              "colsample_bytree")
             if k in hp
         }
+        physics = model_spec.get("physics")
+        base = (_build_identification(str(physics), hp)
+                if physics in _IDENT_FAMILIES
+                else _build_physics(hp, physics))
         return ResidualHybrid(
-            _build_physics(hp, model_spec.get("physics")), seed=seed, nthread=1,
+            base, seed=seed, nthread=1,
             xgb_params=xgb_params,
             monotone_constraints=_parse_monotone(hp.get("monotone_constraints")),
         )
@@ -372,6 +408,19 @@ def run(spec_path: Path) -> dict[str, Any]:
             ]
             ftrain = ftrain.dropna(subset=needed)
             feval = feval.dropna(subset=needed)
+            # 空折跳过而不是中止：数据集的时间轴是全部对象的并集，
+            # 单对象视图在该对象还没投运的早期折里一行都没有 —— 这是
+            # 数据覆盖的事实，不是缺陷。以前它让 compute_metrics 报
+            # TFX-905，整个实验白跑（实测 EXP-0025）。
+            # 空折照样入账（n_train/n_eval + skipped），覆盖缺口在
+            # 产物里看得见；全部折皆空才是真失败，在循环后判。
+            if not len(ftrain) or not len(feval):
+                fold_entries.append({
+                    "fold": fold.fold, "boundaries": fb,
+                    "n_train": len(ftrain), "n_eval": len(feval),
+                    "skipped": "empty_fold", "metrics": None,
+                })
+                continue
             fold_model = _build_model(exp["model"], int(seed))
             _fit(fold_model, ftrain,
                  ftrain[target].to_numpy(np.float64), features)
@@ -387,11 +436,20 @@ def run(spec_path: Path) -> dict[str, Any]:
                 "fold": fold.fold,
                 "boundaries": fb,
                 "n_train": len(ftrain),
+                "n_eval": len(feval),
                 "metrics": report.to_dict(),
             })
+        if not fold_reports:
+            raise ResearchError(
+                "TFX-905",
+                f"rolling_cv 全部 {len(fold_entries)} 折都没有可用样本："
+                "检查视图的对象范围与数据集时间轴是否匹配",
+            )
         rolling_doc = {
             "config": rolling.config,
             "folds": fold_entries,
+            "n_folds_evaluated": len(fold_reports),
+            "n_folds_skipped": len(fold_entries) - len(fold_reports),
             "aggregate": aggregate_fold_metrics(fold_reports),
             "note": "每个 fold 独立训练同一模型定义（同一种子），"
                     "仅训练窗口不同；fold 模型不落盘",

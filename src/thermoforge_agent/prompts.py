@@ -6,6 +6,13 @@
 
 现在一律从 `pi/prompts/<name>.md` 读：**装技能 = 改文件**，四处行为一致。
 
+## 技能
+
+`pi/skills/*.md` 是可复用的方法论（怎么做系统辨识、怎么校验），与位点提示词
+（这个 agent 是谁、能调什么工具）分开：提示词描述**身份与接口**，技能描述
+**做法**。技能按 `SKILL_BINDINGS` 绑定到位点，加载时追加在提示词之后，
+并一并计入指纹 —— 换了技能，实验产物里的 `prompt_fingerprint` 就会变。
+
 ## 为什么要指纹
 
 实验产物记了 `code_version` 与 `environment_lock`，唯独没记「当时是哪套
@@ -26,6 +33,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = REPO_ROOT / "pi" / "prompts"
+SKILLS_DIR = REPO_ROOT / "pi" / "skills"
 
 # 位点 → 文件名。改这里等于改「有哪些可装技能的位点」。
 PROMPT_FILES = {
@@ -33,6 +41,16 @@ PROMPT_FILES = {
     "copilot": "copilot.md",   # 网页副驾
     "planner": "planner.md",   # AI 研究的规划器
     "mcp": "mcp.md",           # MCP server 给外部 agent 的说明
+}
+
+# 位点 → 装载的技能（`pi/skills/<name>.md`，不含扩展名）。
+# 只装到真正做研究的位点：网页副驾负责导航与解读，不直接指挥建模升级。
+# 顺序即装载顺序：取证在前、建模在后，与实际工作顺序一致。
+SKILL_BINDINGS = {
+    "cli": ("measurement-forensics", "system-identification"),
+    "planner": ("measurement-forensics", "system-identification"),
+    "mcp": ("measurement-forensics", "system-identification"),
+    "copilot": (),
 }
 
 _MISSING = "（缺少提示词文件：{path}）"
@@ -44,6 +62,22 @@ def prompt_path(name: str) -> Path:
         raise KeyError(f"未登记的提示词位点: {name!r}（已登记 "
                        f"{sorted(PROMPT_FILES)}）")
     return PROMPTS_DIR / filename
+
+
+def skill_path(skill: str) -> Path:
+    return SKILLS_DIR / f"{skill}.md"
+
+
+def available_skills() -> list[str]:
+    """磁盘上实际存在的技能（按名排序）。"""
+    if not SKILLS_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in SKILLS_DIR.glob("*.md"))
+
+
+def skills_for(name: str) -> tuple[str, ...]:
+    """某位点绑定的技能名。未登记的位点视为不装技能。"""
+    return tuple(SKILL_BINDINGS.get(name, ()))
 
 
 def normalize(text: str) -> str:
@@ -58,23 +92,38 @@ def load(name: str, fallback: str = "") -> str:
     而不是整个界面打不开。指纹会如实反映这一点（缺失记为空内容）。
     """
     path = prompt_path(name)
-    if not path.is_file():
-        return fallback or _MISSING.format(path=path)
-    return normalize(path.read_text(encoding="utf-8"))
+    base = (normalize(path.read_text(encoding="utf-8")) if path.is_file()
+            else (fallback or _MISSING.format(path=path)))
+    parts = [base]
+    for skill in skills_for(name):
+        sp = skill_path(skill)
+        if sp.is_file():          # 技能缺失同样不抛：退化成「没装这项本事」
+            parts.append(normalize(sp.read_text(encoding="utf-8")))
+    return "\n\n---\n\n".join(parts)
 
 
 def digest(name: str) -> str:
-    """单个位点的内容指纹（sha256 前 16 位）。文件缺失记为全 0。"""
-    path = prompt_path(name)
-    if not path.is_file():
+    """单个位点的内容指纹（sha256 前 16 位），**含其绑定的技能**。
+
+    含技能是刻意的：同一份 system.md 配不同技能，agent 的行为不同，
+    实验产物必须能区分这两种情况。文件缺失记为全 0 参与计算。
+    """
+    payload = load(name, fallback="").encode("utf-8")
+    if not prompt_path(name).is_file() and not skills_for(name):
         return "0" * 16
-    payload = normalize(path.read_text(encoding="utf-8")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
 def registry() -> dict[str, str]:
     """全部位点的指纹表，界面上用来展示「当前生效的技能版本」。"""
     return {name: digest(name) for name in sorted(PROMPT_FILES)}
+
+
+def skill_registry() -> dict[str, list[str]]:
+    """位点 → 实际装上的技能（磁盘存在的那些）。界面与报告用。"""
+    have = set(available_skills())
+    return {name: [s for s in skills_for(name) if s in have]
+            for name in sorted(PROMPT_FILES)}
 
 
 @lru_cache(maxsize=1)
@@ -92,8 +141,10 @@ def fingerprint() -> str:
     改了文件立刻生效——否则「改完技能要重启界面」又是一个反直觉行为。
     """
     stamp = tuple(
-        (name, prompt_path(name).stat().st_mtime
-         if prompt_path(name).is_file() else 0.0)
-        for name in sorted(PROMPT_FILES)
+        [(name, prompt_path(name).stat().st_mtime
+          if prompt_path(name).is_file() else 0.0)
+         for name in sorted(PROMPT_FILES)]
+        + [(f"skill:{s}", skill_path(s).stat().st_mtime)
+           for s in available_skills()]
     )
     return _cached_fingerprint(stamp)

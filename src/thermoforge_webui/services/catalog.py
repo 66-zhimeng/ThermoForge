@@ -20,6 +20,8 @@ from thermoforge_research.tools import (
     tf_dataset_schema,
 )
 
+from ..envelope import entries
+
 # 时序预览的点数上限：35040 行 × 多条曲线在浏览器里会明显发卡，
 # 而看趋势并不需要每个点。超过就等间隔抽稀，并在图上注明。
 PREVIEW_MAX_POINTS = 4000
@@ -76,7 +78,7 @@ def variables_frame(schema: dict[str, Any]) -> pd.DataFrame:
     """变量表。`source_kind` 单独一列且排在前面——measured 还是 derived
     直接决定这条变量能不能进候选输入白名单（DD-16）。"""
     rows = []
-    for variable in schema.get("variables") or []:
+    for variable in entries(schema.get("variables")):
         rows.append({
             "变量": variable.get("variable_id"),
             "来源": ("实测" if variable.get("source_kind") == "measured"
@@ -96,7 +98,7 @@ def variables_frame(schema: dict[str, Any]) -> pd.DataFrame:
 def profile_frame(profile: dict[str, Any]) -> pd.DataFrame:
     """画像表：缺失率、分位、离群数。分位点是固定的 7 个（信封约定）。"""
     rows = []
-    for variable in profile.get("variables") or []:
+    for variable in entries(profile.get("variables")):
         distribution = variable.get("distribution") or {}
         rows.append({
             "变量": variable.get("variable_id"),
@@ -152,7 +154,7 @@ def series_preview(ctx: ToolContext, ref: str, variable_ids: list[str],
 
 def measured_variable_ids(schema: dict[str, Any]) -> list[str]:
     """只有实测变量能进候选输入白名单（DD-16 的目标级校验）。"""
-    return [str(v.get("variable_id")) for v in schema.get("variables") or []
+    return [str(v.get("variable_id")) for v in entries(schema.get("variables"))
             if v.get("source_kind") == "measured"]
 
 

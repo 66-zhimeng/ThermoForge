@@ -208,6 +208,30 @@ def test_experiment_plan_run_get_compare(ctx_ref):
     assert cmp_env["summary"]["skipped"] == ["EXP-9999"]
 
 
+def test_experiment_plan_fills_environment_lock_but_not_seed(ctx_ref):
+    """环境指纹缺省时由工具填真值；随机种子缺省时仍须报错。
+
+    指纹是机器算的，调用方猜不到——以前必填导致 Agent 编一个假串，
+    每次 run 都撞 TFX-901。种子性质相反：它是研究决策，不能替调用方决定。
+    """
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc())
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "线性基线足够好")
+
+    doc = _experiment_doc(goal["id"], hyp["id"], mat["id"])
+    doc["runtime"] = {"environment_lock": "", "random_seed": 7}
+    plan = tf_experiment_plan(ctx, doc)
+    assert plan["ok"]
+    assert plan["summary"]["environment_lock"] == current_environment_lock()[0]
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"], ran["summary"].get("error_code")
+
+    doc2 = _experiment_doc(goal["id"], hyp["id"], mat["id"])
+    doc2["runtime"] = {"environment_lock": ""}
+    assert tf_experiment_plan(ctx, doc2)["ok"] is False
+
+
 def test_research_status_tracks_budget(ctx_ref):
     ctx, ref = ctx_ref
     goal, mat, hyp, plan = _research_setup(ctx, ref)
