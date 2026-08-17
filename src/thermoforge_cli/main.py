@@ -346,7 +346,7 @@ def _run_agent(args: argparse.Namespace, ctx: ToolContext) -> int:
 
     退出码：0 正常；2 配置缺失或 --check 连通性失败（CLI 自身错误）。
     """
-    from thermoforge_agent import AgentConfig, PiAgent, config_guidance
+    from thermoforge_agent import AgentConfig, deepseek_harness, config_guidance
     from thermoforge_agent.client import ChatClient
     from thermoforge_agent.repl import run_repl
 
@@ -370,7 +370,7 @@ def _run_agent(args: argparse.Namespace, ctx: ToolContext) -> int:
             return 2
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    agent = PiAgent(config, ctx)
+    agent = deepseek_harness(config, ctx)
     if args.message:
         print(agent.ask(args.message))
         return 0

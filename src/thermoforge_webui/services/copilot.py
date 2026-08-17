@@ -1,6 +1,6 @@
 """网页副驾：听懂问题 → 查数据 → 给结论 → 把你带到对应页面。
 
-复用 `PiAgent` 的对话循环（function calling + 审批拦截 + 会话留痕），在它
+复用 `deepseek_harness` 的对话循环（function calling + 审批拦截 + 会话留痕），在它
 的工具表上**追加一个界面工具** `ui_goto`——模型除了能查数据，还能决定
 「这个问题该看哪一页、该选中哪个实验」，并把结论一起带过去。
 
@@ -113,7 +113,7 @@ class CopilotSession:
     """一次浏览器会话里的副驾。线程安全靠一把锁 + 一个审批闸门。"""
 
     def __init__(self, client: Any | None = None) -> None:
-        # client 只为测试注入 stub；生产走 PiAgent 内部的 ChatClient，不触网测不了
+        # client 只为测试注入 stub；生产走 deepseek_harness 内部的 ChatClient，不触网测不了
         self._client = client
         self._lock = threading.Lock()
         self._agent: Any | None = None
@@ -184,11 +184,11 @@ class CopilotSession:
     # ---- Agent 装配
 
     def _ensure_agent(self, config: Any):
-        from thermoforge_agent import PiAgent
+        from thermoforge_agent import deepseek_harness
 
         if self._agent is not None:
             return self._agent
-        agent = PiAgent(
+        agent = deepseek_harness(
             config, tool_context(),
             client=self._client,
             system_prompt=SYSTEM_PROMPT,

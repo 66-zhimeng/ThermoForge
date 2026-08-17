@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from thermoforge_agent.agent import PiAgent
+from thermoforge_agent.agent import deepseek_harness
 from thermoforge_agent.config import AgentConfig
 from thermoforge_research.tools import ToolContext
 
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     config = AgentConfig.load()
     if config is None:
         raise SystemExit("未找到 agent 配置（pi/agent.toml 或 TF_AGENT_* 环境变量）")
-    agent = PiAgent(
+    agent = deepseek_harness(
         config, ctx,
         on_tool_call=lambda name, ok: print(f"    → {name} {'ok' if ok else 'FAILED'}",
                                             flush=True),

@@ -1,4 +1,4 @@
-"""PiAgent 配置：环境变量 > 配置文件（pi/agent.toml，不入库）。
+"""deepseek_harness 配置：环境变量 > 配置文件（pi/agent.toml，不入库）。
 
 环境变量：
 

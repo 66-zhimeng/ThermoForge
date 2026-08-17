@@ -1,4 +1,4 @@
-"""PiAgent 对话循环：多轮上下文 + function calling + 审批拦截 + 会话留痕。
+"""deepseek_harness 对话循环：多轮上下文 + function calling + 审批拦截 + 会话留痕。
 
 - 模型请求工具 → 本地执行（TOOL_REGISTRY 薄封装）→ 信封 JSON 原样回传
   （32KB 截断约定天然适配上下文窗口）。
@@ -48,12 +48,12 @@ TOOL_LIMIT_FINALIZE_PROMPT = """本轮工具调用预算已经用完。不要再
 不要声称未执行的动作已经完成。"""
 
 
-class PiAgent:
+class deepseek_harness:
     """内置研发 Agent。
 
     ::
 
-        agent = PiAgent(config, ctx)
+        agent = deepseek_harness(config, ctx)
         answer = agent.ask("列出所有数据集")
     """
 
@@ -398,7 +398,7 @@ def _serialize_tool_result(
     try:
         return json.dumps(envelope, ensure_ascii=False)
     except Exception as exc:
-        fallback = PiAgent._error_envelope(
+        fallback = deepseek_harness._error_envelope(
             call.name, f"工具结果序列化失败: {type(exc).__name__}: {exc}")
         return json.dumps(fallback, ensure_ascii=False)
 
