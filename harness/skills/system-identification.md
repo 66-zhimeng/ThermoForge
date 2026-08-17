@@ -161,6 +161,29 @@ NTU = UA/C_min,  UA = UA0·(m_h^-0.8 + β·m_c^-0.8)^-1
                                "monotone_constraints": "cooling_load=1,t_cond_in=1,t_evap_out=-1"}}}
 ```
 
+### 级 6：模型实验室（开放代码通路）
+
+**阶梯内置闭集穷尽、且 §5 的信息面手段也试过仍不达验收阈值时**，不要停在调超参 ——
+自己写一个新模型模块提交到模型实验室，让建模方案本身成为可迭代对象：
+
+1. 按 `thermoforge_models.lab` 的模块协议写一个自包含 Python 模块：定义
+   `MODEL_FORMAT`（`thermoforge.lab.` 前缀）、`INPUT_ROLES`（与实验声明的输入列一致）、
+   `build_model(hyperparameters, seed)` 与 `load_model(directory)`；模型对象须
+   `fit(df, y) / predict(df) / save(dir)`，save 必须写含 `format` 的 model.json，
+   **禁 pickle，随机源只用传入的 seed**。
+2. `tf_lab_submit`（或 CLI `lab submit --source-file`）：先 AST 源扫描
+   （import 白名单、禁 eval/exec/os.system 等），再在隔离子进程跑五连检
+   （interface / fit_predict / save_contract / roundtrip / determinism，位级一致）。
+   通过后入库 `proposed`。
+3. `tf_lab_approve` **只有人类能批**（agent 调用返回 TFML-005，与预处理审批同纪律）。
+4. 批准后，实验定义用 `model.category="lab"` + `hyperparameters.lab="<name>@v<N>"`
+   引用即可进 runner；源码快照写进实验目录与发布包（`artifact/lab_source.py`），
+   发布模型完全自包含、可冷加载。
+
+纪律：实验室模块仍受同一数据契约约束（只用白名单 candidate_inputs 的列）；源码哈希
+变化即新版本，需重新校验与审批；实验室不是绕开 §1 基线与 §4 体检的捷径 ——
+新方案照样要和朴素基线比增量。
+
 ---
 
 ## 4. 每级实验后必做的三项体检

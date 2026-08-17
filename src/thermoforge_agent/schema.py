@@ -118,7 +118,9 @@ def _experiment_definition_schema() -> dict[str, Any]:
         "rated_capacity_kw、rated_power_kw、inputs；"
         "physics(" + "/".join(PHYSICS_IDENTIFICATION) + "): inputs（必填）；"
         "hybrid 还可用 n_estimators、max_depth、learning_rate、subsample、"
-        "colsample_bytree、monotone_constraints。"
+        "colsample_bytree、monotone_constraints；"
+        "lab: lab（模型实验室引用，name 或 name@vN，须已批准）与"
+        "模块自声明的超参。"
         "inputs 写成 \"逻辑名=列名;...\" 的单行字符串，"
         "省略 = 视为同名映射。"
     )

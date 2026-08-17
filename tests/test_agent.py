@@ -272,13 +272,16 @@ def test_session_log_jsonl(tmp_path):
 
 
 def test_schema_generation_and_whitelist():
-    schemas, dispatch = build_tool_schemas()  # 默认排除 approve
+    from thermoforge_agent.config import DEFAULT_TOOLS_EXCLUDE
+
+    schemas, dispatch = build_tool_schemas()  # 默认排除 human-only 工具
     names = {s["function"]["name"] for s in schemas}
     assert "tf_preprocess_approve" not in names  # human-only 不直接暴露
+    assert "tf_lab_approve" not in names         # 同上
     assert HUMAN_APPROVAL_TOOL in names          # 审批元工具在
-    assert names - {HUMAN_APPROVAL_TOOL} == set(TOOL_REGISTRY) - {
-        "tf_preprocess_approve"}
-    assert "tf_preprocess_approve" not in dispatch
+    assert names - {HUMAN_APPROVAL_TOOL} == set(TOOL_REGISTRY) - set(
+        DEFAULT_TOOLS_EXCLUDE)
+    assert not (set(DEFAULT_TOOLS_EXCLUDE) & dispatch.keys())
 
     sample = tool_schema("tf_dataset_sample",
                          TOOL_REGISTRY["tf_dataset_sample"])

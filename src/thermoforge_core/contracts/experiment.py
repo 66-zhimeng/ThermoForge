@@ -19,11 +19,16 @@ METRICS = ("RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2")
 
 
 class ModelSpec(BaseModel):
-    """模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。"""
+    """模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。
+
+    `category="lab"` 引用模型实验室（thermoforge_research.model_lab）中
+    已批准的模块：`hyperparameters.lab` 给出 `name` 或 `name@vN`，
+    其余标量超参原样透传给模块的 `build_model()`。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    category: Literal["physics", "data", "hybrid"]
+    category: Literal["physics", "data", "hybrid", "lab"]
     physics: str | None = None
     residual: str | None = None
     estimator: str | None = None
@@ -37,6 +42,17 @@ class ModelSpec(BaseModel):
             raise ValueError("physics 实验必须声明 physics")
         if self.category == "data" and not (self.estimator or self.residual):
             raise ValueError("data 实验必须声明 estimator")
+        if self.category == "lab":
+            if self.physics or self.residual or self.estimator:
+                raise ValueError(
+                    "lab 实验不得声明 physics/residual/estimator"
+                    "（模型定义全部在实验室模块内）"
+                )
+            if not str(self.hyperparameters.get("lab") or "").strip():
+                raise ValueError(
+                    "lab 实验必须在 hyperparameters.lab 声明模型实验室引用"
+                    "（name 或 name@vN，且须已批准）"
+                )
         return self
 
 

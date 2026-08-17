@@ -132,7 +132,37 @@ def _build_identification(physics: str, hp: Mapping[str, Any]):
     return cls(**kwargs)
 
 
-def _build_model(model_spec: Mapping[str, Any], seed: int):
+def _load_lab_module(spec: Mapping[str, Any], exp_dir: Path):
+    """按 spec.lab_module 加载冻结在实验目录里的实验室模块源码。
+
+    校验 content_hash（快照完整性）；实验只依赖实验目录内的源码，
+    与实验室存储脱钩（runner._resolve_lab_module 已在父进程过审批门禁）。
+    """
+    info = spec.get("lab_module")
+    if not info:
+        return None
+    import hashlib
+    import importlib.util
+
+    path = exp_dir / str(info["path"])
+    with open(path, "rb") as fp:
+        digest = hashlib.sha256(fp.read()).hexdigest()
+    if digest != info.get("content_hash"):
+        raise ResearchError(
+            "TFX-902",
+            f"实验室模块快照哈希不符: {info['name']}@v{info['version']} "
+            f"（期望 {info.get('content_hash')!r}，实际 {digest!r}）",
+        )
+    module_spec = importlib.util.spec_from_file_location("tf_lab_frozen", path)
+    if module_spec is None or module_spec.loader is None:
+        raise ResearchError("TFX-902", f"无法加载实验室模块: {path}")
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def _build_model(model_spec: Mapping[str, Any], seed: int,
+                 lab_module: Any | None = None):
     category = model_spec["category"]
     hp = model_spec.get("hyperparameters", {})
     if category == "data":
@@ -146,6 +176,11 @@ def _build_model(model_spec: Mapping[str, Any], seed: int):
         if physics in _IDENT_FAMILIES:
             return _build_identification(str(physics), hp)
         return _build_physics(hp, physics)
+    if category == "lab":
+        if lab_module is None:
+            raise ResearchError(
+                "TFX-902", "lab 实验缺少冻结的实验室模块（spec.lab_module）")
+        return lab_module.build_model(hp, seed=seed)
     if category == "hybrid":
         xgb_params = {
             k: hp[k] for k in
@@ -306,12 +341,20 @@ def run(spec_path: Path) -> dict[str, Any]:
         raise ResearchError("TFX-905", "训练集清洗后无样本")
 
     # ---- 训练
-    model = _build_model(exp["model"], int(seed))
+    lab_module = _load_lab_module(spec, exp_dir)
+    model = _build_model(exp["model"], int(seed), lab_module=lab_module)
     train_df = subsets["train"]
     y_train = train_df[target].to_numpy(np.float64)
     _fit(model, train_df, y_train, features)
     model_dir = exp_dir / "model"
     model.save(model_dir)
+    if lab_module is not None:
+        # 发布包自包含：lab 源码随模型制品走（artifact/lab_source.py），
+        # 冷加载冒烟不再依赖实验室存储
+        import shutil
+
+        shutil.copy2(exp_dir / str(spec["lab_module"]["path"]),
+                     model_dir / "lab_source.py")
 
     # ---- 评估：validate / test（面 A）+ 设备留出面 B/C
     y_floor = spec.get("y_floor")
@@ -421,7 +464,8 @@ def run(spec_path: Path) -> dict[str, Any]:
                     "skipped": "empty_fold", "metrics": None,
                 })
                 continue
-            fold_model = _build_model(exp["model"], int(seed))
+            fold_model = _build_model(exp["model"], int(seed),
+                                      lab_module=lab_module)
             _fit(fold_model, ftrain,
                  ftrain[target].to_numpy(np.float64), features)
             y_true = feval[target].to_numpy(np.float64)

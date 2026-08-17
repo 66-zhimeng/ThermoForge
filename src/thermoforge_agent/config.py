@@ -23,7 +23,7 @@ DEFAULT_BASE_URL = "https://api.moonshot.cn/v1"
 DEFAULT_MODEL = "kimi-k2-0905-preview"
 
 # human-only 工具：不直接暴露给模型，经 tf_human_approval 弹确认执行
-DEFAULT_TOOLS_EXCLUDE = ("tf_preprocess_approve",)
+DEFAULT_TOOLS_EXCLUDE = ("tf_preprocess_approve", "tf_lab_approve")
 
 CONFIG_PATH = Path("harness/agent.toml")
 

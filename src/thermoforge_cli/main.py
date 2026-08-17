@@ -280,6 +280,29 @@ def build_parser() -> argparse.ArgumentParser:
     tool_cmd(pp, "list", "列出规则集").set_defaults(
         handler=lambda ctx, a, x: T["tf_preprocess_list"](ctx, **x))
 
+    # ---- lab（模型实验室）----
+    lb = sub.add_parser("lab").add_subparsers(dest="command", required=True)
+    p = tool_cmd(lb, "submit", "提交模型实验室模块（静态扫描 + 结构校验）")
+    p.add_argument("name")
+    p.add_argument("--source-file", required=True, help="模块 .py 文件路径")
+    p.add_argument("--description")
+    p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_submit"](
+        ctx, a.name, Path(a.source_file).read_text(encoding="utf-8"),
+        description=a.description, **x))
+    p = tool_cmd(lb, "approve", "审批实验室模块（需 --actor human）")
+    p.add_argument("name")
+    p.add_argument("--version", type=int)
+    p.add_argument("--note")
+    p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_approve"](
+        ctx, a.name, version=a.version, note=a.note, **x))
+    p = tool_cmd(lb, "get", "查看模块元数据与源码")
+    p.add_argument("name")
+    p.add_argument("--version", type=int)
+    p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_get"](
+        ctx, a.name, version=a.version, **x))
+    tool_cmd(lb, "list", "列出实验室模块").set_defaults(
+        handler=lambda ctx, a, x: T["tf_lab_list"](ctx, **x))
+
     # ---- status（面板，非工具信封）----
     s = sub.add_parser("status", help="汇总面板（默认人类可读）")
     s.add_argument("--json", action="store_true", help="机读 JSON")

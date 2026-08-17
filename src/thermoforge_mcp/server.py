@@ -20,7 +20,7 @@ from thermoforge_research.tools import TOOL_REGISTRY, ToolContext
 SERVER_NAME = "thermoforge"
 
 # 需要 actor=human 的工具不暴露（见模块 __init__ 的说明）
-EXCLUDED_TOOLS = frozenset({"tf_preprocess_approve"})
+EXCLUDED_TOOLS = frozenset({"tf_preprocess_approve", "tf_lab_approve"})
 
 # MCP 客户端一次读进上下文的量有限；这里与工具信封本身的 32KB 上限同调，
 # 超出的部分工具层已经落成 artifact 并置 truncated，不需要再截一次。

@@ -82,6 +82,7 @@ TFDC 的传输载体变体：`TFDC-XLSX`、`TFDC-JSON`、`TFDC-Parquet`、`TFDC-
 | Validator | 数据、泛化、物理和运行时验证 |
 | Model Reviewer / Judge | 独立检查指标、约束、泛化与发布条件 |
 | Research Ledger | 记录目标、假设、实验、发现和决策 |
+| Model Lab（模型实验室） | 开放代码建模通路：Agent 编写的模型模块经扫描/校验入库（proposed），人类批准后供 `category=lab` 实验引用 |
 | Model Registry | 模型包版本与发布状态 |
 | Adapter | 依据 `bindings` 把现场点位转换为 `variable_id`。绑定信息只存在于 Adapter 边界 |
 

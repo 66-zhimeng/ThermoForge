@@ -79,6 +79,14 @@ from thermoforge_runtime.package import boundary_rows, build_model_package
 from thermoforge_runtime.registry import ModelRegistry
 
 from .errors import ResearchError
+from .model_lab import (
+    TFML_APPROVAL_FORBIDDEN,
+    LabError,
+    LabStore,
+    parse_lab_ref,
+    scan_source,
+    validate_module,
+)
 from .modelability import ModelabilityConfig, build_modelability_report
 from .whitelist import check_candidate_inputs, check_view_within_whitelist
 
@@ -122,6 +130,7 @@ class ToolContext:
         self._ledger: ResearchLedger | None = None
         self._registry: ModelRegistry | None = None
         self._preprocess_store: RuleStore | None = None
+        self._lab_store: LabStore | None = None
 
     @property
     def vault(self) -> DataVault:
@@ -150,6 +159,12 @@ class ToolContext:
         if self._preprocess_store is None:
             self._preprocess_store = RuleStore(self.research_root / "preprocess")
         return self._preprocess_store
+
+    @property
+    def lab_store(self) -> LabStore:
+        if self._lab_store is None:
+            self._lab_store = LabStore(self.research_root)
+        return self._lab_store
 
 
 def _finish(ctx: ToolContext, env: dict[str, Any]) -> dict[str, Any]:
@@ -1523,6 +1538,149 @@ def tf_preprocess_list(ctx: ToolContext) -> dict[str, Any]:
     ))
 
 
+# ---------------------------------------------------------------- 模型实验室（DD-02 方案 C）
+
+
+def tf_lab_submit(
+    ctx: ToolContext,
+    name: str,
+    source: str,
+    *,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """提交模型实验室模块：静态扫描 + 子进程结构校验 + 版本化入库。
+
+    Agent 用它在内置闭集之外起草新模型（协议见 thermoforge_models.lab：
+    MODEL_FORMAT / INPUT_ROLES / build_model / load_model）。一律
+    status=proposed，须 human 经 tf_lab_approve 审批后方可在实验中以
+    category=lab 引用（hyperparameters.lab = name 或 name@vN）。
+    与最新版内容一致的重交是幂等的（不新增版本）。
+    """
+    tool = "tf_lab_submit"
+    inputs = {"name": name}
+    violations = scan_source(source)
+    if violations:
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="FAILED", inputs=inputs,
+            summary={"error": "静态扫描不通过（粗筛，审批前还有人工复核）",
+                     "violations": violations},
+            diagnostics=[{"code": "TFML-001", "level": "ERROR",
+                          "count": len(violations),
+                          "message": "; ".join(violations)[:500]}],
+        ))
+    try:
+        report: dict[str, Any] | None = None
+        with tempfile.TemporaryDirectory(prefix="lab_validate_") as tmp:
+            candidate = Path(tmp) / f"{name}.py"
+            with open(candidate, "w", encoding="utf-8", newline="\n") as fp:
+                fp.write(source)
+            report = validate_module(candidate, Path(tmp) / "check")
+        if not report.get("ok"):
+            raise LabError("TFML-002", "结构校验未通过")
+        record = ctx.lab_store.submit(
+            name, source, description=description,
+            proposer=ctx.actor, validation=report,
+        )
+    except (LabError, ValueError) as exc:
+        env = _error_envelope(ctx, tool, exc, inputs=inputs)
+        if report:
+            env["summary"]["validation"] = report
+        return env
+    src_path = ctx.lab_store.dir / f"{name}.v{record['version']}.py"
+    return _finish(ctx, make_envelope(
+        tool, id=f"{name}@v{record['version']}", status="PROPOSED",
+        inputs=inputs,
+        summary={
+            "ref": f"{name}@v{record['version']}",
+            "content_hash": record["content_hash"],
+            "status": record["status"],
+            "validation": record.get("validation"),
+            "next": "人工复核源码后，经 tf_human_approval 发起 "
+                    "tf_lab_approve 审批；approved 后方可以 category=lab 引用",
+        },
+        artifacts=[_artifact(src_path, "lab_source")],
+    ))
+
+
+def tf_lab_approve(
+    ctx: ToolContext,
+    name: str,
+    *,
+    version: int | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """审批实验室模块（actor 必须为 human，全部留痕）。
+
+    审批前应先用 tf_lab_get 读源码与校验报告——审批即为此代码进入
+    实验与发布链路背书。
+    """
+    tool = "tf_lab_approve"
+    inputs = {"name": name, "version": version}
+    if ctx.actor != "human":
+        return _error_envelope(
+            ctx, tool,
+            LabError(
+                TFML_APPROVAL_FORBIDDEN,
+                f"审批 actor 必须为 human，当前: {ctx.actor!r}",
+            ),
+            inputs=inputs,
+        )
+    try:
+        record = ctx.lab_store.approve(name, version, actor=ctx.actor,
+                                       note=note)
+    except LabError as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+    return _finish(ctx, make_envelope(
+        tool, id=f"{record['name']}@v{record['version']}", status="APPROVED",
+        inputs=inputs,
+        summary={
+            "ref": f"{record['name']}@v{record['version']}",
+            "content_hash": record["content_hash"],
+            "approvals": record["approvals"],
+        },
+    ))
+
+
+def tf_lab_get(
+    ctx: ToolContext,
+    name: str,
+    *,
+    version: int | None = None,
+) -> dict[str, Any]:
+    """读取实验室模块的元数据、校验报告与源码（审批复核用）。"""
+    tool = "tf_lab_get"
+    inputs = {"name": name, "version": version}
+    try:
+        record = ctx.lab_store.get(name, version)
+    except LabError as exc:
+        return _error_envelope(ctx, tool, exc, inputs=inputs)
+    src_path = ctx.lab_store.dir / f"{name}.v{record['version']}.py"
+    return _finish(ctx, make_envelope(
+        tool, id=f"{record['name']}@v{record['version']}", status="OK",
+        inputs=inputs,
+        summary={
+            "ref": f"{record['name']}@v{record['version']}",
+            "status": record["status"],
+            "proposer": record.get("proposer"),
+            "description": record.get("description"),
+            "content_hash": record["content_hash"],
+            "validation": record.get("validation"),
+            "approvals": record.get("approvals"),
+            "source": record["source"],
+        },
+        artifacts=[_artifact(src_path, "lab_source")],
+    ))
+
+
+def tf_lab_list(ctx: ToolContext) -> dict[str, Any]:
+    """列出全部实验室模块及审批/校验状态。"""
+    modules = ctx.lab_store.list()
+    return _finish(ctx, make_envelope(
+        "tf_lab_list", status="OK",
+        summary={"modules": modules, "count": len(modules)},
+    ))
+
+
 # architecture §6 工具清单 → 入口（与 harness/tools.json 保持一致）
 TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_import": tf_dataset_import,
@@ -1549,4 +1707,8 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_preprocess_approve": tf_preprocess_approve,
     "tf_preprocess_apply": tf_preprocess_apply,
     "tf_preprocess_list": tf_preprocess_list,
+    "tf_lab_submit": tf_lab_submit,
+    "tf_lab_approve": tf_lab_approve,
+    "tf_lab_get": tf_lab_get,
+    "tf_lab_list": tf_lab_list,
 }

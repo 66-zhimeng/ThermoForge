@@ -56,6 +56,12 @@ MODEL_MENU = {
             "monotone_constraints": "字符串，形如 chw_flow:1",
         },
     },
+    "lab": {
+        "hyperparameters": {
+            "lab": "已批准的模型实验室引用（name 或 name@vN，见 available_lab_modules）",
+            "inputs": "字符串映射，同 physics（按模块声明的 INPUT_ROLES）",
+        },
+    },
 }
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
@@ -88,11 +94,17 @@ class PlannerContext:
     dataset_ref: str
     modelability_note: str = ""
     extra_guidance: str = ""
+    lab_modules: Sequence[Mapping[str, Any]] = field(default_factory=list)
     traces: list[PlannerTrace] = field(default_factory=list)
 
     @property
     def view_ids(self) -> list[str]:
         return [str(v.get("id")) for v in self.views if v.get("id")]
+
+    @property
+    def lab_refs(self) -> list[str]:
+        """已批准、可在 category=lab 实验里引用的模块（name 与 name@vN 皆可）。"""
+        return [str(m.get("ref")) for m in self.lab_modules if m.get("ref")]
 
 
 SYSTEM_PROMPT = """你是数据中心暖通领域的建模研究员，负责规划下一轮实验。
@@ -100,6 +112,8 @@ SYSTEM_PROMPT = """你是数据中心暖通领域的建模研究员，负责规�
 铁律：
 1. 只能使用给定的 Dataset View（view_id 必须来自清单，不得编造）。
 2. 只能使用给定的建模路线与超参名，不得发明新的 estimator 或方程版本。
+   内置路线之外的全新函数形式，须先经 tf_lab_submit 提交模型实验室代码
+   并通过人工审批，再以 category=lab + hyperparameters.lab 引用已批准模块。
 3. 除第一轮外，basis 必须引用已有的实验或发现 ID，说明这一轮基于什么证据。
 4. 候选输入白名单是硬约束：视图的特征必须是目标定义里的候选输入子集。
 5. 宁可停下也不要凑数：没有信息增益时返回 {"stop": "理由"}。
@@ -151,6 +165,7 @@ def build_prompt(context: PlannerContext, round_index: int,
         },
         "dataset_ref": context.dataset_ref,
         "available_views": views_desc,
+        "available_lab_modules": list(context.lab_refs),
         "model_menu": MODEL_MENU,
         "evidence": _trim_evidence(evidence),
     }
@@ -225,7 +240,7 @@ def validate_plan(
     model = plan.get("model")
     if not isinstance(model, Mapping):
         return None, "缺少 model 对象"
-    error = _validate_model(model)
+    error = _validate_model(model, context)
     if error:
         return None, error
 
@@ -265,7 +280,8 @@ def validate_plan(
     return result, None
 
 
-def _validate_model(model: Mapping[str, Any]) -> str | None:
+def _validate_model(model: Mapping[str, Any],
+                    context: PlannerContext | None = None) -> str | None:
     category = str(model.get("category") or "")
     if category not in MODEL_MENU:
         return f"model.category={category!r} 不可用，只能是 {list(MODEL_MENU)}"
@@ -283,6 +299,19 @@ def _validate_model(model: Mapping[str, Any]) -> str | None:
     if category == "hybrid" and model.get("residual") not in menu["residual"]:
         return (f"hybrid 路线的 residual={model.get('residual')!r} 未实现，"
                 f"可选 {menu['residual']}")
+    if category == "lab":
+        hp = model.get("hyperparameters") or {}
+        lab_ref = str(hp.get("lab") or "").strip()
+        if not lab_ref:
+            return ("lab 路线必须在 hyperparameters.lab 给已批准模块引用"
+                    "（name 或 name@vN）")
+        if context is not None:
+            name = lab_ref.partition("@v")[0]
+            known = {r.partition("@v")[0] for r in context.lab_refs}
+            if context.lab_refs and name not in known:
+                return (f"lab 引用 {lab_ref!r} 不在已批准清单里，"
+                        f"可选：{context.lab_refs}；新模块须先 tf_lab_submit "
+                        "并经人工审批")
     return None
 
 

@@ -148,6 +148,29 @@
       "name": "tf_preprocess_list",
       "entry": "thermoforge_research.tools:tf_preprocess_list",
       "side_effect": false
+    },
+    {
+      "name": "tf_lab_submit",
+      "entry": "thermoforge_research.tools:tf_lab_submit",
+      "side_effect": true,
+      "returns_id": "name@vN"
+    },
+    {
+      "name": "tf_lab_approve",
+      "entry": "thermoforge_research.tools:tf_lab_approve",
+      "side_effect": true,
+      "returns_id": "name@vN",
+      "actor_required": "human"
+    },
+    {
+      "name": "tf_lab_get",
+      "entry": "thermoforge_research.tools:tf_lab_get",
+      "side_effect": false
+    },
+    {
+      "name": "tf_lab_list",
+      "entry": "thermoforge_research.tools:tf_lab_list",
+      "side_effect": false
     }
   ]
 }

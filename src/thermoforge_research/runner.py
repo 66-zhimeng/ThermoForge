@@ -37,6 +37,7 @@ from thermoforge_core.fingerprint import current_platform_tag, environment_lock
 
 from .errors import ResearchError
 from .ledger import ResearchLedger
+from .model_lab import LabStore, parse_lab_ref
 from .splits import DEFAULT_EMBARGO_SECONDS
 
 # §7.1：必须在子进程 import numpy 之前生效，故由父进程预置
@@ -108,6 +109,35 @@ def _write_json(path: Path, doc: Any) -> None:
     os.replace(tmp, path)
 
 
+def _resolve_lab_module(
+    experiment: Experiment,
+    research_root: Path,
+    exp_dir: Path,
+) -> dict[str, Any] | None:
+    """category=lab：把已批准的实验室模块源码快照进实验目录。
+
+    审批门禁在这里（TFML-006）：未批准模块连子进程都进不去。快照后实验
+    复现只依赖实验目录里的 frozen 源码，不再依赖实验室存储；发布时这份
+    源码随 artifact/ 打包（_child 把它复制进 model/）。
+    """
+    model = experiment.model
+    if model.category != "lab":
+        return None
+    ref = str(model.hyperparameters.get("lab") or "")
+    name, version = parse_lab_ref(ref)
+    store = LabStore(research_root)
+    record = store.require_approved(name, version)
+    dest = exp_dir / "lab_module.py"
+    with open(dest, "w", encoding="utf-8", newline="\n") as fp:
+        fp.write(record["source"])
+    return {
+        "name": record["name"],
+        "version": record["version"],
+        "content_hash": record["content_hash"],
+        "path": "lab_module.py",
+    }
+
+
 def run_experiment(
     experiment: Experiment,
     *,
@@ -150,6 +180,7 @@ def run_experiment(
         "y_floor": y_floor,
         "code_version": _git_rev(Path.cwd()),
         "parent_environment_lock": lock,
+        "lab_module": _resolve_lab_module(experiment, research_root, exp_dir),
     }
     _write_json(exp_dir / "spec.json", spec)
     # 清除上次运行的残留结果，避免子进程早夭时读到陈旧状态
