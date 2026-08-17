@@ -882,21 +882,26 @@ def tf_hypothesis_create(
     goal_id: str,
     statement: str,
     *,
-    basis: Sequence[str] = (),
+    basis: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """创建假设；非首个假设必须引用已有证据（research-loop §3）。"""
+    """创建假设；非首个假设必须引用已有证据（research-loop §3）。
+
+    `basis=None` 与不传等价（首个假设可无证据）。显式传 None 曾直接抛
+    TypeError —— 工具层不得抛异常，一切失败都走 ok=False 信封。
+    """
     tool = "tf_hypothesis_create"
+    basis = list(basis or ())
     try:
         hyp = ctx.ledger.create_hypothesis(
-            goal_id, statement, actor=ctx.actor, basis=list(basis),
+            goal_id, statement, actor=ctx.actor, basis=basis,
             reason="工具层创建假设",
         )
     except ValueError as exc:
         return _error_envelope(ctx, tool, exc,
-                               inputs={"goal_id": goal_id, "basis": list(basis)})
+                               inputs={"goal_id": goal_id, "basis": basis})
     return _finish(ctx, make_envelope(
         tool, id=hyp["id"], status="UNVERIFIED",
-        inputs={"goal_id": goal_id, "basis": list(basis)},
+        inputs={"goal_id": goal_id, "basis": basis},
         summary={"hypothesis_id": hyp["id"], "statement": statement,
                  "basis": hyp["refs"].get("basis", [])},
     ))
@@ -1107,20 +1112,59 @@ def tf_experiment_get(ctx: ToolContext, experiment_id: str) -> dict[str, Any]:
     ))
 
 
-def _primary_surface_name(metrics: Mapping[str, Any]) -> str | None:
-    """发布/比较口径：优先面 C，其次面 A，再次 validate（§4.3）。"""
-    surfaces = (metrics or {}).get("surfaces") or {}
-    for name in ("C", "A", "validate"):
+def _primary_surface_name(metrics: Mapping[str, Any],
+                          evaluated_on: str = "auto") -> str | None:
+    """发布/比较口径：默认 C→A→validate（§4.3），可由 Goal 钉死。
+
+    必须与 `ModelRegistry._primary_surface` 同调 —— 比较排出来的第一名
+    要是发布门禁判的不是同一个面，「最好的模型」就成了两件事。
+    """
+    metrics = metrics or {}
+    if evaluated_on == "rolling_cv":
+        return "rolling_cv" if (metrics.get("rolling_cv") or {}).get(
+            "n_folds") else None
+    surfaces = metrics.get("surfaces") or {}
+    order = (("C", "A", "validate") if evaluated_on in ("auto", "", None)
+             else (evaluated_on,))
+    for name in order:
         if (surfaces.get(name) or {}).get("n_samples"):
             return name
     return None
 
 
+def _goal_evaluated_on(ctx: ToolContext, goal_id: Any) -> str:
+    """Goal 声明的判据面；Goal 读不到时退回 auto（不因此让比较失败）。"""
+    if not goal_id:
+        return "auto"
+    try:
+        goal = ctx.ledger.get(str(goal_id))
+    except (KeyError, ValueError):
+        return "auto"
+    acceptance = (goal.get("definition") or {}).get("acceptance") or {}
+    return str(acceptance.get("evaluated_on") or "auto")
+
+
+def _surface_metrics(metrics: Mapping[str, Any],
+                     surface: str | None) -> dict[str, Any]:
+    if not surface:
+        return {}
+    if surface == "rolling_cv":
+        return dict((metrics.get("rolling_cv") or {}).get("metrics") or {})
+    return dict(((metrics.get("surfaces") or {}).get(surface) or {})
+                .get("metrics") or {})
+
+
 def tf_model_compare(
     ctx: ToolContext,
     experiment_ids: Sequence[str],
+    *,
+    evaluated_on: str | None = None,
 ) -> dict[str, Any]:
-    """模型比较：按主测试面（C→A→validate）CVRMSE 排名，附物理违规率。"""
+    """模型比较：按主测试面 CVRMSE 排名，附物理违规率。
+
+    判据面默认取各实验所属 Goal 的 `acceptance.evaluated_on`（缺省 auto =
+    C→A→validate）；`evaluated_on` 参数可临时覆盖，用于「换个口径看看」。
+    """
     tool = "tf_model_compare"
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
@@ -1134,12 +1178,13 @@ def tf_model_compare(
         if report.get("status") != "completed":
             skipped.append(str(exp_id))
             continue
-        surface = _primary_surface_name(report.get("metrics") or {})
-        surf = (report["metrics"]["surfaces"][surface] if surface else {})
+        criterion = evaluated_on or _goal_evaluated_on(ctx, report.get("goal_id"))
+        metrics = report.get("metrics") or {}
+        surface = _primary_surface_name(metrics, criterion)
         rows.append({
             "experiment_id": str(exp_id),
             "primary_surface": surface,
-            "metrics": surf.get("metrics") or {},
+            "metrics": _surface_metrics(metrics, surface),
             "physics_overall_rate": (report.get("physics") or {})
             .get("overall_rate"),
         })

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from thermoforge_models.hybrid import ResidualHybrid
 from thermoforge_models.identification import EffectivenessNTU, GordonNgChiller
 
 
@@ -139,6 +140,26 @@ def test_runner_can_build_identification_families():
     ntu = _build_model({"category": "physics", "physics": "eps_ntu",
                         "hyperparameters": {}}, seed=0)
     assert isinstance(ntu, EffectivenessNTU)
+
+
+def test_hybrid_wraps_identification_family():
+    """hybrid 能包住系统辨识族，且物理硬检查要能识别出内层没有平衡族接口。
+
+    曾经的缺陷：物理检查用 `isinstance(model, ChillerPhysicsModel |
+    ResidualHybrid)` 判定，hybrid 外壳通过了、内层 gordon_ng 却没有
+    `cooling_capacity`，于是 hybrid+gordon_ng 每次都崩在检查处
+    （实测 EXP-0040~0043 连挂四次）。判据必须落在**解包后**的模型上。
+    """
+    from thermoforge_models.physics import ChillerPhysicsModel
+    from thermoforge_research._child import _build_model
+
+    hy = _build_model({"category": "hybrid", "physics": "gordon_ng",
+                       "residual": "xgboost", "hyperparameters": {}}, seed=0)
+    assert isinstance(hy, ResidualHybrid)
+    assert isinstance(hy.physics, GordonNgChiller)
+    # 解包后不是平衡族 ⇒ 硬检查该降级为只查功率，而不是去调不存在的方法
+    assert not isinstance(hy.physics, ChillerPhysicsModel)
+    assert not hasattr(hy.physics, "cooling_capacity")
 
 
 def test_unknown_physics_family_still_rejected():

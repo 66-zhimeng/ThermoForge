@@ -344,10 +344,21 @@ class ModelRegistry:
                 "detail": f"签名与 {signature.object_model} 兼容"}
 
     @staticmethod
-    def _primary_surface(metrics: Mapping[str, Any]) -> dict[str, Any]:
-        """发布口径：优先面 C（未见×未来），其次面 A，再次 validate（§4.3）。"""
-        surfaces = (metrics or {}).get("surfaces", {})
-        for name in ("C", "A", "validate"):
+    def _primary_surface(metrics: Mapping[str, Any],
+                         evaluated_on: str = "auto") -> dict[str, Any]:
+        """发布口径。默认优先面 C（未见×未来），其次面 A，再次 validate（§4.3）。
+
+        `evaluated_on` 由 Goal 的 acceptance 指定，可钉死到某一个面，或钉到
+        `rolling_cv`（折间均值）。钉死时**不回退**：判据面拿不到数就该发布
+        失败，悄悄换一个面等于把门槛判在了另一件事上。
+        """
+        metrics = metrics or {}
+        if evaluated_on == "rolling_cv":
+            return dict(metrics.get("rolling_cv") or {})
+        surfaces = metrics.get("surfaces", {})
+        order = (("C", "A", "validate") if evaluated_on in ("auto", "", None)
+                 else (evaluated_on,))
+        for name in order:
             surf = surfaces.get(name) or {}
             if surf.get("n_samples"):
                 return dict(surf)
@@ -364,11 +375,19 @@ class ModelRegistry:
             metrics = json.load(fp)
         with open(pkg / "validation.json", encoding="utf-8") as fp:
             validation = json.load(fp)
-        surf = self._primary_surface(metrics)
+        evaluated_on = str(acceptance.get("evaluated_on") or "auto")
+        surf = self._primary_surface(metrics, evaluated_on)
         values = dict(surf.get("metrics") or {})
         physics = (validation.get("physics") or {})
         if physics.get("overall_rate") is not None:
             values["physics_violation_rate"] = physics["overall_rate"]
+
+        if evaluated_on != "auto" and not values:
+            raise ModelRegistryError(
+                "TFM-1003",
+                f"验收判据面 {evaluated_on!r} 在模型包里没有指标 —— "
+                "实验是否启用了对应切分？（rolling_cv 需 validation.rolling_cv.enabled）",
+            )
 
         unmet: list[str] = []
         checks = (
@@ -390,7 +409,8 @@ class ModelRegistry:
                 "TFM-1003", "未满足硬性验收条件: " + "; ".join(unmet)
             )
         return {"name": "acceptance", "ok": True,
-                "detail": f"硬性验收条件全部满足（{len(values)} 项指标）"}
+                "detail": f"硬性验收条件全部满足（判据面 {evaluated_on}，"
+                          f"{len(values)} 项指标）"}
 
     @staticmethod
     def _gate_latency(

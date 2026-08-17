@@ -40,10 +40,18 @@ class ModelTypes(BaseModel):
 
 
 class Acceptance(BaseModel):
-    """硬性验收条件。NMBE 按 DD-14 纳入，单独设限。"""
+    """硬性验收条件。NMBE 按 DD-14 纳入，单独设限。
+
+    `evaluated_on` 决定门槛判在哪个口径上，默认 `auto`（C→A→validate，§4.3）。
+    这不是可有可无的修饰：面 A 是「训练截止后隔一段再考」，衡量的是**漂移**；
+    `rolling_cv` 每折用最近数据重训，衡量的是**定期重训下的精度**。同一个
+    模型在两者上能差三倍（实测冷机 hybrid：面 A 15.9%、滚动 4.9%）。
+    门槛从哪个口径的基线推出来，就必须判在哪个口径上。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    evaluated_on: Literal["auto", "C", "A", "validate", "rolling_cv"] = "auto"
     cvrmse_max: float | None = Field(default=None, ge=0)
     mape_max: float | None = Field(default=None, ge=0)
     nmbe_abs_max: float | None = Field(default=None, ge=0)

@@ -2,7 +2,7 @@
   "$defs": {
     "Acceptance": {
       "additionalProperties": false,
-      "description": "硬性验收条件。NMBE 按 DD-14 纳入，单独设限。",
+      "description": "硬性验收条件。NMBE 按 DD-14 纳入，单独设限。\n\n`evaluated_on` 决定门槛判在哪个口径上，默认 `auto`（C→A→validate，§4.3）。\n这不是可有可无的修饰：面 A 是「训练截止后隔一段再考」，衡量的是**漂移**；\n`rolling_cv` 每折用最近数据重训，衡量的是**定期重训下的精度**。同一个\n模型在两者上能差三倍（实测冷机 hybrid：面 A 15.9%、滚动 4.9%）。\n门槛从哪个口径的基线推出来，就必须判在哪个口径上。",
       "properties": {
         "cvrmse_max": {
           "anyOf": [
@@ -16,6 +16,18 @@
           ],
           "default": null,
           "title": "Cvrmse Max"
+        },
+        "evaluated_on": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "C",
+            "A",
+            "validate",
+            "rolling_cv"
+          ],
+          "title": "Evaluated On",
+          "type": "string"
         },
         "extrapolation_required": {
           "default": false,

@@ -409,7 +409,6 @@ def run(spec_path: Path) -> dict[str, Any]:
             for surface, sub in surfaces.items() if len(sub)
         }
 
-    _write_json(exp_dir / "metrics.json", metrics_doc)
     if prediction_frames:
         pd.concat(prediction_frames).to_parquet(
             exp_dir / "predictions.parquet", compression="zstd", index=False
@@ -499,6 +498,21 @@ def run(spec_path: Path) -> dict[str, Any]:
                     "仅训练窗口不同；fold 模型不落盘",
         }
         _write_json(exp_dir / "rolling_cv.json", rolling_doc)
+        # 折间均值也写进 metrics：验收若判在滚动交叉验证上，模型包必须
+        # 自带这个数 —— 门禁只读包内 metrics.json，不回头翻实验目录。
+        # 放在 surfaces 之外：它不是一个「面」，n_samples 是各折评估集之和。
+        metrics_doc["rolling_cv"] = {
+            "n_folds": len(fold_reports),
+            "n_folds_skipped": rolling_doc["n_folds_skipped"],
+            "n_samples": sum(int(e.get("n_eval") or 0) for e in fold_entries),
+            "metrics": {name: agg["mean"] for name, agg
+                        in rolling_doc["aggregate"]["per_metric"].items()
+                        if agg.get("mean") is not None},
+        }
+
+    # metrics.json 必须在滚动块之后落盘：验收可判在 rolling_cv 上，
+    # 制品与 report 里的 metrics 必须是同一份内容
+    _write_json(exp_dir / "metrics.json", metrics_doc)
 
     # ---- 物理验证（§6）
     physics_doc: dict[str, Any] | None = None
@@ -515,11 +529,14 @@ def run(spec_path: Path) -> dict[str, Any]:
                 "power_col": "__pred_power__",
                 "rated_power": float(rated_power) if rated_power else None,
             }
-            if isinstance(model, ChillerPhysicsModel | ResidualHybrid):
-                physics_model = (
-                    model if isinstance(model, ChillerPhysicsModel)
-                    else model.physics
-                )
+            # 只有能量平衡族才提供 cooling_capacity/condenser_col 这套接口。
+            # 系统辨识族（gordon_ng/eps_ntu）没有，硬检查降级为只查功率。
+            # 判据必须落在**解包后**的物理模型上：hybrid 包住 gordon_ng 时，
+            # 外层 ResidualHybrid 会通过 isinstance，内层却没有这些方法，
+            # 于是 hybrid+gordon_ng 每次都在物理检查处崩掉（实测 EXP-0040~0043）。
+            physics_model = (model.physics if isinstance(model, ResidualHybrid)
+                             else model)
+            if isinstance(physics_model, ChillerPhysicsModel):
                 check_df["__cooling__"] = physics_model.cooling_capacity(eval_df)
                 kwargs["cooling_col"] = "__cooling__"
                 kwargs["chw_supply_col"] = physics_model.inputs["chw_supply_temp"]
