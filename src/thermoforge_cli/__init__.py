@@ -1,4 +1,4 @@
-"""ThermoForge CLI（`tf`）——Pi Agent 的外部接入面。
+"""ThermoForge CLI（`tf`）——Agent 的外部接入面。
 
 每个工具一个子命令，stdout 输出统一信封 JSON（implementation-notes §11）；
 `tf status` 为人类可读的汇总面板（`--json` 机读）。

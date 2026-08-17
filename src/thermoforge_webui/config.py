@@ -2,7 +2,7 @@
 
 从旧控制台迁移，逻辑口径不变：
 
-- 环境变量优先于 `pi/agent.toml`；密钥读回一律掩码，完整值不出界面。
+- 环境变量优先于 `harness/agent.toml`；密钥读回一律掩码，完整值不出界面。
 - 写文件走临时文件 + `os.replace`，与项目其它写路径同调。
 - 自检逐层做 DNS → TCP → TLS → HTTP：「连不上」的成因差别极大，
   笼统一句话没法排查，逐层测能直接指出断点。
@@ -122,7 +122,7 @@ def _toml_escape(value: str) -> str:
 
 def write_config(api_key: str, base_url: str, model: str,
                  proxy: str = "") -> None:
-    """写 `pi/agent.toml`（gitignore 内）。空密钥表示保留原值。"""
+    """写 `harness/agent.toml`（gitignore 内）。空密钥表示保留原值。"""
     current = _load_doc()
     key = api_key or str(current.get("api_key") or "")
     if not key:

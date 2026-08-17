@@ -33,11 +33,11 @@ ThermoForge takes an object model, historical data, and a research goal, then co
 
 ```mermaid
 flowchart LR
-    In["TFOM + TFDC<br/>Research Goal + Engineering Rules"] --> PI["Research Orchestrator"]
-    PI --> Exp["Experiment Planner / Runner<br/>物理 · 数据 · 混合"]
+    In["TFOM + TFDC<br/>Research Goal + Engineering Rules"] --> HARNESS["Research Orchestrator"]
+    HARNESS --> Exp["Experiment Planner / Runner<br/>物理 · 数据 · 混合"]
     Exp --> Val["Validator + Model Reviewer"]
     Val --> Ledger["Research Ledger"]
-    Ledger --> PI
+    Ledger --> HARNESS
     Val --> Reg["Model Registry"]
     Reg --> Rt["Algorithm Server / SoftPLC"]
     Rt -.漂移与违规证据.-> Ledger
@@ -149,7 +149,7 @@ ThermoForge/
 │   ├── thermoforge_agent/     # 内置对话 Agent（OpenAI 兼容 + function calling）
 │   ├── thermoforge_webui/     # 本地 Web 控制台（Streamlit）
 │   └── thermoforge_mcp/       # MCP 服务端（stdio），把同一套工具给外部 Agent
-├── pi/                # Agent extensions / prompts / tools.json
+├── harness/           # Agent extensions / prompts / tools.json
 ├── tests/             # 约 510 个测试
 ├── examples/          # 冷水机端到端示例
 ├── research/          # 运行产物 · Research Ledger（默认不入库）
@@ -169,7 +169,7 @@ ThermoForge/
 | Phase 0 | 契约定稿：TFOM / TFDC / Research Goal / Experiment / Model Package Schema | ✅ 完成（`contracts/` + `thermoforge_core`） |
 | Phase 1 | 数据底座：导入器、指纹、Parquet、Dataset View | ✅ 完成（`thermoforge_data`） |
 | Phase 2 | 确定性研究内核：Ledger、Runner、验证套件 | ✅ 完成（`thermoforge_research` / `thermoforge_models`） |
-| Phase 3 | Pi/Agent 编排：工具接口、预算与停止条件 | ✅ 完成（23 个工具 + CLI + 编排器 + Web 控制台 + MCP） |
+| Phase 3 | Harness/Agent 编排：工具接口、预算与停止条件 | ✅ 完成（23 个工具 + CLI + 编排器 + Web 控制台 + MCP） |
 | Phase 4 | 模型注册与部署：Model Package、发布门禁、绑定 | ✅ 完成（`thermoforge_runtime`） |
 | Phase 5 | 系统化扩展：容器、队列、多站点、多 Agent | 未开始 |
 

@@ -1,7 +1,7 @@
 # 内置 Agent 配置模板
 #
-# 用法：cp pi/agent.example.toml pi/agent.toml，填入 api_key。
-# pi/agent.toml 已在 .gitignore 中，密钥不会提交入库。
+# 用法：cp harness/agent.example.toml harness/agent.toml，填入 api_key。
+# harness/agent.toml 已在 .gitignore 中，密钥不会提交入库。
 #
 # 密钥申请（任一 OpenAI 兼容端点均可）：
 #   Moonshot/Kimi → https://platform.moonshot.cn/console/api-keys

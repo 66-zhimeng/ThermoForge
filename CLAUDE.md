@@ -50,13 +50,13 @@ Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, exper
 
 `thermoforge_webui` is the largest package and splits four ways: `screens/` (one Streamlit page each), `services/` (page-free logic — this is what `tests/test_webui_*.py` targets), `charts/` (`series.py` prepares plot data once; `interactive.py`/`static.py` are the two renderers), `export/` (HTML/Markdown/PDF).
 
-## Agent control plane (`pi/`)
+## Agent control plane (`harness/`)
 
-`pi/` declares *how an agent calls the deterministic tools* and holds no research logic (`architecture.md` §4/§8 — the harness stays light and replaceable; research facts live in contracts and the Ledger).
+`harness/` declares *how an agent calls the deterministic tools* and holds no research logic (`architecture.md` §4/§8 — the harness stays light and replaceable; research facts live in contracts and the Ledger).
 
-- `pi/tools.json` — declarative tool name → Python entry manifest, kept in lockstep with `TOOL_REGISTRY` by `tests/test_tools.py`.
-- `pi/prompts/{system,planner,copilot}.md` — the built-in agent's, research planner's, and Web copilot's prompts. Behavior changes usually belong here, not in Python.
-- `pi/agent.toml` (gitignored; template `pi/agent.example.toml`) — OpenAI-compatible endpoint config. Precedence: CLI args > env (`TF_AGENT_API_KEY` / `TF_AGENT_BASE_URL` / `TF_AGENT_MODEL`) > TOML.
+- `harness/tools.json` — declarative tool name → Python entry manifest, kept in lockstep with `TOOL_REGISTRY` by `tests/test_tools.py`.
+- `harness/prompts/{system,planner,copilot}.md` — the built-in agent's, research planner's, and Web copilot's prompts. Behavior changes usually belong here, not in Python.
+- `harness/agent.toml` (gitignored; template `harness/agent.example.toml`) — OpenAI-compatible endpoint config. Precedence: CLI args > env (`TF_AGENT_API_KEY` / `TF_AGENT_BASE_URL` / `TF_AGENT_MODEL`) > TOML.
 - Tool schemas are generated from `TOOL_REGISTRY`, so a model never sees a hand-written schema. Human-only tools are withheld and reached via the `tf_human_approval` round-trip.
 - Session logs land in `research/agent_sessions/*.jsonl` — the first place to look when the agent misbehaves.
 - One user turn is bounded at `config.max_tool_rounds = 16`; exhausting the bound must degrade into a normal resumable answer, not a UI error. Every assistant message carrying `tool_calls` must be followed by exactly one tool result per call ID — Chat Completions rejects orphaned groups, and preserving those message groups across history trimming is why `agent.py` normalizes history rather than filtering it (commit `ae52b97`).
@@ -93,7 +93,7 @@ These are enforced by code and tests, not just documented. Breaking them breaks 
 
 - `tests/test_errors.py` parses the error-code tables in `docs/conventions.md` §7 and compares them row-by-row with `core.errors.ERROR_REGISTRY`. Adding an error code means editing both, and `docs/conventions.md` is treated as frozen (see `docs/issues.md` I-53 — that is why preprocessing uses its own `TFPP-` registry instead).
 - `tests/test_contracts.py` re-renders the five Pydantic contracts and asserts `contracts/*/schema.json` is fresh — rerun `scripts/export_schemas.py` after changing a contract model.
-- `tests/test_tools.py` asserts `pi/tools.json` matches `TOOL_REGISTRY` — adding a tool means updating both, plus a `tf` subcommand in `thermoforge_cli/main.py`.
+- `tests/test_tools.py` asserts `harness/tools.json` matches `TOOL_REGISTRY` — adding a tool means updating both, plus a `tf` subcommand in `thermoforge_cli/main.py`.
 - `tests/fixtures/` holds one minimal xlsx per import error code; `tests/fixtures/generate.py` regenerates them.
 
 Module docstrings cite the doc section they implement (`data-contract.md §7`, `implementation-notes.md §4`, `DD-12`, `TFDC-502`, …). When changing behavior, follow the citation to the spec first; if the code must diverge, record it in `docs/issues.md` rather than silently editing a frozen doc.

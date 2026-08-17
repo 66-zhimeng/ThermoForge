@@ -94,7 +94,7 @@ def _emit(envelope: dict[str, Any], pretty: bool) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tf",
-        description="ThermoForge 工具 CLI（Pi Agent 接入面，信封 JSON 输出）",
+        description="ThermoForge 工具 CLI（Agent 接入面，信封 JSON 输出）",
     )
     parser.add_argument("--vault-root", default="vault")
     parser.add_argument("--research-root", default="research")
@@ -346,7 +346,7 @@ def _run_agent(args: argparse.Namespace, ctx: ToolContext) -> int:
 
     退出码：0 正常；2 配置缺失或 --check 连通性失败（CLI 自身错误）。
     """
-    from thermoforge_agent import AgentConfig, deepseek_harness, config_guidance
+    from thermoforge_agent import AgentConfig, HarnessAgent, config_guidance
     from thermoforge_agent.client import ChatClient
     from thermoforge_agent.repl import run_repl
 
@@ -370,7 +370,7 @@ def _run_agent(args: argparse.Namespace, ctx: ToolContext) -> int:
             return 2
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    agent = deepseek_harness(config, ctx)
+    agent = HarnessAgent(config, ctx)
     if args.message:
         print(agent.ask(args.message))
         return 0

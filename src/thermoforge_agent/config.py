@@ -1,4 +1,4 @@
-"""deepseek_harness 配置：环境变量 > 配置文件（pi/agent.toml，不入库）。
+"""HarnessAgent 配置：环境变量 > 配置文件（harness/agent.toml，不入库）。
 
 环境变量：
 
@@ -8,7 +8,7 @@
   等均可）。
 - `TF_AGENT_MODEL`：模型名。
 
-配置文件 `pi/agent.toml`（已 gitignore；模板见 pi/agent.example.toml）。
+配置文件 `harness/agent.toml`（已 gitignore；模板见 harness/agent.example.toml）。
 CLI 显式参数（--model/--base-url）优先级最高。
 """
 
@@ -25,7 +25,7 @@ DEFAULT_MODEL = "kimi-k2-0905-preview"
 # human-only 工具：不直接暴露给模型，经 tf_human_approval 弹确认执行
 DEFAULT_TOOLS_EXCLUDE = ("tf_preprocess_approve",)
 
-CONFIG_PATH = Path("pi/agent.toml")
+CONFIG_PATH = Path("harness/agent.toml")
 
 
 @dataclass(frozen=True)
@@ -88,8 +88,8 @@ def config_guidance(api_key_env: str = "TF_AGENT_API_KEY") -> str:
      export TF_AGENT_BASE_URL=https://api.moonshot.cn/v1   # 可选，OpenAI 兼容端点
      export TF_AGENT_MODEL=kimi-k2-0905-preview            # 可选
 
-2. 配置文件：cp pi/agent.example.toml pi/agent.toml，填入 api_key
-   （pi/agent.toml 已 gitignore，密钥不会入库）。
+2. 配置文件：cp harness/agent.example.toml harness/agent.toml，填入 api_key
+   （harness/agent.toml 已 gitignore，密钥不会入库）。
 
 密钥申请：Moonshot/Kimi → https://platform.moonshot.cn/console/api-keys
           OpenAI → https://platform.openai.com/api-keys

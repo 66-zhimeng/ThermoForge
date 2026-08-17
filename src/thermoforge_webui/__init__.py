@@ -10,7 +10,7 @@
 设计边界（沿用旧控制台的安全口径）：
 
 - **只绑 127.0.0.1**：这个界面能改密钥、能跑实验，不能让同网段的人打开。
-- 密钥写入 `pi/agent.toml`（已 gitignore），读回一律掩码。
+- 密钥写入 `harness/agent.toml`（已 gitignore），读回一律掩码。
 - **Agent 不直接读原始数据**：所有能力经 `TOOL_REGISTRY` 的信封；界面
   自己读 parquet 只用于「把已完成实验的结果画出来」，不喂给模型。
 - human-only 工具（预处理审批）在界面上以 `actor=human` 单独执行，

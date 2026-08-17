@@ -8,7 +8,7 @@ research/
 models/
 *.egg-info/
 .pytest_basetemp/
-pi/agent.toml
+harness/agent.toml
 .mcp.json
 
 # 处理后数据导出（scripts/export_processed_dataset.py）

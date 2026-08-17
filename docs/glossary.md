@@ -73,7 +73,7 @@ TFDC 的传输载体变体：`TFDC-XLSX`、`TFDC-JSON`、`TFDC-Parquet`、`TFDC-
 
 | 组件 | 职责 |
 |---|---|
-| Pi Harness / ThermoForge PI | 研究编排、工具调用、会话入口。可替换的控制面，研究事实不存在于其中 |
+| TF Harness / ThermoForge Harness | 研究编排、工具调用、会话入口。可替换的控制面，研究事实不存在于其中 |
 | TFOM Registry | 管理对象模型与物理约束 |
 | TFDC Importer | 导入和校验 Excel |
 | Data Vault | 原始数据、Parquet、元数据与谱系的不可变存储 |
@@ -89,7 +89,7 @@ TFDC 的传输载体变体：`TFDC-XLSX`、`TFDC-JSON`、`TFDC-Parquet`、`TFDC-
 
 一期可由单个主 Agent 顺序扮演全部角色。
 
-ThermoForge PI · Data Scientist · Physics Scientist · ML Scientist · Hybrid Scientist · Experiment Engineer · Model Reviewer
+TF Harness · Data Scientist · Physics Scientist · ML Scientist · Hybrid Scientist · Experiment Engineer · Model Reviewer
 
 职责见 [architecture.md §5](./architecture.md)。
 

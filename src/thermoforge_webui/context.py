@@ -15,7 +15,7 @@ from pathlib import Path
 from thermoforge_research.tools import ToolContext
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_PATH = REPO_ROOT / "pi" / "agent.toml"
+CONFIG_PATH = REPO_ROOT / "harness" / "agent.toml"
 
 ACTOR_UI = "webui"
 ACTOR_HUMAN = "human"

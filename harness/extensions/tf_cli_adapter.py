@@ -1,6 +1,6 @@
-"""Pi Agent 侧最小适配示例：把 `tf` CLI 包装成函数调用。
+"""外部 Agent 宿主侧最小适配示例：把 `tf` CLI 包装成函数调用。
 
-用法（Pi Agent 的 shell 工具层）::
+用法（外部 Agent 宿主的 shell 工具层）::
 
     from tf_cli_adapter import Tf
 
@@ -12,7 +12,7 @@
     env = tf("dataset", "sample", "WX_2025_PLANT@rev_0001",
              "--n", "50", "--variables", "PLANT.total_power")
 
-约定（见 pi/README.md）：exit 0 含工具级失败，成败读信封 ok；
+约定（见 harness/README.md）：exit 0 含工具级失败，成败读信封 ok；
 exit 2 为 CLI 自身错误（参数问题，重试前先修参数）。
 """
 

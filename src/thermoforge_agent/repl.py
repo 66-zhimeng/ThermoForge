@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Mapping
 
-from .agent import deepseek_harness
+from .agent import HarnessAgent
 
 BANNER = (
     "ThermoForge 内置研发 Agent（输入 /exit 退出，/tools 查看可用工具）"
@@ -26,7 +26,7 @@ def make_approval_handler(input_fn=input):
     return handler
 
 
-def run_repl(agent: deepseek_harness, *, input_fn=input) -> None:
+def run_repl(agent: HarnessAgent, *, input_fn=input) -> None:
     def on_tool_call(name: str, ok: bool) -> None:
         print(f"  → 调用 {name} → {'ok' if ok else 'FAILED'}",
               file=sys.stderr)

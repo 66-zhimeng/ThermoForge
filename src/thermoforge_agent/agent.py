@@ -1,4 +1,4 @@
-"""deepseek_harness 对话循环：多轮上下文 + function calling + 审批拦截 + 会话留痕。
+"""HarnessAgent 对话循环：多轮上下文 + function calling + 审批拦截 + 会话留痕。
 
 - 模型请求工具 → 本地执行（TOOL_REGISTRY 薄封装）→ 信封 JSON 原样回传
   （32KB 截断约定天然适配上下文窗口）。
@@ -48,12 +48,12 @@ TOOL_LIMIT_FINALIZE_PROMPT = """本轮工具调用预算已经用完。不要再
 不要声称未执行的动作已经完成。"""
 
 
-class deepseek_harness:
+class HarnessAgent:
     """内置研发 Agent。
 
     ::
 
-        agent = deepseek_harness(config, ctx)
+        agent = HarnessAgent(config, ctx)
         answer = agent.ask("列出所有数据集")
     """
 
@@ -398,7 +398,7 @@ def _serialize_tool_result(
     try:
         return json.dumps(envelope, ensure_ascii=False)
     except Exception as exc:
-        fallback = deepseek_harness._error_envelope(
+        fallback = HarnessAgent._error_envelope(
             call.name, f"工具结果序列化失败: {type(exc).__name__}: {exc}")
         return json.dumps(fallback, ensure_ascii=False)
 
@@ -412,7 +412,7 @@ def _summarize_content(message: Mapping[str, Any]) -> Any:
 
 def _default_system_prompt() -> str:
     path = (Path(__file__).resolve().parents[2]
-            / "pi" / "prompts" / "system.md")
+            / "harness" / "prompts" / "system.md")
     if path.exists():
         return path.read_text(encoding="utf-8")
     return "你是 ThermoForge 内置研发 Agent，使用提供的工具完成 HVAC 建模研究任务。"

@@ -1,4 +1,4 @@
-"""deepseek_harness（内置研发 Agent）测试——不依赖真实 API。
+"""HarnessAgent（内置研发 Agent）测试——不依赖真实 API。
 
 - StubClient：脚本化 ChatResult（function calling 循环 / 多轮 / 错误透传）；
 - mock HTTP server：`--check` 走真实 openai SDK 路径；
@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from thermoforge_agent.agent import deepseek_harness
+from thermoforge_agent.agent import HarnessAgent
 from thermoforge_agent.client import (
     ChatResult,
     ToolCallRequest,
@@ -86,7 +86,7 @@ def test_function_calling_loop(tmp_path):
         tool_call("tf_dataset_list", {}),
         final("当前共有 1 个数据集：WX 合成数据。"),
     ])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
     answer = agent.ask("列出所有数据集")
     assert "1 个数据集" in answer
@@ -107,7 +107,7 @@ def test_tool_round_limit_disables_tools_and_requests_final_answer(tmp_path):
         tool_call("tf_dataset_list", {}, call_id="call-2"),
         final("工具预算已用完；根据现有结果，当前有一个数据集。"),
     ])
-    agent = deepseek_harness(_config(max_tool_rounds=2), ctx, client=stub,
+    agent = HarnessAgent(_config(max_tool_rounds=2), ctx, client=stub,
                     session_dir=tmp_path / "research")
 
     answer = agent.ask("查清楚数据集")
@@ -126,7 +126,7 @@ def test_tool_round_limit_closes_unexpected_finalizer_tool_call(tmp_path):
         tool_call("tf_experiment_run", {"experiment_id": "EXP-9999"},
                   call_id="call-2"),
     ])
-    agent = deepseek_harness(_config(max_tool_rounds=1), ctx, client=stub,
+    agent = HarnessAgent(_config(max_tool_rounds=1), ctx, client=stub,
                     session_dir=tmp_path / "research")
 
     answer = agent.ask("一直调用工具")
@@ -148,13 +148,13 @@ def test_multiple_tool_calls_all_receive_matching_results(tmp_path):
         ToolCallRequest("call-2", "tf_dataset_list", {}),
     ]
     stub = StubClient([
-        # Deliberately omit raw tool_calls: deepseek_harness must reconstruct them from
+        # Deliberately omit raw tool_calls: HarnessAgent must reconstruct them from
         # the normalized requests before the next Chat Completions call.
         ChatResult(content=None, tool_calls=calls,
                    raw_message={"role": "assistant", "content": None}),
         final("done"),
     ])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
 
     assert agent.ask("list twice") == "done"
@@ -175,7 +175,7 @@ def test_multiple_tool_calls_all_receive_matching_results(tmp_path):
 def test_unexpected_tool_exception_is_returned_as_tool_result(tmp_path):
     ctx, _ = make_ctx(tmp_path, n_steps=100)
     stub = StubClient([tool_call("explode", {}), final("recovered")])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
 
     def explode(_ctx):
@@ -193,7 +193,7 @@ def test_unexpected_tool_exception_is_returned_as_tool_result(tmp_path):
 def test_next_question_repairs_orphaned_tool_call_history(tmp_path):
     ctx, _ = make_ctx(tmp_path, n_steps=100)
     stub = StubClient([final("history repaired")])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
     agent.messages.extend([
         {
@@ -228,7 +228,7 @@ def test_next_question_repairs_orphaned_tool_call_history(tmp_path):
 def test_multi_turn_history(tmp_path):
     ctx, _ = make_ctx(tmp_path, n_steps=100)
     stub = StubClient([final("回答一"), final("回答二")])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
     agent.ask("第一个问题")
     agent.ask("第二个问题")
@@ -243,7 +243,7 @@ def test_error_envelope_passthrough(tmp_path):
         tool_call("tf_dataset_get", {"ref": "NOPE@rev_9999"}),
         final("数据版本不存在（TFV-703）。"),
     ])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research")
     answer = agent.ask("查看 NOPE@rev_9999")
     envelope = json.loads(_tool_messages(agent)[0]["content"])
@@ -255,7 +255,7 @@ def test_error_envelope_passthrough(tmp_path):
 def test_session_log_jsonl(tmp_path):
     ctx, _ = make_ctx(tmp_path, n_steps=100)
     stub = StubClient([tool_call("tf_dataset_list", {}), final("done")])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     session_dir=tmp_path / "research" / "agent_sessions")
     agent.ask("hi")
     logs = list((tmp_path / "research" / "agent_sessions").glob("*.jsonl"))
@@ -324,7 +324,7 @@ def test_approval_yes_executes_as_human(tmp_path):
         final("已审批。"),
     ])
     approvals = []
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     approval_handler=lambda t, a, r: approvals.append(t) or True,
                     session_dir=tmp_path / "research")
     agent.ask("帮我审批 WX_FIX")
@@ -346,7 +346,7 @@ def test_approval_no_declines(tmp_path):
             "reason": "试试"}),
         final("用户未批准，未执行。"),
     ])
-    agent = deepseek_harness(_config(), ctx, client=stub,
+    agent = HarnessAgent(_config(), ctx, client=stub,
                     approval_handler=lambda t, a, r: False,
                     session_dir=tmp_path / "research")
     agent.ask("审批 WX_FIX")
@@ -387,14 +387,14 @@ def test_config_api_key_env_alias(tmp_path, monkeypatch):
 
 def test_config_missing_key_guidance(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("TF_AGENT_API_KEY", raising=False)
-    # CLI 分支不传 config_path，会落到模块默认的 pi/agent.toml；使用者一旦
+    # CLI 分支不传 config_path，会落到模块默认的 harness/agent.toml；使用者一旦
     # 真的配了密钥，这个「无 key」用例就会被真实配置污染。改指临时路径。
     monkeypatch.setattr("thermoforge_agent.config.CONFIG_PATH",
                         tmp_path / "none.toml")
     config = AgentConfig.load(config_path=tmp_path / "none.toml")
     assert config is None
     text = config_guidance()
-    assert "platform.moonshot.cn" in text and "pi/agent.toml" in text
+    assert "platform.moonshot.cn" in text and "harness/agent.toml" in text
     code = cli_main(["--vault-root", str(tmp_path / "v"),
                      "--research-root", str(tmp_path / "r"),
                      "--models-root", str(tmp_path / "m"),

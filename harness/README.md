@@ -1,6 +1,6 @@
-# pi/ — ThermoForge 控制面
+# harness/ — ThermoForge 控制面
 
-`pi/` 是 **控制面**（architecture.md §4/§8：Pi Harness 保持轻量、可替换，
+`harness/` 是 **控制面**（architecture.md §4/§8：TF Harness 保持轻量、可替换，
 研究事实保存在契约与 Research Ledger 中）。本目录不放研究逻辑，只
 声明「Agent 如何调用确定性工具」。
 
@@ -8,7 +8,7 @@
 
 - `tools.json`：工具名 → Python 入口的声明式清单（与
   `thermoforge_research.tools.TOOL_REGISTRY` 一一对应，测试保证不漂移）。
-- `extensions/`：Pi Agent 侧的接入适配示例。
+- `extensions/`：外部 Agent 宿主侧的接入适配示例。
 
 ## 接入方式一：内置 Agent（`tf agent`，零宿主）
 
@@ -16,25 +16,25 @@
 Agent 宿主：
 
 ```bash
-export TF_AGENT_API_KEY=sk-...     # 或 cp pi/agent.example.toml pi/agent.toml
+export TF_AGENT_API_KEY=sk-...     # 或 cp harness/agent.example.toml harness/agent.toml
 .venv/Scripts/tf agent --check     # 验证配置与连通性
 .venv/Scripts/tf agent             # 进入对话 REPL（/tools /exit）
 ```
 
 - 协议：OpenAI 兼容 chat completions + function calling（Moonshot/Kimi、
   OpenAI、DeepSeek 等均可，`TF_AGENT_BASE_URL` / `TF_AGENT_MODEL` 切换）。
-- 配置优先级：CLI 参数 > 环境变量 > `pi/agent.toml`（已 gitignore，
-  密钥不入库；模板 `pi/agent.example.toml`）。
+- 配置优先级：CLI 参数 > 环境变量 > `harness/agent.toml`（已 gitignore，
+  密钥不入库；模板 `harness/agent.example.toml`）。
 - 工具清单从 `TOOL_REGISTRY` 自动生成 JSON Schema；
   `tf_preprocess_approve` 等 human-only 工具不直接暴露，模型经
   `tf_human_approval` 发起请求，REPL 弹确认后以 actor=human 执行。
-- 系统提示词：`pi/prompts/system.md`；会话日志：
+- 系统提示词：`harness/prompts/system.md`；会话日志：
   `research/agent_sessions/*.jsonl`。
 
-## 接入方式二：CLI 进程调用（推荐给外部 Pi Agent）
+## 接入方式二：CLI 进程调用（推荐给外部 Agent 宿主）
 
 `tf` 命令（`thermoforge_cli` 包，`pyproject [project.scripts]` 注册）
-把每个工具暴露为一个子命令，适合作为 Pi Agent 的 shell 工具：
+把每个工具暴露为一个子命令，适合作为外部 Agent 宿主的 shell 工具：
 
 ```bash
 tf dataset list                                   # 单行 JSON 信封
@@ -60,7 +60,7 @@ tf status                                         # 人类可读面板（--json 
 - 结构化定义（goal/experiment/view/ruleset）用 `--*-json` 或 `--*-file`
   （YAML 亦可）。
 
-Pi 侧最小适配示例见 `extensions/tf_cli_adapter.py`。
+宿主侧最小适配示例见 `extensions/tf_cli_adapter.py`。
 
 ## 接入方式三：Python import（同进程）
 

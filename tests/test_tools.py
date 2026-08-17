@@ -3,7 +3,7 @@
 - 信封字段与稳定 ID（有副作用工具）；
 - sample 200 行硬上限；profile 分位数固定点位；
 - goal → hypothesis（basis 强制）→ view → experiment → run/get/compare/publish；
-- pi/tools.json 与 TOOL_REGISTRY 一致性。
+- harness/tools.json 与 TOOL_REGISTRY 一致性。
 """
 
 from __future__ import annotations
@@ -282,8 +282,8 @@ def test_model_publish_rejected_when_acceptance_unmet(ctx_ref):
     assert env["summary"]["gates"][-1]["ok"] is False
 
 
-def test_pi_manifest_matches_registry(repo_root):
-    with open(repo_root / "pi" / "tools.json", encoding="utf-8") as fp:
+def test_harness_manifest_matches_registry(repo_root):
+    with open(repo_root / "harness" / "tools.json", encoding="utf-8") as fp:
         manifest = json.load(fp)
     names = {t["name"] for t in manifest["tools"]}
     assert names == set(TOOL_REGISTRY)

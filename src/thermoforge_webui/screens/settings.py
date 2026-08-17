@@ -71,7 +71,7 @@ def _form(config) -> None:
         else:
             cache.invalidate()
             st.session_state.pop("research_session", None)  # 配置变了，旧会话作废
-            st.success("已保存。密钥写入 pi/agent.toml（该文件已 gitignore）。")
+            st.success("已保存。密钥写入 harness/agent.toml（该文件已 gitignore）。")
             st.rerun()
 
     st.caption(f"配置文件：`{config.config_path}`　密钥读回一律掩码，"

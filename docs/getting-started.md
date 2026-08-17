@@ -95,7 +95,7 @@ examples/chiller_power/report.md
 - 「把表现最好的模型发布到生产」
 - 「最近五次实验的结果汇总给我」
 
-AI 助手通过 `pi/tools.json` 里登记的 22 个工具完成这些操作，每一步都有结构化记录。要接入你自己的 Agent（Pi Agent），看 `pi/README.md`——CLI 调用和 Python 调用两种方式任选。
+AI 助手通过 `harness/tools.json` 里登记的 22 个工具完成这些操作，每一步都有结构化记录。要接入你自己的 Agent（外部 Agent 宿主），看 `harness/README.md`——CLI 调用和 Python 调用两种方式任选。
 
 ### 内置 Agent：`tf agent`（不依赖外部助手）
 
@@ -104,7 +104,7 @@ AI 助手通过 `pi/tools.json` 里登记的 22 个工具完成这些操作，�
 ```bash
 # 1. 配置密钥（二选一；密钥不会入库）
 export TF_AGENT_API_KEY=sk-...        # Moonshot/Kimi、OpenAI、DeepSeek 等均可
-# 或：cp pi/agent.example.toml pi/agent.toml，填入 api_key
+# 或：cp harness/agent.example.toml harness/agent.toml，填入 api_key
 
 # 2. 验证连通性
 .venv/Scripts/tf agent --check        # 输出 {"ok": true, ...} 即就绪

@@ -1,5 +1,5 @@
 {
-  "contract": "TF-PI-TOOLS",
+  "contract": "TF-HARNESS-TOOLS",
   "version": "1.0",
   "description": "architecture.md §6 工具清单 → Python 入口（thermoforge_research.tools）。每个工具第一参数为 ToolContext，返回统一信封（implementation-notes §11）。",
   "envelope": {

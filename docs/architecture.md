@@ -21,8 +21,8 @@ ThermoForge 不是一个“让 LLM 写 Python 脚本”的工具，而是一个�
 
 ```mermaid
 flowchart TD
-    Input["TFOM + TFDC + Research Goal + Engineering Rules"] --> PI["ThermoForge PI / Research Orchestrator"]
-    PI --> Planner["Experiment Planner"]
+    Input["TFOM + TFDC + Research Goal + Engineering Rules"] --> HARNESS["TF Harness / Research Orchestrator"]
+    HARNESS --> Planner["Experiment Planner"]
     Planner --> Physics["Physics Modeling"]
     Planner --> Data["Data Modeling"]
     Planner --> Hybrid["Hybrid Modeling"]
@@ -33,7 +33,7 @@ flowchart TD
     Compute --> Validator["Data + Physics Validator"]
     Validator --> Judge["Model Reviewer / Judge"]
     Judge --> Ledger["Research Ledger"]
-    Ledger --> PI
+    Ledger --> HARNESS
     Judge --> Registry["Model Registry"]
     Registry --> Runtime["Algorithm Server / SoftPLC / External Systems"]
 ```
@@ -69,7 +69,7 @@ flowchart TD
 
 | 组件 | 主要职责 | 一期建议 |
 |---|---|---|
-| Pi Harness | 研究编排、工具调用、会话入口 | 保持轻量，只做控制面 |
+| TF Harness | 研究编排、工具调用、会话入口 | 保持轻量，只做控制面 |
 | TFOM Registry | 管理对象模型与物理约束 | YAML + JSON Schema |
 | TFDC Importer | 导入和校验 Excel | Python |
 | Data Vault | 原始数据、Parquet、元数据、谱系 | 文件系统 + DuckDB + Parquet |
@@ -85,7 +85,7 @@ flowchart TD
 
 | 角色 | 职责 |
 |---|---|
-| ThermoForge PI | 管理研究目标、预算、证据和下一步决策 |
+| TF Harness | 管理研究目标、预算、证据和下一步决策 |
 | Data Scientist | 数据发现、质量分析、Dataset View 设计 |
 | Physics Scientist | 建立物理方程、参数范围和守恒约束 |
 | ML Scientist | 建立数据模型和可靠的基线 |
@@ -137,7 +137,7 @@ ThermoForge/
 │   ├── thermoforge_research/
 │   ├── thermoforge_models/
 │   └── thermoforge_runtime/
-├── pi/
+├── harness/
 │   ├── extensions/
 │   ├── skills/
 │   └── prompts/
@@ -151,7 +151,7 @@ ThermoForge/
 
 ## 8. 设计决策
 
-- Pi 是可替换的控制面，研究事实保存在契约和账本中。
+- TF Harness 是可替换的控制面，研究事实保存在契约和账本中。
 - 原始数据只读，所有清洗和聚合都通过 Dataset View 表达。
 - 所有科学计算通过确定性工具执行，并记录环境和随机种子。
 - 发布决策必须由可机器检查的验收条件驱动。

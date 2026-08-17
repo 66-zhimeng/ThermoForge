@@ -1,14 +1,14 @@
 """提示词加载与指纹（控制面「决策规则」的唯一来源）。
 
 四个 agent 位点（命令行 REPL、网页副驾、研究规划器、MCP server）各有一套
-系统提示词。以前它们散在各自的代码里，改 `pi/prompts/system.md` 只有命令行
+系统提示词。以前它们散在各自的代码里，改 `harness/prompts/system.md` 只有命令行
 会变——同一句「技能」在不同入口行为不一致，这本身就是缺陷。
 
-现在一律从 `pi/prompts/<name>.md` 读：**装技能 = 改文件**，四处行为一致。
+现在一律从 `harness/prompts/<name>.md` 读：**装技能 = 改文件**，四处行为一致。
 
 ## 技能
 
-`pi/skills/*.md` 是可复用的方法论（怎么做系统辨识、怎么校验），与位点提示词
+`harness/skills/*.md` 是可复用的方法论（怎么做系统辨识、怎么校验），与位点提示词
 （这个 agent 是谁、能调什么工具）分开：提示词描述**身份与接口**，技能描述
 **做法**。技能按 `SKILL_BINDINGS` 绑定到位点，加载时追加在提示词之后，
 并一并计入指纹 —— 换了技能，实验产物里的 `prompt_fingerprint` 就会变。
@@ -32,8 +32,8 @@ from functools import lru_cache
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROMPTS_DIR = REPO_ROOT / "pi" / "prompts"
-SKILLS_DIR = REPO_ROOT / "pi" / "skills"
+PROMPTS_DIR = REPO_ROOT / "harness" / "prompts"
+SKILLS_DIR = REPO_ROOT / "harness" / "skills"
 
 # 位点 → 文件名。改这里等于改「有哪些可装技能的位点」。
 PROMPT_FILES = {
@@ -43,7 +43,7 @@ PROMPT_FILES = {
     "mcp": "mcp.md",           # MCP server 给外部 agent 的说明
 }
 
-# 位点 → 装载的技能（`pi/skills/<name>.md`，不含扩展名）。
+# 位点 → 装载的技能（`harness/skills/<name>.md`，不含扩展名）。
 # 只装到真正做研究的位点：网页副驾负责导航与解读，不直接指挥建模升级。
 # 顺序即装载顺序：取证在前、建模在后，与实际工作顺序一致。
 SKILL_BINDINGS = {

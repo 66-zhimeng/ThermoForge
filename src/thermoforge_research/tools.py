@@ -1523,7 +1523,7 @@ def tf_preprocess_list(ctx: ToolContext) -> dict[str, Any]:
     ))
 
 
-# architecture §6 工具清单 → 入口（与 pi/tools.json 保持一致）
+# architecture §6 工具清单 → 入口（与 harness/tools.json 保持一致）
 TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_import": tf_dataset_import,
     "tf_dataset_list": tf_dataset_list,
