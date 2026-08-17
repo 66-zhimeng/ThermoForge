@@ -200,12 +200,28 @@ def _build_model(model_spec: Mapping[str, Any], seed: int,
     raise ResearchError("TFX-902", f"未支持的模型类别: {category!r}")
 
 
+def _model_frame(df: pd.DataFrame, features: Sequence[str]) -> pd.DataFrame:
+    """交给模型的列：视图特征 + 记账列，**绝不含目标列**。
+
+    DD-16 的白名单门禁管的是「视图的特征 ⊆ 目标白名单」，管不到模型自己
+    从 DataFrame 里伸手拿列。内置模型都按 feature_order / inputs 取列，
+    不受影响；实验室模块拿到的是整张表，只要写一句「除 object_id/timestamp
+    外都当特征」就会把目标列训进去——R² 立刻变成 0.99，而那是拿 y predict y。
+    这类假精度正是 DD-16 存在的理由，因此在这里从结构上堵死：模型看不到
+    的东西，就不可能用。
+    """
+    keep = [c for c in ("object_id", "timestamp") if c in df.columns]
+    keep += [c for c in features if c in df.columns and c not in keep]
+    return df[keep]
+
+
 def _fit(model: Any, df: pd.DataFrame, y: np.ndarray,
          features: Sequence[str]) -> None:
+    frame = _model_frame(df, features)
     if isinstance(model, LinearBaseline | ResidualHybrid):
-        model.fit(df, y, feature_order=features)
+        model.fit(frame, y, feature_order=features)
     else:
-        model.fit(df, y)
+        model.fit(frame, y)
 
 
 def _seed_manifest(seed: int) -> dict[str, Any]:
@@ -376,7 +392,8 @@ def run(spec_path: Path) -> dict[str, Any]:
             metrics_doc["surfaces"][surface] = {"n_samples": 0, "metrics": {}}
             continue
         y_true = sub[target].to_numpy(np.float64)
-        y_pred = np.asarray(model.predict(sub), dtype=np.float64)
+        y_pred = np.asarray(
+            model.predict(_model_frame(sub, features)), dtype=np.float64)
         report = compute_metrics(
             y_true.tolist(), y_pred.tolist(), exp["metrics"],
             y_floor=y_floor,
@@ -468,7 +485,9 @@ def run(spec_path: Path) -> dict[str, Any]:
             _fit(fold_model, ftrain,
                  ftrain[target].to_numpy(np.float64), features)
             y_true = feval[target].to_numpy(np.float64)
-            y_pred = np.asarray(fold_model.predict(feval), dtype=np.float64)
+            y_pred = np.asarray(
+                fold_model.predict(_model_frame(feval, features)),
+                dtype=np.float64)
             report = compute_metrics(
                 y_true.tolist(), y_pred.tolist(), exp["metrics"],
                 y_floor=y_floor,
@@ -519,7 +538,9 @@ def run(spec_path: Path) -> dict[str, Any]:
     if (exp.get("physics_tests") or {}).get("enabled"):
         eval_df = subsets["test"] if len(subsets["test"]) else subsets["validate"]
         if len(eval_df):
-            y_pred = np.asarray(model.predict(eval_df), dtype=np.float64)
+            y_pred = np.asarray(
+                model.predict(_model_frame(eval_df, features)),
+                dtype=np.float64)
             rated_power = (exp["model"].get("hyperparameters") or {}).get(
                 "rated_power_kw"
             )

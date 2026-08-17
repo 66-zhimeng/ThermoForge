@@ -20,10 +20,21 @@ import 的项目内依赖（`thermoforge_models` 根包在静态扫描白名单�
 
 模型对象必须提供::
 
-    fit(df: pandas.DataFrame, y) -> self   # df 是视图行（含全部列），自行选列
+    fit(df: pandas.DataFrame, y) -> self   # 见下「df 里有什么」
     predict(df: pandas.DataFrame) -> 等长数值序列
     save(directory) -> None                # 必须写 model.json，且含
                                            # "format" == 本模块 MODEL_FORMAT
+
+## df 里有什么
+
+`fit`/`predict` 拿到的 DataFrame **只含视图声明的特征列**，外加
+`object_id` / `timestamp` 两个记账列 —— **目标列不在里面**（runner 侧
+`_child._model_frame` 投影，模型看不到就不可能用）。
+
+这不是客气话：曾经把整张表交给模块，一句「除 object_id/timestamp 外都
+当特征」就会把目标列训进去，rolling_cv R² 立刻从 0.6 跳到 0.99 ——
+那是拿 y 去 predict y。DD-16 白名单管的是视图特征，管不到模块伸手取列，
+所以只能在这里堵死。写模块时也别再自己去找 target 列，它不存在。
 
 ## 纪律
 

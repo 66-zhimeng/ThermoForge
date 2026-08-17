@@ -16,6 +16,8 @@ category=lab 实验 → 发布自包含 的全链路测试。
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from thermoforge_core.contracts.experiment import Experiment
@@ -161,6 +163,68 @@ def load_model(directory):
 
 # 直接用 LabStore 时省掉真跑一遍子进程五连检（工具层测试覆盖真校验）
 OK_VALIDATION = {"ok": True, "checks": [], "model_format": "thermoforge.lab.x"}
+
+# 「除记账列外都当特征」的贪心模块——最自然、也最容易把目标列训进去的写法。
+# runner 必须让它拿不到目标列（否则 R² 直奔 0.99，是拿 y predict y）。
+GREEDY_SOURCE = '''"""贪心模块：把拿到的每一列都当特征。"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+
+MODEL_FORMAT = "thermoforge.lab.greedy.v1"
+INPUT_ROLES = []
+
+_SKIP = ("object_id", "timestamp")
+
+
+class Greedy:
+    def __init__(self):
+        self._columns = None
+        self._coef = None
+        self._intercept = 0.0
+
+    def _design(self, df):
+        x = df[self._columns].to_numpy(np.float64)
+        return np.column_stack([x, np.ones(len(x))])
+
+    def fit(self, df, y):
+        self._columns = [c for c in df.columns if c not in _SKIP]
+        sol, *_ = np.linalg.lstsq(
+            self._design(df), np.asarray(y, dtype=np.float64), rcond=None)
+        self._coef = sol[:-1]
+        self._intercept = float(sol[-1])
+        return self
+
+    def predict(self, df):
+        return self._design(df) @ np.append(self._coef, self._intercept)
+
+    def save(self, directory):
+        path = Path(directory)
+        path.mkdir(parents=True, exist_ok=True)
+        doc = {"format": MODEL_FORMAT, "columns": self._columns,
+               "coef": [float(c) for c in self._coef],
+               "intercept": self._intercept}
+        with open(path / "model.json", "w", encoding="utf-8") as fp:
+            json.dump(doc, fp)
+
+
+def build_model(hyperparameters, seed):
+    return Greedy()
+
+
+def load_model(directory):
+    with open(Path(directory) / "model.json", encoding="utf-8") as fp:
+        doc = json.load(fp)
+    model = Greedy()
+    model._columns = list(doc["columns"])
+    model._coef = np.asarray(doc["coef"], dtype=np.float64)
+    model._intercept = float(doc["intercept"])
+    return model
+'''
 
 NO_BUILD_SOURCE = '''"""缺 build_model 的模块。"""
 
@@ -474,6 +538,47 @@ def test_lab_iteration_loop_v1_then_v2(tmp_path):
     snap1 = (exps / "EXP-9111" / "lab_module.py").read_text(encoding="utf-8")
     snap2 = (exps / "EXP-9112" / "lab_module.py").read_text(encoding="utf-8")
     assert "# v2" not in snap1 and "# v2" in snap2
+
+
+def test_lab_model_never_sees_target_column(tmp_path):
+    """贪心模块拿不到目标列——否则 R² 是拿 y predict y 的假精度。
+
+    DD-16 的白名单门禁管的是「视图特征 ⊆ 白名单」，管不到模块自己从
+    DataFrame 里伸手取列；结构上堵死的位置在 `_child._model_frame`。
+    """
+    _, ref = build_chiller_vault(tmp_path)
+    research_root = tmp_path / "research"
+    LabStore(research_root).submit("greedy", GREEDY_SOURCE,
+                                   validation=OK_VALIDATION)
+
+    report = run_experiment(
+        _lab_experiment("EXP-9121", lab_ref="greedy"),
+        research_root=research_root, vault_root=tmp_path / "vault",
+        view_definition=view_definition(ref),
+    )
+    assert report["status"] == "completed", report.get("error")
+
+    saved = json.loads(
+        (research_root / "experiments" / "EXP-9121" / "model" / "model.json")
+        .read_text(encoding="utf-8"))
+    assert TARGET not in saved["columns"], (
+        f"目标列 {TARGET} 进了训练特征：{saved['columns']}")
+    assert set(saved["columns"]) <= set(FEATURES), saved["columns"]
+
+
+def test_model_frame_drops_target_and_keeps_bookkeeping():
+    """投影函数本身的单元断言（三处 predict 与 fit 都过它）。"""
+    import pandas as pd
+
+    from thermoforge_research._child import _model_frame
+
+    df = pd.DataFrame({
+        "object_id": ["CH01"], "timestamp": [pd.Timestamp("2025-01-01")],
+        "feat_a": [1.0], "feat_b": [2.0], "power": [99.0],
+    })
+    out = _model_frame(df, ["feat_a", "feat_b"])
+    assert list(out.columns) == ["object_id", "timestamp", "feat_a", "feat_b"]
+    assert "power" not in out.columns
 
 
 def test_lab_experiment_rejected_when_deprecated(tmp_path):
