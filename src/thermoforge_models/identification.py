@@ -226,13 +226,19 @@ class GordonNgChiller:
                       json.dumps(self.to_dict(), ensure_ascii=False, indent=2))
 
     @classmethod
-    def load(cls, directory: str | Path) -> "GordonNgChiller":
-        with open(Path(directory) / "model.json", encoding="utf-8") as fp:
-            doc = json.load(fp)
+    def from_dict(cls, doc: Mapping[str, Any]) -> "GordonNgChiller":
+        """从 to_dict() 文档重建（ResidualHybrid 主干随包落盘走这条路）。"""
+        if doc.get("format") != GN_FORMAT:
+            raise ValueError(f"未知模型格式: {doc.get('format')!r}")
         m = cls(inputs=doc.get("inputs"), q_floor=doc.get("q_floor", 1.0))
         m.coef_ = np.asarray(doc["coef"], dtype=np.float64)
         m.n_train_ = int(doc.get("n_train", 0))
         return m
+
+    @classmethod
+    def load(cls, directory: str | Path) -> "GordonNgChiller":
+        with open(Path(directory) / "model.json", encoding="utf-8") as fp:
+            return cls.from_dict(json.load(fp))
 
 
 class EffectivenessNTU:
@@ -326,12 +332,18 @@ class EffectivenessNTU:
                       json.dumps(self.to_dict(), ensure_ascii=False, indent=2))
 
     @classmethod
-    def load(cls, directory: str | Path) -> "EffectivenessNTU":
-        with open(Path(directory) / "model.json", encoding="utf-8") as fp:
-            doc = json.load(fp)
+    def from_dict(cls, doc: Mapping[str, Any]) -> "EffectivenessNTU":
+        """从 to_dict() 文档重建（ResidualHybrid 主干随包落盘走这条路）。"""
+        if doc.get("format") != NTU_FORMAT:
+            raise ValueError(f"未知模型格式: {doc.get('format')!r}")
         m = cls(inputs=doc.get("inputs"), n_units=doc.get("n_units"))
         params = doc.get("parameters") or {}
         m.ua0_ = float(params["ua0"]) if "ua0" in params else None
         m.beta_ = float(params.get("beta", 1.0))
         m.n_train_ = int(doc.get("n_train", 0))
         return m
+
+    @classmethod
+    def load(cls, directory: str | Path) -> "EffectivenessNTU":
+        with open(Path(directory) / "model.json", encoding="utf-8") as fp:
+            return cls.from_dict(json.load(fp))

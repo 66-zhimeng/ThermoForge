@@ -12,8 +12,12 @@ import json
 
 import pytest
 
+from thermoforge_models.hybrid import ResidualHybrid
+from thermoforge_models.identification import EffectivenessNTU
+from thermoforge_models.physics import ChillerPhysicsV2
 from thermoforge_research.envelope import SAMPLE_MAX_ROWS
 from thermoforge_research.runner import current_environment_lock
+from thermoforge_runtime.artifact import load_model_artifact
 from thermoforge_research.tools import (
     TOOL_REGISTRY,
     tf_dataset_compare,
@@ -34,7 +38,14 @@ from thermoforge_research.tools import (
     tf_research_status,
 )
 
-from phase2_helpers import FEATURES, TARGET, view_definition
+from phase2_helpers import (
+    FEATURES,
+    PHYSICS_INPUTS,
+    RATED_CAPACITY_KW,
+    RATED_POWER_KW,
+    TARGET,
+    view_definition,
+)
 from phase34_helpers import make_ctx
 
 
@@ -280,6 +291,131 @@ def test_model_publish_rejected_when_acceptance_unmet(ctx_ref):
     assert env["ok"] is False
     assert env["diagnostics"][0]["code"] == "TFM-1003"
     assert env["summary"]["gates"][-1]["ok"] is False
+
+
+ROLLING_CV = {"enabled": True, "mode": "expanding",
+              "initial_train_fraction": 0.4, "horizon_seconds": 6 * 3600,
+              "step_seconds": 6 * 3600, "max_folds": 5}
+
+
+def test_acceptance_can_be_judged_on_rolling_cv(ctx_ref):
+    """门槛判在滚动交叉验证聚合上，而不是尾部留出面。
+
+    面 A 是「训练截止后隔一段再考」，衡量漂移；rolling_cv 每折用最近数据
+    重训，衡量定期重训下的精度。同一模型两者能差数倍 —— 门槛从哪个口径的
+    基线推出来，就必须判在哪个口径上，否则是拿甲的尺子量乙。
+    """
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc(
+        acceptance={"cvrmse_max": 0.5, "evaluated_on": "rolling_cv"}))
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "滚动口径足够好")
+    doc = _experiment_doc(goal["id"], hyp["id"], mat["id"])
+    doc["validation"]["rolling_cv"] = ROLLING_CV
+    plan = tf_experiment_plan(ctx, doc)
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"], ran["summary"].get("error_code")
+
+    # 折间均值进了 metrics，模型包因此自带这个数
+    report = json.loads(
+        (ctx.research_root / "experiments" / plan["id"] / "metrics.json")
+        .read_text(encoding="utf-8"))
+    assert report["rolling_cv"]["n_folds"] >= 2
+    assert report["rolling_cv"]["metrics"]["CVRMSE"] > 0
+
+    # 比较工具按 Goal 声明的口径取数，与发布门禁同调
+    cmp_env = tf_model_compare(ctx, [plan["id"]])
+    assert cmp_env["summary"]["experiments"][0]["primary_surface"] == "rolling_cv"
+
+    env = tf_model_publish(ctx, plan["id"], model_id="chiller-power",
+                           version="1.0.0", run_smoke=False)
+    assert env["ok"], env["summary"].get("error")
+    detail = next(g for g in env["summary"]["gates"]
+                  if g["name"] == "acceptance")["detail"]
+    assert "rolling_cv" in detail
+
+
+def test_publish_fails_when_declared_criterion_has_no_metrics(ctx_ref):
+    """钉死的判据面拿不到数就该发布失败，不许悄悄回退到别的面。"""
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc(
+        acceptance={"cvrmse_max": 0.5, "evaluated_on": "rolling_cv"}))
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "忘了开滚动切分")
+    plan = tf_experiment_plan(          # 未配 rolling_cv
+        ctx, _experiment_doc(goal["id"], hyp["id"], mat["id"]))
+    assert tf_experiment_run(ctx, plan["id"])["ok"]
+    env = tf_model_publish(ctx, plan["id"], model_id="chiller-power",
+                           version="1.0.0", run_smoke=False)
+    assert env["ok"] is False
+    assert env["diagnostics"][0]["code"] == "TFM-1003"
+
+
+def _publish_doc(goal_id, hypothesis_id, view_id, model):
+    doc = _experiment_doc(goal_id, hypothesis_id, view_id)
+    doc["model"] = model
+    return doc
+
+
+def test_model_publish_physics_v2_end_to_end(ctx_ref):
+    """cooling_balance_v2 实验可发布（缺陷回归：_LOADERS 曾缺 v2 格式，
+    发布构建模型包时被「未知模型格式」拒掉）。"""
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc())
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "DOE-2 三曲线足够好")
+    plan = tf_experiment_plan(ctx, _publish_doc(
+        goal["id"], hyp["id"], mat["id"],
+        {"category": "physics", "physics": "cooling_balance_v2",
+         "hyperparameters": {"rated_capacity_kw": RATED_CAPACITY_KW,
+                             "rated_power_kw": RATED_POWER_KW,
+                             "inputs": PHYSICS_INPUTS}},
+    ))
+    assert plan["ok"], plan.get("diagnostics")
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"], ran["summary"].get("error_code")
+    assert ran["status"] == "COMPLETED"
+
+    env = tf_model_publish(ctx, plan["id"], model_id="chiller-v2",
+                           version="1.0.0")
+    assert env["ok"], env["summary"]
+    assert env["status"] == "PRODUCTION"
+    # 冷加载冒烟已过门禁；再显式验证制品可脱离实验目录重建
+    artifact_dir = ctx.registry.package_dir("chiller-v2", "1.0.0") / "artifact"
+    model = load_model_artifact(artifact_dir)
+    assert isinstance(model, ChillerPhysicsV2)
+
+
+def test_model_publish_hybrid_identification_base_end_to_end(ctx_ref):
+    """hybrid + 系统辨识族主干可发布、可冷加载（缺陷回归：主干参数曾被
+    hybrid 的 model.json 覆盖丢失，load 走 params.yaml 必崩）。"""
+    ctx, ref = ctx_ref
+    goal = tf_goal_create(ctx, _goal_doc())
+    mat = tf_dataset_materialize(ctx, view_definition(ref))
+    hyp = tf_hypothesis_create(ctx, goal["id"], "ε-NTU 主干 + 残差足够好")
+    plan = tf_experiment_plan(ctx, _publish_doc(
+        goal["id"], hyp["id"], mat["id"],
+        {"category": "hybrid", "physics": "eps_ntu", "residual": "xgboost",
+         "hyperparameters": {
+             "inputs": ("t_hot_in=cw_supply_temp;"
+                        "t_cold_in=evap_chw_supply_temp;"
+                        "f_hot=evap_chw_flow;f_cold=evap_chw_flow"),
+             "n_estimators": 50}},
+    ))
+    assert plan["ok"], plan.get("diagnostics")
+    ran = tf_experiment_run(ctx, plan["id"])
+    assert ran["ok"], ran["summary"].get("error_code")
+    assert ran["status"] == "COMPLETED"
+
+    env = tf_model_publish(ctx, plan["id"], model_id="hx-hybrid",
+                           version="1.0.0")
+    assert env["ok"], env["summary"]
+    assert env["status"] == "PRODUCTION"
+    artifact_dir = ctx.registry.package_dir("hx-hybrid", "1.0.0") / "artifact"
+    assert (artifact_dir / "base_model.json").exists()  # 主干参数随包
+    model = load_model_artifact(artifact_dir)
+    assert isinstance(model, ResidualHybrid)
+    assert isinstance(model.physics, EffectivenessNTU)
 
 
 def test_harness_manifest_matches_registry(repo_root):

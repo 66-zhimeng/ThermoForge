@@ -21,10 +21,26 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-from .physics import ChillerPhysicsModel, load_physics_model
+from .identification import (
+    GN_FORMAT,
+    NTU_FORMAT,
+    EffectivenessNTU,
+    GordonNgChiller,
+)
+from .physics import (
+    MODEL_FORMAT as PHYSICS_FORMAT,
+    MODEL_FORMAT_V2 as PHYSICS_FORMAT_V2,
+    ChillerPhysicsModel,
+    load_physics_model,
+)
 from .preprocessing import FeatureScaler
 
 MODEL_FORMAT = "thermoforge.residual_hybrid.v1"
+
+#: 能量平衡族（v1/v2）主干格式：参数真源是 params.yaml，load 走
+#: load_physics_model；系统辨识族（GN/NTU）的 save 只写 model.json，
+#: 会被 hybrid 的 meta 覆盖，须单独落 base_model.json（save/load 见下）。
+_PHYSICS_FAMILY_FORMATS = (PHYSICS_FORMAT, PHYSICS_FORMAT_V2)
 
 DEFAULT_XGB_PARAMS: dict[str, Any] = {
     "n_estimators": 200,
@@ -37,11 +53,16 @@ DEFAULT_XGB_PARAMS: dict[str, Any] = {
 
 
 class ResidualHybrid:
-    """残差混合：ChillerPhysicsModel + XGBoost(残差)。"""
+    """残差混合：物理/辨识主干 + XGBoost(残差)。
+
+    主干可以是能量平衡族（ChillerPhysicsModel / ChillerPhysicsV2）或
+    系统辨识族（GordonNgChiller / EffectivenessNTU）——两者都提供
+    fit/predict，序列化路径不同（save/load 注释）。
+    """
 
     def __init__(
         self,
-        physics: ChillerPhysicsModel,
+        physics: ChillerPhysicsModel | GordonNgChiller | EffectivenessNTU,
         *,
         seed: int,
         nthread: int = 1,
@@ -127,7 +148,13 @@ class ResidualHybrid:
     # ---------------------------------------------------------------- 序列化
 
     def save(self, directory: str | Path) -> Path:
-        """写 `booster.json`（XGBoost 原生）+ `params.yaml` + `model.json`。"""
+        """写 `booster.json`（XGBoost 原生）+ 主干参数 + `model.json`。
+
+        主干落盘按族分派：能量平衡族（v1/v2）写 `params.yaml`（其
+        model.json 会被下面的 hybrid meta 覆盖，真源是 YAML）；系统辨识族
+        （GN/NTU）的 save 只写 model.json，必须单独落 `base_model.json`，
+        否则主干参数被覆盖丢失、load 无从重建。
+        """
         if self.scaler is None or self._booster is None:
             raise RuntimeError("模型尚未 fit")
         directory = Path(directory)
@@ -138,10 +165,23 @@ class ResidualHybrid:
         self._booster.save_model(tmp)  # 原生 JSON 格式（§8.1）
         os.replace(tmp, booster_path)
 
-        self.physics.save(directory)  # params.yaml（YAML 明文参数）
+        if isinstance(self.physics, ChillerPhysicsModel):
+            base_format = self.physics.params_dict()["format"]
+            self.physics.save(directory)  # params.yaml（YAML 明文参数）
+        else:
+            base_doc = self.physics.to_dict()
+            base_format = base_doc["format"]
+            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp_",
+                                       suffix=".json")
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fp:
+                json.dump(base_doc, fp, ensure_ascii=False, sort_keys=True,
+                          indent=2, allow_nan=False)
+                fp.write("\n")
+            os.replace(tmp, directory / "base_model.json")
 
         meta = {
             "format": MODEL_FORMAT,
+            "base_format": base_format,
             "seed": self.seed,
             "nthread": self.nthread,
             "xgb_params": dict(self.xgb_params),
@@ -163,8 +203,24 @@ class ResidualHybrid:
             meta = json.load(fp)
         if meta.get("format") != MODEL_FORMAT:
             raise ValueError(f"未知模型格式: {meta.get('format')!r}")
+        base_format = meta.get("base_format")
+        if base_format is None or base_format in _PHYSICS_FAMILY_FORMATS:
+            # 旧包没有 base_format 字段；能量平衡族的真源是 params.yaml
+            base = load_physics_model(directory)
+        else:
+            base_path = directory / "base_model.json"
+            if not base_path.exists():
+                raise ValueError(f"混合模型缺少主干参数文件: {base_path}")
+            with open(base_path, encoding="utf-8") as fp:
+                base_doc = json.load(fp)
+            if base_format == GN_FORMAT:
+                base = GordonNgChiller.from_dict(base_doc)
+            elif base_format == NTU_FORMAT:
+                base = EffectivenessNTU.from_dict(base_doc)
+            else:
+                raise ValueError(f"未知主干模型格式: {base_format!r}")
         model = cls(
-            physics=load_physics_model(directory),
+            physics=base,
             seed=int(meta["seed"]),
             nthread=int(meta["nthread"]),
             xgb_params=meta["xgb_params"],

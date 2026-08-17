@@ -1,8 +1,9 @@
 """模型制品加载（implementation-notes.md §8.1）。
 
 按 `artifact/model.json` 的 `format` 字段分发到 Phase 2 的原生格式加载器：
-系数 JSON（线性基线）、YAML 明文参数（物理模型）、XGBoost 原生 .json
-（残差混合）。不使用 pickle（跨版本不可加载 + 任意代码执行）。
+系数 JSON（线性基线）、YAML 明文参数（物理模型 v1/v2）、参数 JSON
+（系统辨识族 gordon_ng/eps_ntu）、XGBoost 原生 .json（残差混合）。
+不使用 pickle（跨版本不可加载 + 任意代码执行）。
 
 模型实验室（`thermoforge.lab.` 前缀）的制品自带冻结源码
 `artifact/lab_source.py`（实验时由 _child 快照进 model/），加载即导入该
@@ -16,12 +17,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from thermoforge_models import baseline, hybrid, physics
+from thermoforge_models import baseline, hybrid, identification, physics
 from thermoforge_models.lab import MODEL_FORMAT_PREFIX
 
 _LOADERS = {
     baseline.MODEL_FORMAT: baseline.LinearBaseline.load,
     physics.MODEL_FORMAT: physics.ChillerPhysicsModel.load,
+    physics.MODEL_FORMAT_V2: physics.ChillerPhysicsV2.load,
+    identification.GN_FORMAT: identification.GordonNgChiller.load,
+    identification.NTU_FORMAT: identification.EffectivenessNTU.load,
     hybrid.MODEL_FORMAT: hybrid.ResidualHybrid.load,
 }
 
