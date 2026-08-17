@@ -19,8 +19,9 @@ from thermoforge_research.tools import TOOL_REGISTRY, ToolContext
 
 SERVER_NAME = "thermoforge"
 
-# 需要 actor=human 的工具不暴露（见模块 __init__ 的说明）
-EXCLUDED_TOOLS = frozenset({"tf_preprocess_approve", "tf_lab_approve"})
+# 需要 actor=human 的工具不暴露（见模块 __init__ 的说明）。
+# 只剩预处理审批：它改的是数据，必须人批；模型实验室改的是假设，全自治。
+EXCLUDED_TOOLS = frozenset({"tf_preprocess_approve"})
 
 # MCP 客户端一次读进上下文的量有限；这里与工具信封本身的 32KB 上限同调，
 # 超出的部分工具层已经落成 artifact 并置 truncated，不需要再截一次。
@@ -119,24 +120,32 @@ def tf_experiment_report(experiment_id: str) -> str:
 
 EXTRA_TOOLS: tuple[Callable[..., str], ...] = (tf_status, tf_experiment_report)
 
+# harness/prompts/mcp.md 缺失时的兜底（真正生效的是那个文件）
+_FALLBACK_INSTRUCTIONS = (
+    "ThermoForge 是数据中心暖通的物理-数据混合建模研究系统。"
+    "所有能力都经这些工具，每个工具返回统一信封："
+    "`ok` 为 false 表示工具级失败（不会抛异常），必须读 `ok` 而不是"
+    "看有没有报错。有副作用的工具返回稳定 ID（dataset@rev_NNNN / "
+    "RG- / H- / EXP- / VIEW- / model@version）。\n"
+    "先调 tf_status 看当前进展，再决定下一步。\n"
+    "注意：候选输入白名单是硬门禁——派生量（由公式算出来的列）不能"
+    "用来预测它的原料，否则是循环论证。预处理规则的审批需要人在"
+    "网页控制台完成，这里没有审批工具。"
+)
+
 
 def build_server():
     """装配 MCPServer。"""
     from mcp.server.mcpserver import MCPServer
 
+    from thermoforge_agent import prompts
+
     server = MCPServer(
         name=SERVER_NAME,
-        instructions=(
-            "ThermoForge 是数据中心暖通的物理-数据混合建模研究系统。"
-            "所有能力都经这些工具，每个工具返回统一信封："
-            "`ok` 为 false 表示工具级失败（不会抛异常），必须读 `ok` 而不是"
-            "看有没有报错。有副作用的工具返回稳定 ID（dataset@rev_NNNN / "
-            "RG- / H- / EXP- / VIEW- / model@version）。\n"
-            "先调 tf_status 看当前进展，再决定下一步。\n"
-            "注意：候选输入白名单是硬门禁——派生量（由公式算出来的列）不能"
-            "用来预测它的原料，否则是循环论证。预处理规则的审批需要人在"
-            "网页控制台完成，这里没有审批工具。"
-        ),
+        # 说明书走 prompts 层：外部 agent 拿到的不只是「工具怎么调」，还有
+        # harness/skills 里的方法论（取证 + 系统辨识阶梯）。没有它，外部
+        # agent 会重复副驾踩过的坑——猜不存在的 estimator、跳过朴素基线。
+        instructions=prompts.load("mcp", fallback=_FALLBACK_INSTRUCTIONS),
     )
     for name, fn in sorted(TOOL_REGISTRY.items()):
         if name in EXCLUDED_TOOLS:

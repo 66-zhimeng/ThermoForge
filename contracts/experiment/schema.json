@@ -22,7 +22,7 @@
     },
     "ModelSpec": {
       "additionalProperties": false,
-      "description": "模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。\n\n`category=\"lab\"` 引用模型实验室（thermoforge_research.model_lab）中\n已批准的模块：`hyperparameters.lab` 给出 `name` 或 `name@vN`，\n其余标量超参原样透传给模块的 `build_model()`。",
+      "description": "模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。\n\n`category=\"lab\"` 引用模型实验室（thermoforge_research.model_lab）中\n通过结构校验的模块：`hyperparameters.lab` 给出 `name` 或 `name@vN`，\n其余标量超参原样透传给模块的 `build_model()`。可运行门禁在 runner\n（TFML-006），契约层只管引用格式。",
       "properties": {
         "category": {
           "enum": [

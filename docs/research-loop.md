@@ -112,8 +112,10 @@ ThermoForge 应优先支持三种混合方式：
 2. **Parameter Hybrid**：物理方程保持不变，模型根据工况预测动态参数。
 3. **Physics-Constrained Model**：数据模型直接预测输出，但训练或验证中加入守恒、单调性和范围约束。
 4. **模型实验室（`category=lab`）**：内置闭集穷尽后，Agent 可编写全新的自包含模型模块，
-   经源扫描 + 子进程校验入库、人类批准后以 `hyperparameters.lab="name@vN"` 引用 ——
-   可迭代的不只是超参，而是建模方案本身。模块协议见 `thermoforge_models.lab`。
+   经源扫描 + 子进程校验入库后即以 `hyperparameters.lab="name@vN"` 引用（门禁是机器
+   判定的结构校验，不含人工审批）—— 可迭代的不只是超参，而是建模方案本身，Agent
+   自己完成"写代码 → 跑真实数据 → 读指标 → 改代码"的闭环。模块协议见
+   `thermoforge_models.lab`。
 
 ## 5. Experiment Contract
 

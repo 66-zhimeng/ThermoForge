@@ -39,12 +39,12 @@ There is no configured formatter/linter in the repo; `docs/implementation-notes.
 | `thermoforge_core` | Contracts (Pydantic v2) + cross-cutting primitives: canonical JSON, fingerprints, sequential IDs, naming regexes, units, time, error registry |
 | `thermoforge_data` | TFDC-XLSX importer/validator, immutable Data Vault (Parquet + DuckDB index), Dataset Views, legacy-workbook adapter, preprocessing rule library |
 | `thermoforge_models` | Model implementations: linear baseline, chiller physics (Q·COP), residual hybrid (physics + XGBoost), feature scaler |
-| `thermoforge_research` | Research kernel: Ledger, Experiment Runner (subprocess-isolated), splits/leakage, metrics, physics checks, modelability report, whitelist enforcement, orchestrator, and the 23-tool registry + envelope |
+| `thermoforge_research` | Research kernel: Ledger, Experiment Runner (subprocess-isolated), splits/leakage, metrics, physics checks, modelability report, whitelist enforcement, orchestrator, model lab (agent-authored model modules: AST scan → subprocess validation → run, no human in the loop), and the 28-tool registry + envelope |
 | `thermoforge_runtime` | Model Package build/verify, model registry + release gates, deployment binding, online inference |
 | `thermoforge_cli` | `tf` CLI — one subcommand per tool, envelope JSON on stdout |
 | `thermoforge_agent` | Built-in conversational agent (OpenAI-compatible chat completions + function calling) over the same tool registry |
 | `thermoforge_webui` | Streamlit console (`tools/webui.py` launches it): AI copilot (asks → analyses → navigates), data browser, quality diagnosis→prescription, AI research loop with live progress, experiment result charts, model registry, report export (HTML/Markdown/PDF) |
-| `thermoforge_mcp` | MCP server (`python -m thermoforge_mcp`, stdio) exposing the same tool registry to external agents (Claude Code etc.) — 24 tools = 23 registry − `tf_preprocess_approve` (`EXCLUDED_TOOLS`, approval requires `actor=human`) + `tf_status` / `tf_experiment_report` (`EXTRA_TOOLS`, MCP-only convenience wrappers) |
+| `thermoforge_mcp` | MCP server (`python -m thermoforge_mcp`, stdio) exposing the same tool registry to external agents (Claude Code etc.) — 29 tools = 28 registry − `tf_preprocess_approve` (`EXCLUDED_TOOLS`, approval requires `actor=human`) + `tf_status` / `tf_experiment_report` (`EXTRA_TOOLS`, MCP-only convenience wrappers) |
 
 Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, experiments, agent sessions), `models/` (registry). They are configurable via `tf --vault-root/--research-root/--models-root` and `ToolContext`.
 
@@ -65,7 +65,7 @@ Runtime artifact roots (gitignored): `vault/` (data), `research/` (ledger, exper
 
 These are enforced by code and tests, not just documented. Breaking them breaks the suite.
 
-**Agent never touches raw data.** All agent-facing capability goes through `thermoforge_research.tools.TOOL_REGISTRY` (23 tools), each returning the envelope from `envelope.py`: `ok/tool/id/status/inputs/summary/diagnostics/artifacts/truncated`. Hard limits: 32 KB response body (overflow spills to an artifact and sets `truncated`), `tf_dataset_sample` ≤ 200 rows, fixed profile quantile points. Known errors (`VaultError` / `ResearchError` / `ModelRegistryError` / contract validation) are converted to `ok=False` envelopes, never raised. Side-effecting tools must return a stable ID (`dataset@rev_NNNN`, `RG-`, `H-`, `EXP-`, `VIEW-`, `model@version`).
+**Agent never touches raw data.** All agent-facing capability goes through `thermoforge_research.tools.TOOL_REGISTRY` (28 tools), each returning the envelope from `envelope.py`: `ok/tool/id/status/inputs/summary/diagnostics/artifacts/truncated`. Hard limits: 32 KB response body (overflow spills to an artifact and sets `truncated`), `tf_dataset_sample` ≤ 200 rows, fixed profile quantile points. Known errors (`VaultError` / `ResearchError` / `ModelRegistryError` / contract validation) are converted to `ok=False` envelopes, never raised. Side-effecting tools must return a stable ID (`dataset@rev_NNNN`, `RG-`, `H-`, `EXP-`, `VIEW-`, `model@version`).
 
 **CLI exit codes are not success signals.** `exit 0` means the command ran — including tool-level failure (`ok=false` in the envelope). `exit 2` means CLI-level error (bad args, malformed JSON). Callers must read `ok`.
 
@@ -86,6 +86,8 @@ These are enforced by code and tests, not just documented. Breaking them breaks 
 **Naming rules matter on disk.** `object_id` must not contain `.` (else `variable_id` cannot be split), `variable_id` is case-sensitive — so it must never be used directly as a file or directory name on Windows/macOS. Split on the *first* dot.
 
 **Preprocessing is proposal + approval, never generated code.** The agent may only propose parameters for pre-registered deterministic transforms (`data/preprocess.py`); `status=proposed` rulesets cannot produce a vault revision, and approval requires `actor=human` (`tf --actor human preprocess approve`, or the agent's `tf_human_approval` round-trip).
+
+**Model code is the one place the agent writes code — and that loop is autonomous, unlike preprocessing.** `research/model_lab.py` (`TFML-` registry) takes an agent-authored single-file model module through AST scan (import whitelist + denied submodules + banned calls/dunders + 64 KB) → subprocess five-check (`_lab_check.py`: interface / fit_predict / save_contract / roundtrip / determinism, bit-exact) → versioned immutable store. Passing the five-check sets `status=validated`, which is the *only* thing the experiment gate looks at (`require_runnable`, `TFML-006`) — **no human approval anywhere in the loop**: the agent submits, runs on real data, reads metrics, edits, resubmits as `v(N+1)`. `deprecate()` is an after-the-fact veto (any actor) that blocks future references without ever blocking a round; already-run experiments keep their frozen source snapshot. The runner snapshots source into the experiment dir and `_child` copies it to `artifact/lab_source.py` so packages stay self-contained. The contrast with preprocessing is deliberate: preprocessing mutates *data* and needs `actor=human`; the lab mutates *hypotheses*, which evidence should kill, not a queue. Note the AST scan runs *before* the validation subprocess executes the candidate and is therefore the only automatic pre-execution gate — it is a coarse filter, not a kernel sandbox (`model_lab.py` module docstring says so explicitly).
 
 ## Docs are a tested source of truth
 

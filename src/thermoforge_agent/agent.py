@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from thermoforge_research.tools import TOOL_REGISTRY, ToolContext
 
+from . import prompts
 from .client import ChatClient, ChatResult, ToolCallRequest
 from .config import AgentConfig
 from .schema import HUMAN_APPROVAL_TOOL, build_tool_schemas
@@ -411,8 +412,13 @@ def _summarize_content(message: Mapping[str, Any]) -> Any:
 
 
 def _default_system_prompt() -> str:
-    path = (Path(__file__).resolve().parents[2]
-            / "harness" / "prompts" / "system.md")
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return "你是 ThermoForge 内置研发 Agent，使用提供的工具完成 HVAC 建模研究任务。"
+    """CLI 位点的提示词：走 prompts.load 才会带上绑定的技能。
+
+    以前这里直接读 system.md 原文，绕过了 prompts 层——结果
+    `harness/skills/*.md` 写得再细也到不了模型手上（技能只在测试里被拼过）。
+    """
+    return prompts.load(
+        "cli",
+        fallback="你是 ThermoForge 内置研发 Agent，使用提供的工具完成 "
+                 "HVAC 建模研究任务。",
+    )

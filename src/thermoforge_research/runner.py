@@ -114,9 +114,10 @@ def _resolve_lab_module(
     research_root: Path,
     exp_dir: Path,
 ) -> dict[str, Any] | None:
-    """category=lab：把已批准的实验室模块源码快照进实验目录。
+    """category=lab：把实验室模块源码快照进实验目录。
 
-    审批门禁在这里（TFML-006）：未批准模块连子进程都进不去。快照后实验
+    门禁在这里且是机器判定（TFML-006）：结构校验没过或已停用的模块连
+    子进程都进不去，但**通过校验就直接能跑，不等人审批**。快照后实验
     复现只依赖实验目录里的 frozen 源码，不再依赖实验室存储；发布时这份
     源码随 artifact/ 打包（_child 把它复制进 model/）。
     """
@@ -126,7 +127,7 @@ def _resolve_lab_module(
     ref = str(model.hyperparameters.get("lab") or "")
     name, version = parse_lab_ref(ref)
     store = LabStore(research_root)
-    record = store.require_approved(name, version)
+    record = store.require_runnable(name, version)
     dest = exp_dir / "lab_module.py"
     with open(dest, "w", encoding="utf-8", newline="\n") as fp:
         fp.write(record["source"])

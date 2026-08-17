@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 from functools import lru_cache
 from pathlib import Path
+from string import Template
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = REPO_ROOT / "harness" / "prompts"
@@ -85,11 +86,17 @@ def normalize(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def load(name: str, fallback: str = "") -> str:
+def load(name: str, fallback: str = "", **placeholders: str) -> str:
     """读某个位点的提示词。文件缺失时退回 `fallback`，不抛异常。
 
     不抛是刻意的：提示词文件没了，agent 应该退化成「能用但没那么懂行」，
     而不是整个界面打不开。指纹会如实反映这一点（缺失记为空内容）。
+
+    `placeholders` 填充 `$name` 占位符（`string.Template.safe_substitute`：
+    填不上的原样留着，不抛）。占位符只用于**代码派生的事实**（页面清单、
+    工具名这类随代码走的东西），决策规则一律写死在文件里——否则「改文件
+    = 改行为」这条就不成立了。占位符在替换**前**参与指纹计算，于是
+    指纹只反映决策规则本身，不随页面清单抖动。
     """
     path = prompt_path(name)
     base = (normalize(path.read_text(encoding="utf-8")) if path.is_file()
@@ -99,7 +106,9 @@ def load(name: str, fallback: str = "") -> str:
         sp = skill_path(skill)
         if sp.is_file():          # 技能缺失同样不抛：退化成「没装这项本事」
             parts.append(normalize(sp.read_text(encoding="utf-8")))
-    return "\n\n---\n\n".join(parts)
+    text = "\n\n---\n\n".join(parts)
+    return Template(text).safe_substitute(placeholders) if placeholders \
+        else text
 
 
 def digest(name: str) -> str:

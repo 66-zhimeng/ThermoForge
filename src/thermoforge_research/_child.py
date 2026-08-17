@@ -136,7 +136,7 @@ def _load_lab_module(spec: Mapping[str, Any], exp_dir: Path):
     """按 spec.lab_module 加载冻结在实验目录里的实验室模块源码。
 
     校验 content_hash（快照完整性）；实验只依赖实验目录内的源码，
-    与实验室存储脱钩（runner._resolve_lab_module 已在父进程过审批门禁）。
+    与实验室存储脱钩（runner._resolve_lab_module 已在父进程过可运行门禁）。
     """
     info = spec.get("lab_module")
     if not info:

@@ -277,7 +277,8 @@ def test_schema_generation_and_whitelist():
     schemas, dispatch = build_tool_schemas()  # 默认排除 human-only 工具
     names = {s["function"]["name"] for s in schemas}
     assert "tf_preprocess_approve" not in names  # human-only 不直接暴露
-    assert "tf_lab_approve" not in names         # 同上
+    # 模型实验室是自治通路：提交与停用都直接给模型，不走审批
+    assert {"tf_lab_submit", "tf_lab_deprecate"} <= names
     assert HUMAN_APPROVAL_TOOL in names          # 审批元工具在
     assert names - {HUMAN_APPROVAL_TOOL} == set(TOOL_REGISTRY) - set(
         DEFAULT_TOOLS_EXCLUDE)
@@ -534,6 +535,49 @@ def test_skills_are_bound_and_fingerprinted():
     # 指纹覆盖技能内容：位点摘要含技能，故两位点摘要不同
     assert prompts.digest("cli") != prompts.digest("copilot")
     assert len(prompts.fingerprint()) == 64
+
+
+def test_live_prompt_sites_go_through_prompts_layer(monkeypatch, tmp_path):
+    """四个位点都真的走 prompts.load——技能与提示词文件必须能到模型手上。
+
+    这条曾经是断的：`_default_system_prompt()` 直接读 system.md 原文，
+    副驾与规划器各用代码里的常量，于是 harness/skills 只在测试里被拼过。
+    做法是把提示词文件换成哨兵内容，看四个位点是否都跟着变。
+    """
+    from thermoforge_agent import agent as agent_mod
+    from thermoforge_agent import prompts
+    from thermoforge_mcp import server as mcp_server
+    from thermoforge_webui.services import copilot, planner
+
+    sentinel = tmp_path / "prompts"
+    sentinel.mkdir()
+    for filename in set(prompts.PROMPT_FILES.values()):
+        (sentinel / filename).write_text(
+            f"SENTINEL-{filename}\n", encoding="utf-8", newline="\n")
+    monkeypatch.setattr(prompts, "PROMPTS_DIR", sentinel)
+
+    assert "SENTINEL-system.md" in agent_mod._default_system_prompt()
+    assert "SENTINEL-copilot.md" in copilot.system_prompt()
+    assert "SENTINEL-planner.md" in planner.system_prompt()
+    assert "SENTINEL-mcp.md" in prompts.load(
+        "mcp", fallback=mcp_server._FALLBACK_INSTRUCTIONS)
+
+    # 装了技能的位点，技能内容也要跟着进去
+    assert "系统辨识" in agent_mod._default_system_prompt()
+    assert "系统辨识" in planner.system_prompt()
+
+
+def test_copilot_prompt_fills_placeholders():
+    """代码派生的事实（页面清单、界面工具名）由占位符填入，不留 `$`。"""
+    from thermoforge_webui.navigation import PAGE_KEYS
+    from thermoforge_webui.services.copilot import UI_GOTO_TOOL, system_prompt
+
+    text = system_prompt()
+    assert "$page_catalog" not in text and "$ui_goto_tool" not in text
+    assert UI_GOTO_TOOL in text
+    assert next(iter(PAGE_KEYS)) in text
+    # 决策规则写在文件里，不靠占位符
+    assert "模型实验室" in text
 
 
 def test_missing_skill_degrades_without_raising(monkeypatch):

@@ -22,8 +22,9 @@ class ModelSpec(BaseModel):
     """模型规格：类别 + 路线细节（物理方程版本 / 残差学习器等）。
 
     `category="lab"` 引用模型实验室（thermoforge_research.model_lab）中
-    已批准的模块：`hyperparameters.lab` 给出 `name` 或 `name@vN`，
-    其余标量超参原样透传给模块的 `build_model()`。
+    通过结构校验的模块：`hyperparameters.lab` 给出 `name` 或 `name@vN`，
+    其余标量超参原样透传给模块的 `build_model()`。可运行门禁在 runner
+    （TFML-006），契约层只管引用格式。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -51,7 +52,7 @@ class ModelSpec(BaseModel):
             if not str(self.hyperparameters.get("lab") or "").strip():
                 raise ValueError(
                     "lab 实验必须在 hyperparameters.lab 声明模型实验室引用"
-                    "（name 或 name@vN，且须已批准）"
+                    "（name 或 name@vN，且须已通过结构校验）"
                 )
         return self
 

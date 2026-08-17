@@ -58,7 +58,7 @@ MODEL_MENU = {
     },
     "lab": {
         "hyperparameters": {
-            "lab": "已批准的模型实验室引用（name 或 name@vN，见 available_lab_modules）",
+            "lab": "模型实验室引用（name 或 name@vN，见 available_lab_modules）",
             "inputs": "字符串映射，同 physics（按模块声明的 INPUT_ROLES）",
         },
     },
@@ -103,23 +103,38 @@ class PlannerContext:
 
     @property
     def lab_refs(self) -> list[str]:
-        """已批准、可在 category=lab 实验里引用的模块（name 与 name@vN 皆可）。"""
-        return [str(m.get("ref")) for m in self.lab_modules if m.get("ref")]
+        """可在 category=lab 实验里引用的模块（过校验且未停用；name@vN 皆可）。"""
+        return [str(m.get("ref")) for m in self.lab_modules
+                if m.get("ref") and m.get("runnable", True)]
 
 
-SYSTEM_PROMPT = """你是数据中心暖通领域的建模研究员，负责规划下一轮实验。
+# 文件缺失时的兜底（内容与 planner.md 保持同义；真正生效的是那个文件，
+# 且规划器绑定了 harness/skills 的取证与系统辨识技能）
+_FALLBACK_PROMPT = """你是数据中心暖通领域的建模研究员，负责规划下一轮实验。
 
 铁律：
 1. 只能使用给定的 Dataset View（view_id 必须来自清单，不得编造）。
 2. 只能使用给定的建模路线与超参名，不得发明新的 estimator 或方程版本。
-   内置路线之外的全新函数形式，须先经 tf_lab_submit 提交模型实验室代码
-   并通过人工审批，再以 category=lab + hyperparameters.lab 引用已批准模块。
+   内置路线之外的全新函数形式，走模型实验室：tf_lab_submit 提交模块代码，
+   过结构校验后即可以 category=lab + hyperparameters.lab 引用（不需要审批）。
 3. 除第一轮外，basis 必须引用已有的实验或发现 ID，说明这一轮基于什么证据。
 4. 候选输入白名单是硬约束：视图的特征必须是目标定义里的候选输入子集。
 5. 宁可停下也不要凑数：没有信息增益时返回 {"stop": "理由"}。
 
 只输出一个 JSON 对象，不要任何解释文字、不要 Markdown 代码围栏。
 """
+
+
+def system_prompt() -> str:
+    """规划器提示词：以 `harness/prompts/planner.md` + 绑定技能为准。
+
+    每轮现读，改文件立刻生效（同副驾）。技能书（现场数据取证、系统辨识
+    阶梯）就是靠这条路进规划器的——绕开 prompts 层等于把方法论扔了。
+    """
+    from thermoforge_agent import prompts
+
+    return prompts.load("planner", fallback=_FALLBACK_PROMPT)
+
 
 PLAN_SCHEMA_HINT = """{
   "statement": "假设陈述，一句话说清这轮想验证什么",
@@ -303,15 +318,15 @@ def _validate_model(model: Mapping[str, Any],
         hp = model.get("hyperparameters") or {}
         lab_ref = str(hp.get("lab") or "").strip()
         if not lab_ref:
-            return ("lab 路线必须在 hyperparameters.lab 给已批准模块引用"
+            return ("lab 路线必须在 hyperparameters.lab 给模块引用"
                     "（name 或 name@vN）")
         if context is not None:
             name = lab_ref.partition("@v")[0]
             known = {r.partition("@v")[0] for r in context.lab_refs}
             if context.lab_refs and name not in known:
-                return (f"lab 引用 {lab_ref!r} 不在已批准清单里，"
-                        f"可选：{context.lab_refs}；新模块须先 tf_lab_submit "
-                        "并经人工审批")
+                return (f"lab 引用 {lab_ref!r} 不在可用清单里，"
+                        f"可选：{context.lab_refs}；新模块先用 tf_lab_submit "
+                        "提交，过校验后即可引用")
     return None
 
 
@@ -331,7 +346,7 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
         for attempt in range(1, MAX_REPAIR_ATTEMPTS + 1):
             trace.attempts = attempt
             try:
-                reply = ask(SYSTEM_PROMPT, prompt + feedback)
+                reply = ask(system_prompt(), prompt + feedback)
             except Exception as exc:  # 网络/鉴权等，交给上层显示
                 trace.error = f"{type(exc).__name__}: {exc}"
                 raise PlannerError(trace.error) from exc

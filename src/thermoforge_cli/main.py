@@ -289,11 +289,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_submit"](
         ctx, a.name, Path(a.source_file).read_text(encoding="utf-8"),
         description=a.description, **x))
-    p = tool_cmd(lb, "approve", "审批实验室模块（需 --actor human）")
+    p = tool_cmd(lb, "deprecate", "停用实验室模块（此后不得再被实验引用）")
     p.add_argument("name")
     p.add_argument("--version", type=int)
     p.add_argument("--note")
-    p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_approve"](
+    p.set_defaults(handler=lambda ctx, a, x: T["tf_lab_deprecate"](
         ctx, a.name, version=a.version, note=a.note, **x))
     p = tool_cmd(lb, "get", "查看模块元数据与源码")
     p.add_argument("name")

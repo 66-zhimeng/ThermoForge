@@ -80,7 +80,6 @@ from thermoforge_runtime.registry import ModelRegistry
 
 from .errors import ResearchError
 from .model_lab import (
-    TFML_APPROVAL_FORBIDDEN,
     LabError,
     LabStore,
     parse_lab_ref,
@@ -1596,9 +1595,10 @@ def tf_lab_submit(
     """提交模型实验室模块：静态扫描 + 子进程结构校验 + 版本化入库。
 
     Agent 用它在内置闭集之外起草新模型（协议见 thermoforge_models.lab：
-    MODEL_FORMAT / INPUT_ROLES / build_model / load_model）。一律
-    status=proposed，须 human 经 tf_lab_approve 审批后方可在实验中以
-    category=lab 引用（hyperparameters.lab = name 或 name@vN）。
+    MODEL_FORMAT / INPUT_ROLES / build_model / load_model）。**通过五连检
+    即 status=validated，可立刻在实验里以 category=lab 引用
+    （hyperparameters.lab = name 或 name@vN），不需要任何人审批**——
+    看指标、改代码、再提交新版本，闭环由 agent 自己走完。
     与最新版内容一致的重交是幂等的（不新增版本）。
     """
     tool = "tf_lab_submit"
@@ -1607,7 +1607,7 @@ def tf_lab_submit(
     if violations:
         return _finish(ctx, make_envelope(
             tool, ok=False, status="FAILED", inputs=inputs,
-            summary={"error": "静态扫描不通过（粗筛，审批前还有人工复核）",
+            summary={"error": "静态扫描不通过：按 violations 逐条改源码后重交",
                      "violations": violations},
             diagnostics=[{"code": "TFML-001", "level": "ERROR",
                           "count": len(violations),
@@ -1631,57 +1631,50 @@ def tf_lab_submit(
         if report:
             env["summary"]["validation"] = report
         return env
+    ref = f"{name}@v{record['version']}"
     src_path = ctx.lab_store.dir / f"{name}.v{record['version']}.py"
     return _finish(ctx, make_envelope(
-        tool, id=f"{name}@v{record['version']}", status="PROPOSED",
-        inputs=inputs,
+        tool, id=ref, status="VALIDATED", inputs=inputs,
         summary={
-            "ref": f"{name}@v{record['version']}",
+            "ref": ref,
             "content_hash": record["content_hash"],
             "status": record["status"],
             "validation": record.get("validation"),
-            "next": "人工复核源码后，经 tf_human_approval 发起 "
-                    "tf_lab_approve 审批；approved 后方可以 category=lab 引用",
+            "next": f"可直接开实验：model.category=\"lab\" + "
+                    f"hyperparameters.lab=\"{ref}\"（无需审批）。"
+                    "看完指标要改模型就改源码重交，会自动进下一个版本",
         },
         artifacts=[_artifact(src_path, "lab_source")],
     ))
 
 
-def tf_lab_approve(
+def tf_lab_deprecate(
     ctx: ToolContext,
     name: str,
     *,
     version: int | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
-    """审批实验室模块（actor 必须为 human，全部留痕）。
+    """停用实验室模块：此后不得再被实验引用（留痕记录停用者与理由）。
 
-    审批前应先用 tf_lab_get 读源码与校验报告——审批即为此代码进入
-    实验与发布链路背书。
+    这是实验室通路上唯一的否决口，且不阻塞任何一轮循环——agent 自己也
+    该用它清掉已证伪的方案，让规划上下文里只剩还活着的候选。已跑完的
+    实验不受影响（源码快照冻结在实验目录里，结论仍可复现）。
     """
-    tool = "tf_lab_approve"
+    tool = "tf_lab_deprecate"
     inputs = {"name": name, "version": version}
-    if ctx.actor != "human":
-        return _error_envelope(
-            ctx, tool,
-            LabError(
-                TFML_APPROVAL_FORBIDDEN,
-                f"审批 actor 必须为 human，当前: {ctx.actor!r}",
-            ),
-            inputs=inputs,
-        )
     try:
-        record = ctx.lab_store.approve(name, version, actor=ctx.actor,
-                                       note=note)
+        record = ctx.lab_store.deprecate(name, version, actor=ctx.actor,
+                                         note=note)
     except LabError as exc:
         return _error_envelope(ctx, tool, exc, inputs=inputs)
     return _finish(ctx, make_envelope(
-        tool, id=f"{record['name']}@v{record['version']}", status="APPROVED",
+        tool, id=f"{record['name']}@v{record['version']}", status="DEPRECATED",
         inputs=inputs,
         summary={
             "ref": f"{record['name']}@v{record['version']}",
             "content_hash": record["content_hash"],
-            "approvals": record["approvals"],
+            "audit": record["audit"],
         },
     ))
 
@@ -1709,8 +1702,9 @@ def tf_lab_get(
             "proposer": record.get("proposer"),
             "description": record.get("description"),
             "content_hash": record["content_hash"],
+            "runnable": record["status"] == "validated",
             "validation": record.get("validation"),
-            "approvals": record.get("approvals"),
+            "audit": record.get("audit") or record.get("approvals") or [],
             "source": record["source"],
         },
         artifacts=[_artifact(src_path, "lab_source")],
@@ -1718,11 +1712,15 @@ def tf_lab_get(
 
 
 def tf_lab_list(ctx: ToolContext) -> dict[str, Any]:
-    """列出全部实验室模块及审批/校验状态。"""
+    """列出全部实验室模块及其校验/停用状态（runnable=true 的可直接引用）。"""
     modules = ctx.lab_store.list()
     return _finish(ctx, make_envelope(
         "tf_lab_list", status="OK",
-        summary={"modules": modules, "count": len(modules)},
+        summary={
+            "modules": modules,
+            "count": len(modules),
+            "runnable": [m["ref"] for m in modules if m["runnable"]],
+        },
     ))
 
 
@@ -1753,7 +1751,7 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_preprocess_apply": tf_preprocess_apply,
     "tf_preprocess_list": tf_preprocess_list,
     "tf_lab_submit": tf_lab_submit,
-    "tf_lab_approve": tf_lab_approve,
+    "tf_lab_deprecate": tf_lab_deprecate,
     "tf_lab_get": tf_lab_get,
     "tf_lab_list": tf_lab_list,
 }

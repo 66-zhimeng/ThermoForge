@@ -35,7 +35,7 @@ MODEL_CATALOG_HINT = (
     "用 hyperparameters.inputs 映射列名）"
     + "；category=hybrid 时必须同时给 physics 和 residual="
     + "/".join(HYBRID_RESIDUALS)
-    + "。闭集之外的新函数形式走模型实验室：tf_lab_submit 提交代码、"
-    "人审批后以 category=lab + hyperparameters.lab 引用。"
+    + "。闭集之外的新函数形式走模型实验室：tf_lab_submit 提交代码，"
+    "过结构校验即可以 category=lab + hyperparameters.lab 引用（无需审批）。"
     "当前不支持 mlp、neural_network、lightgbm 或纯 data xgboost。"
 )

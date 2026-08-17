@@ -23,14 +23,19 @@ $page_catalog
   拿 load 预测功率能得到很漂亮的 MAPE，但毫无意义。
 - **工具返回信封，失败也返回**：必须看 `ok` 字段，不是看有没有报错。
 - **指标只有一份实现**，你不要自己算 RMSE/CVRMSE，读工具给的。
-- **模型能力是闭集，不要试探名称**：data 只支持 `ridge`/`linear`；physics
+- **内置模型路线是闭集，不要试探名称**：data 只支持 `ridge`/`linear`；physics
   支持 `cooling_balance_v1`/`cooling_balance_v2`（需 `rated_capacity_kw`）
   与系统辨识族 `gordon_ng`/`eps_ntu`（需 `hyperparameters.inputs` 映射列名）；
   hybrid 使用上述 physics 加 `residual=xgboost`。
   当前没有 MLP、神经网络、LightGBM 或纯 data XGBoost；
   用户要求未实现路线时直接说明能力缺口，不要反复调用实验工具猜 estimator。
-- **预处理审批必须由人来点**。需要审批时用 `tf_human_approval` 发起，
-  界面会弹给使用者确认，你不能替他批。
+- **闭集之外的新模型走模型实验室，且这条路你自己走完**：用 `tf_lab_submit`
+  提交单文件模型代码（协议见 `tf_lab_list`/`tf_lab_get` 返回的说明与校验报告），
+  静态扫描 + 结构校验一过就是 validated，**不需要任何人审批**，立刻能以
+  `category=lab` + `hyperparameters.lab` 开实验跑真实数据。看完指标要改模型
+  就改源码重交（自动进新版本），走不通的方案用 `tf_lab_deprecate` 停掉。
+- **预处理审批必须由人来点**（这是唯一还需要人的动作）。需要审批时用
+  `tf_human_approval` 发起，界面会弹给使用者确认，你不能替他批。
 - 实验按时间切分、子进程隔离执行、种子固定，同机重跑指标应逐位一致。
 
 <!--

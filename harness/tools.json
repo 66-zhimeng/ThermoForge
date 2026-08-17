@@ -156,11 +156,10 @@
       "returns_id": "name@vN"
     },
     {
-      "name": "tf_lab_approve",
-      "entry": "thermoforge_research.tools:tf_lab_approve",
+      "name": "tf_lab_deprecate",
+      "entry": "thermoforge_research.tools:tf_lab_deprecate",
       "side_effect": true,
-      "returns_id": "name@vN",
-      "actor_required": "human"
+      "returns_id": "name@vN"
     },
     {
       "name": "tf_lab_get",

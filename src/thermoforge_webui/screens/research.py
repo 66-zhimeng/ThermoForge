@@ -285,9 +285,9 @@ def _start(goal: dict, goal_id: str, dataset_ref: str, views: list[dict],
            mode: str, max_rounds: int, guidance: str, config) -> None:
     definition = dict(goal.get("definition") or {})
     definition.setdefault("id", goal_id)
-    # 已批准的实验室模块进规划上下文：模型只能引用看得见的（白名单同构）
+    # 可用的实验室模块进规划上下文：模型只能引用看得见的（白名单同构）
     lab_modules = [m for m in tool_context().lab_store.list()
-                   if m.get("status") == "approved"]
+                   if m.get("runnable")]
     context = PlannerContext(goal=definition, views=views,
                              dataset_ref=dataset_ref, extra_guidance=guidance,
                              lab_modules=lab_modules)

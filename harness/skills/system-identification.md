@@ -172,17 +172,25 @@ NTU = UA/C_min,  UA = UA0·(m_h^-0.8 + β·m_c^-0.8)^-1
    `fit(df, y) / predict(df) / save(dir)`，save 必须写含 `format` 的 model.json，
    **禁 pickle，随机源只用传入的 seed**。
 2. `tf_lab_submit`（或 CLI `lab submit --source-file`）：先 AST 源扫描
-   （import 白名单、禁 eval/exec/os.system 等），再在隔离子进程跑五连检
-   （interface / fit_predict / save_contract / roundtrip / determinism，位级一致）。
-   通过后入库 `proposed`。
-3. `tf_lab_approve` **只有人类能批**（agent 调用返回 TFML-005，与预处理审批同纪律）。
-4. 批准后，实验定义用 `model.category="lab"` + `hyperparameters.lab="<name>@v<N>"`
-   引用即可进 runner；源码快照写进实验目录与发布包（`artifact/lab_source.py`），
-   发布模型完全自包含、可冷加载。
+   （import 白名单、禁 eval/exec/os.system、禁 pickle/动态库/联网下载），再在隔离
+   子进程跑五连检（interface / fit_predict / save_contract / roundtrip / determinism，
+   位级一致）。通过即 `validated`。
+3. **不需要任何人审批，直接开实验**：`model.category="lab"` +
+   `hyperparameters.lab="<name>@v<N>"` 即可进 runner，跑的是真实数据、真实时间切分、
+   真实指标；源码快照写进实验目录与发布包（`artifact/lab_source.py`），发布模型
+   完全自包含、可冷加载。
+4. **读指标 → 改代码 → 重交 → 再跑**，这一圈由你自己闭合：源码哈希一变就是新版本
+   （`v2`/`v3`…），每版都在 Ledger 里留下自己的实验证据；走不通的版本用
+   `tf_lab_deprecate` 停掉，让候选清单只剩还活着的方案。
 
-纪律：实验室模块仍受同一数据契约约束（只用白名单 candidate_inputs 的列）；源码哈希
-变化即新版本，需重新校验与审批；实验室不是绕开 §1 基线与 §4 体检的捷径 ——
-新方案照样要和朴素基线比增量。
+纪律：
+
+- 实验室模块仍受同一数据契约约束（只用白名单 candidate_inputs 的列），实验室不是
+  绕开 §1 基线与 §4 体检的捷径 —— 新方案照样要和朴素基线比增量。
+- 校验失败不是"再试一次"，是**代码有问题**：`determinism` 挂了说明你用了无种子随机源，
+  `roundtrip` 挂了说明 save/load 丢了状态，按 checks 里的 detail 改，别原样重交。
+- 别把实验室当成堆参数的地方：每提一版都要能说清"这版换了哪个物理/统计假设、
+  预期改善哪个面的指标"，说不清就不是一次实验，是一次瞎撞。
 
 ---
 

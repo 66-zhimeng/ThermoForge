@@ -60,7 +60,8 @@ UI_GOTO_SCHEMA = {
     },
 }
 
-SYSTEM_PROMPT = f"""你是 ThermoForge 控制台的副驾。ThermoForge 是数据中心暖通的
+# 文件缺失时的兜底（内容与 copilot.md 保持同义；真正生效的是那个文件）
+_FALLBACK_PROMPT = f"""你是 ThermoForge 控制台的副驾。ThermoForge 是数据中心暖通的
 物理-数据混合建模研究系统，使用者是工程师，但不想自己在界面上点来点去——
 他提问，你负责查清楚、讲明白，并把他带到该看的页面。
 
@@ -88,14 +89,32 @@ SYSTEM_PROMPT = f"""你是 ThermoForge 控制台的副驾。ThermoForge 是数�
   hybrid 使用上述 physics
   加 `residual=xgboost`。当前没有 MLP、神经网络、LightGBM 或纯 data XGBoost；
   用户要求未实现路线时直接说明能力缺口，不要反复调用实验工具猜 estimator。
-- **闭集之外的新模型走模型实验室**：用 tf_lab_submit 提交单文件模型代码
-  （协议见 tf_lab_list/tf_lab_get 返回的说明与校验报告），静态扫描 +
-  结构校验通过后入库为 proposed；必须经 tf_human_approval 由人审批，
-  之后实验才能以 category=lab + hyperparameters.lab 引用。
+- **闭集之外的新模型走模型实验室，且这条路你自己走完**：用 tf_lab_submit
+  提交单文件模型代码（协议见 tf_lab_list/tf_lab_get 返回的说明与校验报告），
+  静态扫描 + 结构校验一过就是 validated，**不需要任何人审批**，立刻能以
+  category=lab + hyperparameters.lab 开实验跑真实数据。看完指标要改模型
+  就改源码重交（自动进新版本），走不通的方案用 tf_lab_deprecate 停掉。
 - **预处理审批必须由人来点**。需要审批时用 tf_human_approval 发起，
   界面会弹给使用者确认，你不能替他批。
 - 实验按时间切分、子进程隔离执行、种子固定，同机重跑指标应逐位一致。
 """
+
+
+def system_prompt() -> str:
+    """副驾提示词：以 `harness/prompts/copilot.md` 为准，`_FALLBACK_PROMPT` 兜底。
+
+    每次建 agent 时现读（不在 import 期定死）：改提示词文件应当立刻生效，
+    否则「装技能 = 改文件」就变成「改完还得重启界面」。页面清单与界面
+    工具名是代码派生的事实，以占位符填进去。
+    """
+    from thermoforge_agent import prompts
+
+    return prompts.load(
+        "copilot",
+        fallback=_FALLBACK_PROMPT,
+        page_catalog=catalog_for_prompt(),
+        ui_goto_tool=UI_GOTO_TOOL,
+    )
 
 
 @dataclass
@@ -195,7 +214,7 @@ class CopilotSession:
         agent = HarnessAgent(
             config, tool_context(),
             client=self._client,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt(),
             approval_handler=self._on_approval,
             on_tool_call=self._on_tool_call,
         )

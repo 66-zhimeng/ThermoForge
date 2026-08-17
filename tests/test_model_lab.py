@@ -1,13 +1,17 @@
-"""模型实验室（model_lab）：扫描 → 子进程校验 → 版本化入库 → 人工审批 →
+"""模型实验室（model_lab）：扫描 → 子进程校验 → 版本化入库 →
 category=lab 实验 → 发布自包含 的全链路测试。
 
-- scan_source：import 白名单 / 危险调用 / dunder 逃生梯 / 体积上限；
+这条通路是**自治**的：过了结构校验就能跑真实数据，没有人工审批环节。
+测试要盯住的是「机器判定的门禁真的挡得住东西」，而不是「人批了没有」。
+
+- scan_source：import 白名单 / 禁用子模块 / 危险调用 / dunder 逃生梯 /
+  体积上限；
 - validate_module：五连检（interface/fit_predict/save_contract/roundtrip/
   determinism）在子进程执行，非确定性模块必须被揪出；
-- LabStore：幂等重交、版本递增、篡改检测（TFML-004）、未批准门禁
-  （TFML-006）；
-- 工具层：审批只有 human 可行（TFML-005）；
-- e2e：category=lab 实验跑通且源码快照随实验/发布包固化。
+- LabStore：幂等重交、版本递增、篡改检测（TFML-004）、可运行门禁
+  （TFML-006：未过校验或已停用）；
+- e2e：提交后**不经任何审批**直接跑通 category=lab 实验并发布，
+  源码快照随实验/发布包固化。
 """
 
 from __future__ import annotations
@@ -16,8 +20,7 @@ import pytest
 
 from thermoforge_core.contracts.experiment import Experiment
 from thermoforge_research.model_lab import (
-    TFML_APPROVAL_FORBIDDEN,
-    TFML_NOT_APPROVED,
+    TFML_NOT_RUNNABLE,
     TFML_SOURCE_VIOLATION,
     TFML_VERSION_CONFLICT,
     LabError,
@@ -28,13 +31,12 @@ from thermoforge_research.model_lab import (
 )
 from thermoforge_research.runner import current_environment_lock, run_experiment
 from thermoforge_research.tools import (
-    ToolContext,
     tf_dataset_materialize,
     tf_experiment_plan,
     tf_experiment_run,
     tf_goal_create,
     tf_hypothesis_create,
-    tf_lab_approve,
+    tf_lab_deprecate,
     tf_lab_list,
     tf_lab_submit,
     tf_model_publish,
@@ -157,6 +159,9 @@ def load_model(directory):
     return model
 '''
 
+# 直接用 LabStore 时省掉真跑一遍子进程五连检（工具层测试覆盖真校验）
+OK_VALIDATION = {"ok": True, "checks": [], "model_format": "thermoforge.lab.x"}
+
 NO_BUILD_SOURCE = '''"""缺 build_model 的模块。"""
 
 MODEL_FORMAT = "thermoforge.lab.no_build.v1"
@@ -182,11 +187,27 @@ def test_scan_source_accepts_mini_module():
     ("def f():\n    return f.__globals__\n", "dunder"),
     ("x = __subclasses__\n", "dunder"),
     ("from . import sibling\n", "相对 import"),
+    # 白名单根模块下的已知逃逸口（扫描是执行前唯一的自动关卡）
+    ("import pandas as pd\npd.read_pickle('http://x/y.pkl')\n", "read_pickle"),
+    ("import numpy as np\nnp.ctypeslib.load_library('a', '.')\n",
+     "load_library"),
+    ("import sklearn.datasets as ds\n", "禁用子模块"),
+    ("from sklearn import datasets\n", "禁用子模块"),
+    ("from numpy import ctypeslib\n", "禁用子模块"),
 ])
 def test_scan_source_rejects_dangerous_constructs(bad, needle):
     violations = scan_source(bad)
     assert violations, f"应检出违规: {bad!r}"
     assert any(needle in v for v in violations), violations
+
+
+def test_scan_source_allows_json_and_project_imports():
+    """收紧扫描时最容易误伤的两处：json.loads 与 thermoforge_models 子模块。"""
+    ok = ("import json\n"
+          "from thermoforge_models.lab import parse_inputs\n"
+          "def load_model(directory):\n"
+          "    return json.loads('{}')\n")
+    assert scan_source(ok) == []
 
 
 def test_scan_source_rejects_oversize():
@@ -240,19 +261,29 @@ def test_validate_module_rejects_missing_interface(tmp_path):
 
 def test_lab_store_submit_idempotent_and_versioned(tmp_path):
     store = LabStore(tmp_path)
-    first = store.submit("mini_view", MINI_SOURCE)
-    assert first["version"] == 1 and first["status"] == "proposed"
-    again = store.submit("mini_view", MINI_SOURCE)  # 幂等重交
+    first = store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
+    assert first["version"] == 1 and first["status"] == "validated"
+    again = store.submit("mini_view", MINI_SOURCE,
+                         validation=OK_VALIDATION)  # 幂等重交
     assert again["version"] == 1
-    bumped = store.submit("mini_view", MINI_SOURCE + "\n# v2\n")
+    bumped = store.submit("mini_view", MINI_SOURCE + "\n# v2\n",
+                          validation=OK_VALIDATION)
     assert bumped["version"] == 2
     assert store.latest_version("mini_view") == 2
     assert [m["version"] for m in store.list()] == [1, 2]
 
 
+def test_lab_store_marks_unvalidated_when_no_report(tmp_path):
+    """没有校验报告就不该是 validated——门禁只认机器判定过的模块。"""
+    store = LabStore(tmp_path)
+    record = store.submit("bare", MINI_SOURCE)
+    assert record["status"] == "unvalidated"
+    assert store.runnable_refs() == []
+
+
 def test_lab_store_detects_tampering(tmp_path):
     store = LabStore(tmp_path)
-    store.submit("mini_view", MINI_SOURCE)
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
     path = store.dir / "mini_view.v1.py"
     path.write_text(MINI_SOURCE + "\n# 被篡改\n", encoding="utf-8")
     with pytest.raises(LabError) as excinfo:
@@ -260,43 +291,74 @@ def test_lab_store_detects_tampering(tmp_path):
     assert excinfo.value.code == TFML_VERSION_CONFLICT
 
 
-def test_lab_store_require_approved_gate(tmp_path):
+def test_lab_store_runnable_right_after_submit(tmp_path):
+    """过了校验就能跑——中间没有任何人工环节。"""
     store = LabStore(tmp_path)
-    store.submit("mini_view", MINI_SOURCE)
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
+    record = store.require_runnable("mini_view")
+    assert record["status"] == "validated"
+    assert store.runnable_refs() == ["mini_view@v1"]
+
+
+def test_lab_store_gate_blocks_unvalidated_and_deprecated(tmp_path):
+    store = LabStore(tmp_path)
+    store.submit("bare", MINI_SOURCE)  # 无校验报告
     with pytest.raises(LabError) as excinfo:
-        store.require_approved("mini_view")
-    assert excinfo.value.code == TFML_NOT_APPROVED
-    store.approve("mini_view", actor="human")
-    record = store.require_approved("mini_view")
-    assert record["status"] == "approved"
-    assert record["approvals"][0]["actor"] == "human"
+        store.require_runnable("bare")
+    assert excinfo.value.code == TFML_NOT_RUNNABLE
+
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
+    store.deprecate("mini_view", actor="agent", note="被 v2 取代")
+    with pytest.raises(LabError) as excinfo:
+        store.require_runnable("mini_view")
+    assert excinfo.value.code == TFML_NOT_RUNNABLE
+    record = store.get("mini_view")
+    assert record["status"] == "deprecated"
+    assert record["audit"][0]["action"] == "deprecate"
+    assert record["audit"][0]["actor"] == "agent"
+
+
+def test_lab_store_normalizes_legacy_approval_statuses(tmp_path):
+    """取消审批前入库的模块：能否运行改由 validation 重判，不看旧 status。"""
+    store = LabStore(tmp_path)
+    store.submit("legacy_ok", MINI_SOURCE, validation=OK_VALIDATION)
+    meta_path = store.dir / "legacy_ok.v1.yaml"
+    meta_path.write_text(
+        meta_path.read_text(encoding="utf-8").replace(
+            "status: validated", "status: proposed"),
+        encoding="utf-8", newline="\n")
+    assert store.require_runnable("legacy_ok")["status"] == "validated"
+    assert store.list()[0]["runnable"] is True
 
 
 # ---------------------------------------------------------------- 工具层
 
-def test_lab_tools_submit_approve_list(tmp_path):
+def test_lab_tools_submit_is_runnable_without_approval(tmp_path):
+    """agent 身份提交 → 立刻 runnable，全程没有 human 参与。"""
     ctx, _ = make_ctx(tmp_path)
+    assert ctx.actor != "human"
     env = tf_lab_submit(ctx, "mini_view", MINI_SOURCE)
     assert env["ok"], env["summary"]
-    assert env["status"] == "PROPOSED"
+    assert env["status"] == "VALIDATED"
+    assert env["summary"]["status"] == "validated"
     assert env["summary"]["validation"]["ok"]
-
-    # 非 human 审批被拒（与预处理审批同纪律）
-    denied = tf_lab_approve(ctx, "mini_view")
-    assert denied["ok"] is False
-    assert denied["diagnostics"][0]["code"] == TFML_APPROVAL_FORBIDDEN
-
-    human_ctx = ToolContext(
-        vault_root=ctx.vault_root, research_root=ctx.research_root,
-        models_root=ctx.models_root, actor="human",
-    )
-    approved = tf_lab_approve(human_ctx, "mini_view", note="看过源码")
-    assert approved["ok"], approved["summary"]
 
     listed = tf_lab_list(ctx)
     assert listed["ok"]
-    modules = {m["ref"]: m["status"] for m in listed["summary"]["modules"]}
-    assert modules == {"mini_view@v1": "approved"}
+    assert listed["summary"]["runnable"] == ["mini_view@v1"]
+
+
+def test_lab_tools_deprecate_removes_from_runnable(tmp_path):
+    ctx, _ = make_ctx(tmp_path)
+    assert tf_lab_submit(ctx, "mini_view", MINI_SOURCE)["ok"]
+    env = tf_lab_deprecate(ctx, "mini_view", note="走不通")
+    assert env["ok"], env["summary"]
+    assert env["status"] == "DEPRECATED"
+    assert env["summary"]["audit"][-1]["action"] == "deprecate"
+
+    listed = tf_lab_list(ctx)
+    assert listed["summary"]["runnable"] == []
+    assert listed["summary"]["modules"][0]["status"] == "deprecated"
 
 
 def test_lab_tools_submit_scan_violation(tmp_path):
@@ -361,8 +423,7 @@ def test_lab_experiment_end_to_end(tmp_path):
     _, ref = build_chiller_vault(tmp_path)
     research_root = tmp_path / "research"
     store = LabStore(research_root)
-    store.submit("mini_view", MINI_SOURCE)
-    store.approve("mini_view", actor="human")
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
 
     report = run_experiment(
         _lab_experiment("EXP-9101"),
@@ -380,10 +441,48 @@ def test_lab_experiment_end_to_end(tmp_path):
     assert surfaces["A"]["metrics"]["CVRMSE"] is not None
 
 
-def test_lab_experiment_rejected_when_not_approved(tmp_path):
+def test_lab_iteration_loop_v1_then_v2(tmp_path):
+    """自治闭环：跑完 v1 → 改代码 → v2 立刻能跑，中间没有审批。
+
+    两轮各自冻结自己的源码快照，历史实验不被新版本改写。
+    """
     _, ref = build_chiller_vault(tmp_path)
     research_root = tmp_path / "research"
-    LabStore(research_root).submit("mini_view", MINI_SOURCE)  # 不审批
+    store = LabStore(research_root)
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
+
+    first = run_experiment(
+        _lab_experiment("EXP-9111", lab_ref="mini_view@v1"),
+        research_root=research_root, vault_root=tmp_path / "vault",
+        view_definition=view_definition(ref),
+    )
+    assert first["status"] == "completed", first.get("error")
+
+    # agent 读完指标改模型：源码一变就是新版本，无需任何人放行
+    v2 = store.submit("mini_view", MINI_SOURCE + "\n# v2: 换了设计矩阵\n",
+                      validation=OK_VALIDATION)
+    assert v2["version"] == 2 and v2["status"] == "validated"
+
+    second = run_experiment(
+        _lab_experiment("EXP-9112", lab_ref="mini_view@v2"),
+        research_root=research_root, vault_root=tmp_path / "vault",
+        view_definition=view_definition(ref),
+    )
+    assert second["status"] == "completed", second.get("error")
+
+    exps = research_root / "experiments"
+    snap1 = (exps / "EXP-9111" / "lab_module.py").read_text(encoding="utf-8")
+    snap2 = (exps / "EXP-9112" / "lab_module.py").read_text(encoding="utf-8")
+    assert "# v2" not in snap1 and "# v2" in snap2
+
+
+def test_lab_experiment_rejected_when_deprecated(tmp_path):
+    """停用是事后否决：停掉之后就不能再开新实验。"""
+    _, ref = build_chiller_vault(tmp_path)
+    research_root = tmp_path / "research"
+    store = LabStore(research_root)
+    store.submit("mini_view", MINI_SOURCE, validation=OK_VALIDATION)
+    store.deprecate("mini_view", actor="agent")
 
     with pytest.raises(LabError) as excinfo:
         run_experiment(
@@ -392,20 +491,32 @@ def test_lab_experiment_rejected_when_not_approved(tmp_path):
             vault_root=tmp_path / "vault",
             view_definition=view_definition(ref),
         )
-    assert excinfo.value.code == TFML_NOT_APPROVED
+    assert excinfo.value.code == TFML_NOT_RUNNABLE
+
+
+def test_lab_experiment_rejected_when_unvalidated(tmp_path):
+    """没过五连检的模块连子进程都进不去（机器判定的硬门禁）。"""
+    _, ref = build_chiller_vault(tmp_path)
+    research_root = tmp_path / "research"
+    LabStore(research_root).submit("mini_view", MINI_SOURCE)  # 无校验报告
+
+    with pytest.raises(LabError) as excinfo:
+        run_experiment(
+            _lab_experiment("EXP-9103"),
+            research_root=research_root,
+            vault_root=tmp_path / "vault",
+            view_definition=view_definition(ref),
+        )
+    assert excinfo.value.code == TFML_NOT_RUNNABLE
 
 
 # ---------------------------------------------------------------- 发布 e2e
 
 def test_lab_publish_produces_self_contained_package(tmp_path):
+    """agent 一个身份走完：提交 → 开实验 → 跑真实数据 → 发布自包含模型包。"""
     ctx, ref = make_ctx(tmp_path, n_steps=600)
     submitted = tf_lab_submit(ctx, "mini_view", MINI_SOURCE)
     assert submitted["ok"]
-    human_ctx = ToolContext(
-        vault_root=ctx.vault_root, research_root=ctx.research_root,
-        models_root=ctx.models_root, actor="human",
-    )
-    assert tf_lab_approve(human_ctx, "mini_view")["ok"]
 
     goal = tf_goal_create(ctx, {
         "name": "冷水机输入功率模型",
