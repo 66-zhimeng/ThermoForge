@@ -6,7 +6,9 @@
   `tf_human_approval` 发起审批 → `approval_handler` 弹确认 → 用户同意后
   以 actor=human 的 ToolContext 执行（I-49）。
 - 每轮 user/assistant/tool 事件写 `research/agent_sessions/<ts>.jsonl`，
-  供谱系追溯。
+  供谱系追溯；assistant 事件另记思维链（reasoning，端点返回时）、
+  工具调用参数（arguments）与 token 用量/估算费用（usage/cost），
+  可还原完整探索路径。
 """
 
 from __future__ import annotations
@@ -88,6 +90,8 @@ class HarnessAgent:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
         self._session_path = self.session_dir / f"{stamp}.jsonl"
+        # 每次模型调用的用量/思维链（与会话 JSONL 同源；界面轮询用）
+        self.usage_log: list[dict[str, Any]] = []
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt}
         ]
@@ -105,7 +109,10 @@ class HarnessAgent:
             )
             if not isinstance(result, ChatResult):
                 raise TypeError("client.chat 必须返回 ChatResult")
-            self._append(_assistant_message(result))
+            self._record_usage(result, kind="chat")
+            self._append(_assistant_message(result),
+                         reasoning=result.reasoning,
+                         usage=result.usage, cost=result.cost)
             if not result.tool_calls:
                 return result.content or ""
             for call in result.tool_calls:
@@ -144,6 +151,7 @@ class HarnessAgent:
             )
             if not isinstance(result, ChatResult):
                 raise TypeError("client.chat 必须返回 ChatResult")
+            self._record_usage(result, kind="finalize")
         except Exception as exc:
             self._log({
                 "type": "tool_limit_finalize_error",
@@ -154,11 +162,14 @@ class HarnessAgent:
         if not result.tool_calls:
             answer = (result.content or "").strip()
             if answer:
-                self._append(_assistant_message(result))
+                self._append(_assistant_message(result),
+                             reasoning=result.reasoning,
+                             usage=result.usage, cost=result.cost)
                 return answer
             return self._append_tool_limit_fallback()
 
-        self._append(_assistant_message(result))
+        self._append(_assistant_message(result), reasoning=result.reasoning,
+                     usage=result.usage, cost=result.cost)
         for call in result.tool_calls:
             envelope = self._error_envelope(
                 call.name,
@@ -345,14 +356,40 @@ class HarnessAgent:
 
     # ---------------------------------------------------------------- 留痕
 
-    def _append(self, message: dict[str, Any]) -> None:
+    def _record_usage(self, result: ChatResult, *, kind: str) -> None:
+        """每次模型调用记一条（含思维链）；端点不返回用量时 usage 为 None，
+        但条目照记——调用次数本身就是界面要展示的信息。"""
+        self.usage_log.append({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "kind": kind,
+            "usage": result.usage,
+            "cost": result.cost,
+            "reasoning": result.reasoning,
+        })
+
+    def usage_snapshot(self) -> list[dict[str, Any]]:
+        """逐次模型调用的用量/思维链副本（界面轮询用，后台线程写这里读）。"""
+        return list(self.usage_log)
+
+    def _append(self, message: dict[str, Any], *,
+                reasoning: str | None = None,
+                usage: Mapping[str, Any] | None = None,
+                cost: float | None = None) -> None:
         event = {"type": "message", "role": message.get("role"),
                  "content": _summarize_content(message)}
+        if reasoning:
+            event["reasoning"] = reasoning
+        if usage:
+            event["usage"] = dict(usage)
+        if cost is not None:
+            event["cost"] = cost
         if message.get("tool_calls"):
             event["tool_calls"] = [
                 {
                     "id": call.get("id"),
                     "name": (call.get("function") or {}).get("name"),
+                    "arguments": _summarize_arguments(
+                        (call.get("function") or {}).get("arguments")),
                 }
                 for call in message["tool_calls"]
             ]
@@ -409,6 +446,13 @@ def _summarize_content(message: Mapping[str, Any]) -> Any:
     if isinstance(content, str) and len(content) > 2000:
         return content[:2000] + "…(截断)"
     return content
+
+
+def _summarize_arguments(arguments: Any) -> Any:
+    """工具调用参数留痕：保留模型产出的原始 JSON 字符串，超长截断。"""
+    if isinstance(arguments, str) and len(arguments) > 2000:
+        return arguments[:2000] + "…(截断)"
+    return arguments
 
 
 def _default_system_prompt() -> str:

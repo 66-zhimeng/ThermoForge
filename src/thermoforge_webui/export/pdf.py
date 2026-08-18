@@ -21,6 +21,7 @@ from reportlab.platypus import (
     Image,
     PageBreak,
     Paragraph,
+    Preformatted,
     SimpleDocTemplate,
     Spacer,
     Table,
@@ -66,6 +67,12 @@ def _styles() -> dict[str, ParagraphStyle]:
         "cell": ParagraphStyle(
             "TFCell", parent=base["Normal"], fontName=CJK_FONT, fontSize=7.6,
             leading=10),
+        # 公式代码块含中文注释，不能用 Courier（无 CJK 字形）；用同一 CID
+        # 字体、小字号、灰底，换行靠 Preformatted 保留
+        "code": ParagraphStyle(
+            "TFCode", parent=base["Code"], fontName=CJK_FONT, fontSize=8.5,
+            leading=12, backColor=colors.HexColor("#f6f8fa"),
+            borderPadding=6, spaceAfter=6),
     }
 
 
@@ -145,7 +152,14 @@ def _section_flowables(section: Section, styles: dict) -> list:
         flowables.extend([_key_value_table(section.key_values, styles),
                           Spacer(1, 8)])
     for paragraph in section.paragraphs:
-        if paragraph.strip():
+        if not paragraph.strip():
+            continue
+        stripped = paragraph.strip()
+        if stripped.startswith("```") and stripped.endswith("```"):
+            lines = stripped.split("\n")
+            flowables.append(Preformatted("\n".join(lines[1:-1]),
+                                          styles["code"]))
+        else:
             flowables.append(Paragraph(_inline(paragraph), styles["body"]))
     if section.table is not None and not section.table.empty:
         flowables.extend([_table(section.table, styles), Spacer(1, 4)])
@@ -156,6 +170,12 @@ def _section_flowables(section: Section, styles: dict) -> list:
                 f"（表格列数超过 {MAX_TABLE_COLUMNS}，PDF 里只排前 "
                 f"{MAX_TABLE_COLUMNS} 列；完整数据见 HTML 或 Markdown 版）",
                 styles["caption"]))
+    for caption, frame in section.extra_tables:
+        if frame is None or frame.empty:
+            continue
+        flowables.extend([_table(frame, styles), Spacer(1, 4)])
+        if caption:
+            flowables.append(Paragraph(caption, styles["caption"]))
     for figure in section.figures:
         flowables.append(Paragraph(figure.title, styles["h3"]))
         flowables.append(_image(figure.png()))

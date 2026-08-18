@@ -15,8 +15,9 @@ from typing import Any
 import streamlit as st
 
 from .. import cache
+from ..charts import interactive, series
 from ..config import agent_config
-from ..context import tool_context
+from ..context import RESEARCH_ROOT, tool_context
 from ..services import catalog
 from ..services.experiments import CATEGORY_LABELS
 from ..services.planner import PlannerContext
@@ -27,9 +28,21 @@ from ..services.research import (
     make_ask,
     summarize_outcome,
 )
-from ..ui import copilot_banner, empty_state, envelope_result, fmt_metric
+from .structure import render_model_structure
+from ..ui import (
+    copilot_banner,
+    empty_state,
+    envelope_result,
+    fmt_cost,
+    fmt_metric,
+    fmt_tokens,
+    usage_caption,
+)
 
 SESSION_KEY = "research_session"
+# _events 轮询发现「等待审批/已结束」时，触发一次整页 rerun 让主流程渲染
+# 批准按钮/结果区；这个 key 记下已同步的状态，防止每 2 秒循环刷整页。
+_SYNC_KEY = "research_live_synced"
 
 # 契约里 purpose 是自由字符串，但历史取值是这几个英文词。界面显示中文、
 # 写进契约的仍是英文原值——翻译只发生在展示层，不动数据。
@@ -337,9 +350,14 @@ def _events(session: ResearchSession) -> None:
         if event.kind == "plan":
             with st.container(border=True):
                 st.markdown(f"{icon} `{stamp}`　**假设**：{event.text}")
+                usage = event.payload.get("usage")
+                cost = event.payload.get("cost")
+                if usage or cost is not None:
+                    st.caption("本轮规划用量：" + usage_caption(usage, cost))
                 reasoning = event.payload.get("reasoning")
                 if reasoning:
-                    st.caption(f"AI 的理由：{reasoning}")
+                    with st.expander("思维链"):
+                        st.markdown(reasoning)
                 plan = event.payload.get("plan") or {}
                 category = str((plan.get("model") or {}).get("category") or "")
                 st.caption(f"视图 `{plan.get('view_id')}`　路线 "
@@ -355,6 +373,17 @@ def _events(session: ResearchSession) -> None:
             st.markdown(f"{icon} `{stamp}`　{event.text}")
     if session.running:
         st.caption("每 2 秒自动刷新。实验在子进程里跑，关掉浏览器不影响它跑完。")
+    # 状态切换要跟回主页面：等待审批时主流程要渲染批准按钮，结束时要渲染
+    # 结果区。fragment 轮询只重画自己，所以这里在切换瞬间触发一次整页
+    # rerun；用 _SYNC_KEY 记下已同步的状态，避免每 2 秒循环刷新整页。
+    need = ("awaiting" if session.pending_plan is not None
+            else "done" if (not session.running
+                            and session.state in ("finished", "error"))
+            else "")
+    if st.session_state.get(_SYNC_KEY, "") != need:
+        st.session_state[_SYNC_KEY] = need
+        if need:
+            st.rerun(scope="app")
 
 
 def _approval(session: ResearchSession) -> None:
@@ -394,11 +423,46 @@ def _outcome(session: ResearchSession) -> None:
     if summary.get("experiments"):
         st.caption("产生的实验：" + "、".join(summary["experiments"])
                    + "　去「实验结果」页看图和指标。")
+        with st.expander("产出模型的结构（公式与参数）", expanded=False):
+            picked = st.selectbox("选一个本次任务产出的实验",
+                                  list(summary["experiments"]),
+                                  key="research_structure_exp")
+            render_model_structure(
+                RESEARCH_ROOT / "experiments" / str(picked) / "model",
+                key_prefix="research_structure")
     if session.planner_context and session.planner_context.traces:
-        with st.expander("AI 的规划留痕（每轮的原始回复）"):
-            for trace in session.planner_context.traces:
+        traces = session.planner_context.traces
+        bars = series.prepare_usage(
+            traces, [f"第 {t.round_index + 1} 轮" for t in traces])
+        if not bars.empty:
+            st.markdown("#### 本次任务用量")
+            columns = st.columns(3)
+            columns[0].metric("输入 tokens", fmt_tokens(bars.total_prompt))
+            columns[1].metric("输出 tokens", fmt_tokens(bars.total_completion))
+            columns[2].metric("估算金额", fmt_cost(bars.total_cost),
+                              help="在 harness/agent.toml 的 [pricing] 里配置"
+                                   "单价后才会计算金额")
+            st.plotly_chart(interactive.usage_figure(
+                bars, title="每轮规划的 token 用量与累计金额"),
+                width="stretch")
+        with st.expander("AI 的规划留痕（每轮的原始回复与思维链）"):
+            rounds = ((session.outcome or {}).get("summary") or {}) \
+                .get("rounds") or []
+            trace_exp = {r.get("round"): r.get("experiment_id")
+                         for r in rounds if isinstance(r, dict)}
+            for trace in traces:
                 st.markdown(f"**第 {trace.round_index + 1} 轮**　"
                             f"尝试 {trace.attempts} 次　{trace.prompt_summary}")
+                exp_id = trace_exp.get(trace.round_index + 1)
+                if exp_id:
+                    st.caption(f"已随实验工件落盘：research/experiments/"
+                               f"{exp_id}/planner_trace.json")
+                if trace.usage or trace.cost is not None:
+                    st.caption("规划用量："
+                               + usage_caption(trace.usage, trace.cost))
                 if trace.error:
                     st.caption(f"最后一次错误：{trace.error}")
+                if trace.reasoning:
+                    with st.expander("思维链", expanded=False):
+                        st.markdown(trace.reasoning)
                 st.code(trace.raw_reply[:2000] or "（空）", language="json")

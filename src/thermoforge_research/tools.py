@@ -7,6 +7,7 @@ architecture §6 工具清单的确定性实现，薄封装 Phase 1/2/4 能力�
 - 研究：tf_goal_create / tf_goal_get / tf_research_status / tf_hypothesis_create /
   tf_experiment_plan / tf_experiment_run / tf_experiment_get /
   tf_model_compare / tf_model_publish
+- 文献：tf_literature_search（外部学术 API 检索，只读）
 
 约定：
 
@@ -79,6 +80,7 @@ from thermoforge_runtime.package import boundary_rows, build_model_package
 from thermoforge_runtime.registry import ModelRegistry
 
 from .errors import ResearchError
+from . import litsearch
 from .model_lab import (
     LabError,
     LabStore,
@@ -984,7 +986,8 @@ def _experiment_artifacts(ctx: ToolContext, exp_id: str) -> list[dict[str, Any]]
                        ("metrics.json", "metrics"),
                        ("predictions.parquet", "predictions"),
                        ("split.json", "split"),
-                       ("physics_report.json", "physics_report")):
+                       ("physics_report.json", "physics_report"),
+                       ("planner_trace.json", "planner_trace")):
         path = exp_dir / name
         if path.exists():
             out.append(_artifact(path, kind))
@@ -1724,6 +1727,71 @@ def tf_lab_list(ctx: ToolContext) -> dict[str, Any]:
     ))
 
 
+# ---------------------------------------------------------------- 文献工具
+
+
+def tf_literature_search(
+    ctx: ToolContext,
+    query: str,
+    *,
+    sources: Sequence[str] = litsearch.DEFAULT_SOURCES,
+    limit: int = 10,
+    year_from: int | None = None,
+) -> dict[str, Any]:
+    """文献调研：跨 CrossRef/arXiv/Semantic Scholar 检索论文（标题/摘要/DOI/引用数）。
+
+    免费 API 无需 key；只读无副作用。单源失败不拖垮整体（status=PARTIAL +
+    TFL-001 诊断），全部源不可用才 ok=False（TFL-002）。引用结果时必须带
+    DOI/URL，不得编造文献。
+    """
+    tool = "tf_literature_search"
+    limit = max(1, min(int(limit), litsearch.MAX_LIMIT))
+    inputs = {"query": query, "sources": list(sources),
+              "limit": limit, "year_from": year_from}
+    if not (query or "").strip():
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="FAILED", inputs=inputs,
+            summary={"error": "query 不能为空"},
+        ))
+    unknown = [s for s in sources if s not in litsearch.SOURCES]
+    if unknown:
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="FAILED", inputs=inputs,
+            summary={"error": f"未知文献源: {unknown}"
+                              f"（允许 {list(litsearch.SOURCES)}）"},
+            diagnostics=[{"code": litsearch.TFL_SOURCE_UNKNOWN,
+                          "level": "ERROR", "count": 1,
+                          "message": f"未知文献源: {unknown}"}],
+        ))
+    try:
+        results, failures = litsearch.search(
+            query, sources=tuple(sources), limit=limit, year_from=year_from)
+    except litsearch.AllSourcesFailed as exc:
+        return _finish(ctx, make_envelope(
+            tool, ok=False, status="FAILED", inputs=inputs,
+            summary={"error": "所有文献源均不可用（网络/限流），"
+                              "可稍后重试或换 narrower 查询",
+                     "failures": exc.failures},
+            diagnostics=[{"code": litsearch.TFL_ALL_SOURCES_FAILED,
+                          "level": "ERROR", "count": len(exc.failures),
+                          "message": str(exc)[:500]}],
+        ))
+    failed_sources = {f["source"] for f in failures}
+    return _finish(ctx, make_envelope(
+        tool, status="PARTIAL" if failures else "OK", inputs=inputs,
+        summary={
+            "query": query,
+            "count": len(results),
+            "sources_ok": [s for s in sources if s not in failed_sources],
+            "sources_failed": [f["source"] for f in failures],
+            "results": results,
+        },
+        diagnostics=[{"code": litsearch.TFL_SOURCE_FAILED, "level": "WARN",
+                      "count": 1, "location": f["source"],
+                      "message": f["error"][:500]} for f in failures],
+    ))
+
+
 # architecture §6 工具清单 → 入口（与 harness/tools.json 保持一致）
 TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_dataset_import": tf_dataset_import,
@@ -1754,4 +1822,5 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_lab_deprecate": tf_lab_deprecate,
     "tf_lab_get": tf_lab_get,
     "tf_lab_list": tf_lab_list,
+    "tf_literature_search": tf_literature_search,
 }

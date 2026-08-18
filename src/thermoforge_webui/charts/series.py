@@ -8,7 +8,7 @@ pytest 测——图好不好看要人看，但「残差算对没有、区间切�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -320,6 +320,59 @@ def objects_in(predictions: pd.DataFrame | None, surface: str) -> list[str]:
     return sorted(str(o) for o in frame["object_id"].unique())
 
 
+# ---------------------------------------------------------------- 用量图
+
+
+@dataclass(frozen=True)
+class UsageBars:
+    """逐次模型调用的 token 用量（堆叠柱）+ 累计金额（折线数据）。"""
+
+    labels: list[str]
+    prompt_tokens: list[int]
+    completion_tokens: list[int]
+    cumulative_cost: list[float] | None  # 未配置单价时为 None（不画金额线）
+    total_prompt: int
+    total_completion: int
+    total_cost: float | None
+
+    @property
+    def empty(self) -> bool:
+        return not self.labels
+
+
+def prepare_usage(entries: Sequence[Any],
+                  labels: Sequence[str] | None = None) -> UsageBars:
+    """把用量条目（agent usage_log / planner trace 展开的 {usage, cost}）
+    整理成绘图数据。缺 cost 的条目按 0 累计——只要配过单价就画得出金额线。"""
+    labels_out: list[str] = []
+    prompt: list[int] = []
+    completion: list[int] = []
+    costs: list[float] = []
+    any_cost = False
+    for index, entry in enumerate(entries):
+        usage = (entry.get("usage") if isinstance(entry, Mapping)
+                 else getattr(entry, "usage", None)) or {}
+        cost = (entry.get("cost") if isinstance(entry, Mapping)
+                else getattr(entry, "cost", None))
+        labels_out.append(labels[index] if labels else str(index + 1))
+        prompt.append(int(usage.get("prompt_tokens") or 0))
+        completion.append(int(usage.get("completion_tokens") or 0))
+        if cost is not None:
+            any_cost = True
+        costs.append(float(cost or 0.0))
+    cumulative = list(np.cumsum(costs)) if any_cost else None
+    return UsageBars(
+        labels=labels_out,
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cumulative_cost=[float(v) for v in cumulative] if cumulative is not None
+        else None,
+        total_prompt=sum(prompt),
+        total_completion=sum(completion),
+        total_cost=sum(costs) if any_cost else None,
+    )
+
+
 def detail_series(detail: ExperimentDetail, predictions: pd.DataFrame | None,
                   surface: str, object_id: str | None = None
                   ) -> tuple[PredictionSeries, ResidualStats | None]:
@@ -327,3 +380,35 @@ def detail_series(detail: ExperimentDetail, predictions: pd.DataFrame | None,
     series = prepare_predictions(predictions, surface, object_id=object_id)
     residuals = prepare_residuals(predictions, surface, object_id=object_id)
     return series, residuals
+
+
+# ---------------------------------------------------------------- 模型结构图
+
+
+@dataclass(frozen=True)
+class CoefBars:
+    """系数 / 特征重要性横向条形图数据（线性系数与 XGBoost 重要性共用）。
+
+    `unit` 只是轴说明：线性系数为「每标准差」，重要性为「%」。
+    """
+
+    labels: list[str]
+    values: list[float]
+    unit: str = ""
+
+
+def prepare_coef_bars(values: Mapping[str, float], *, unit: str = "",
+                      top: int | None = None) -> CoefBars | None:
+    """标签与数值对齐成绘图数据。
+
+    重要性类（unit="%"）按值降序；线性系数保持传入顺序（feature_order，
+    顺序本身就是模型的一部分）。空输入返回 None，调用方不出图。
+    """
+    rows = [(str(k), float(v)) for k, v in values.items()]
+    if not rows:
+        return None
+    if unit == "%":
+        rows.sort(key=lambda kv: kv[1], reverse=True)
+    if top:
+        rows = rows[:top]
+    return CoefBars([k for k, _ in rows], [v for _, v in rows], unit=unit)

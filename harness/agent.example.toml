@@ -16,3 +16,10 @@ model = "kimi-k2-0905-preview"
 # 不暴露给模型的工具（默认排除 tf_preprocess_approve，审批走
 # tf_human_approval 元工具 + REPL 人工确认）：
 # exclude = ["tf_preprocess_approve"]
+
+# [pricing]
+# 用量计价（元 / 1M tokens），配置后界面才会把 token 用量折算成金额。
+# 单价以服务商官网为准并会调整，这里不写默认价。DeepSeek 另有缓存命中价：
+# input_per_mtok = 2.0            # 输入（缓存未命中）
+# input_cache_hit_per_mtok = 0.5  # 输入（缓存命中）；不配则按输入原价
+# output_per_mtok = 8.0           # 输出

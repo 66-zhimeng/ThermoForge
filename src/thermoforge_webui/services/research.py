@@ -151,6 +151,9 @@ class ResearchSession:
             except PlannerError as exc:
                 self._emit("error", f"规划失败：{exc}")
                 raise
+            # make_planner 把当轮 trace 挂在函数属性上；编排器只调本包装
+            # 函数，透传给它，规划留痕才能随实验工件落盘
+            planner.last_trace = getattr(base_planner, "last_trace", None)
             if plan is None:
                 self._emit("plan_none", "模型认为没有值得再试的假设了。")
                 return None
@@ -160,7 +163,9 @@ class ResearchSession:
                 return plan
             self._emit("plan", plan.get("statement", ""), plan=dict(plan),
                        round_index=round_index,
-                       reasoning=_latest_reasoning(planner_context))
+                       reasoning=_latest_reasoning(planner_context),
+                       usage=_latest_usage(planner_context),
+                       cost=_latest_cost(planner_context))
             if self.mode == MODE_STEP and not self._await_approval(plan):
                 return None
             return plan
@@ -206,8 +211,20 @@ def _latest_reasoning(context: PlannerContext) -> str:
     return context.traces[-1].reasoning if context.traces else ""
 
 
+def _latest_usage(context: PlannerContext) -> dict[str, Any] | None:
+    return context.traces[-1].usage if context.traces else None
+
+
+def _latest_cost(context: PlannerContext) -> float | None:
+    return context.traces[-1].cost if context.traces else None
+
+
 def make_ask(config) -> Callable[[str, str], str]:
-    """把 `ChatClient` 包成规划器要的 `ask(system, user) -> str`。"""
+    """把 `ChatClient` 包成规划器要的 `ask(system, user) -> str`。
+
+    用量挂在函数属性 `last_usage`/`last_cost` 上：ask 协议只是
+    `str -> str`，测试塞的假模型不带这两个属性，planner 读到 None 即可。
+    """
     from thermoforge_agent.client import ChatClient
 
     client = ChatClient(config)
@@ -217,8 +234,12 @@ def make_ask(config) -> Callable[[str, str], str]:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ])
+        ask.last_usage = result.usage
+        ask.last_cost = result.cost
         return result.content or ""
 
+    ask.last_usage = None
+    ask.last_cost = None
     return ask
 
 

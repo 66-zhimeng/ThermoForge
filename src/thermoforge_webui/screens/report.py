@@ -129,6 +129,12 @@ def _preview(document) -> None:
                              hide_index=True)
                 if section.table_caption:
                     st.caption(section.table_caption)
+            for caption, frame in section.extra_tables:
+                if frame is None or frame.empty:
+                    continue
+                st.dataframe(frame, width="stretch", hide_index=True)
+                if caption:
+                    st.caption(caption)
             for figure in section.figures:
                 st.plotly_chart(figure.plotly(), width="stretch",
                                 key=f"preview_{figure.key}")

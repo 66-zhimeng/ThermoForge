@@ -15,8 +15,10 @@ import pytest
 
 from thermoforge_agent.agent import HarnessAgent
 from thermoforge_agent.client import (
+    ChatClient,
     ChatResult,
     ToolCallRequest,
+    _from_sdk_message,
     _is_local_endpoint,
 )
 from thermoforge_agent.config import AgentConfig, config_guidance
@@ -56,7 +58,7 @@ class StubClient:
         return self.script.pop(0)
 
 
-def tool_call(name, arguments, call_id="call-1"):
+def tool_call(name, arguments, call_id="call-1", reasoning=None):
     return ChatResult(
         content=None,
         tool_calls=[ToolCallRequest(call_id, name, arguments)],
@@ -65,6 +67,7 @@ def tool_call(name, arguments, call_id="call-1"):
                          "id": call_id, "type": "function",
                          "function": {"name": name,
                                       "arguments": json.dumps(arguments)}}]},
+        reasoning=reasoning,
     )
 
 
@@ -266,6 +269,153 @@ def test_session_log_jsonl(tmp_path):
     assert "message" in types and "tool_result" in types
     tool_event = next(e for e in events if e["type"] == "tool_result")
     assert tool_event["tool"] == "tf_dataset_list" and tool_event["ok"] is True
+
+
+def test_session_log_records_reasoning_and_arguments(tmp_path):
+    """assistant 事件必须带思维链与工具调用参数，才能还原探索路径。"""
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    stub = StubClient([
+        tool_call("tf_dataset_query",
+                  {"ref": "wx@rev_0001", "variable_ids": ["chiller.power"]},
+                  reasoning="先查功率列的范围"),
+        final("done"),
+    ])
+    agent = HarnessAgent(_config(), ctx, client=stub,
+                    session_dir=tmp_path / "research" / "agent_sessions")
+    agent.ask("hi")
+    log = next((tmp_path / "research" / "agent_sessions").glob("*.jsonl"))
+    events = [json.loads(line) for line in
+              log.read_text(encoding="utf-8").splitlines()]
+    assistant = next(e for e in events
+                     if e["type"] == "message" and e["role"] == "assistant")
+    assert assistant["reasoning"] == "先查功率列的范围"
+    call = assistant["tool_calls"][0]
+    assert call["name"] == "tf_dataset_query"
+    assert json.loads(call["arguments"]) == {
+        "ref": "wx@rev_0001", "variable_ids": ["chiller.power"]}
+    # 无思维链的消息事件不带 reasoning 键，保持旧格式可读
+    user = next(e for e in events
+                if e["type"] == "message" and e["role"] == "user")
+    assert "reasoning" not in user
+
+
+def test_client_extracts_reasoning_from_sdk_message():
+    from types import SimpleNamespace
+
+    message = SimpleNamespace(content="答", tool_calls=None,
+                              reasoning_content="想")
+    result = _from_sdk_message(message)
+    assert result.reasoning == "想"
+    # 思维链不回显进 raw_message：多数端点不接受该字段回传
+    assert "reasoning" not in result.raw_message
+    assert "reasoning_content" not in result.raw_message
+    # 兼容只给 reasoning 字段的端点；都没有则为 None
+    alt = SimpleNamespace(content="答", tool_calls=None, reasoning="想2")
+    assert _from_sdk_message(alt).reasoning == "想2"
+    plain = SimpleNamespace(content="答", tool_calls=None)
+    assert _from_sdk_message(plain).reasoning is None
+
+
+def test_client_stream_accumulates_reasoning():
+    from types import SimpleNamespace
+
+    def _chunk(delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    chunks = [
+        _chunk(SimpleNamespace(content=None, reasoning_content="先想",
+                               tool_calls=None)),
+        _chunk(SimpleNamespace(content=None, reasoning_content="再查",
+                               tool_calls=None)),
+        _chunk(SimpleNamespace(content="答", reasoning_content=None,
+                               tool_calls=None)),
+    ]
+    client = ChatClient.__new__(ChatClient)  # 跳过 __init__，不触网
+    client.config = _config()
+    client._client = SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=lambda **kw: iter(chunks))))
+    result = client._chat_stream({}, lambda _delta: None)
+    assert result.reasoning == "先想再查"
+    assert result.content == "答"
+
+
+def test_client_stream_captures_usage_chunk():
+    """流式的用量在最后一个空 choices 的 chunk 里（include_usage）。"""
+    from types import SimpleNamespace
+
+    usage_obj = SimpleNamespace(model_dump=lambda exclude_none=False: {
+        "prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15})
+    chunks = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+            content="答", reasoning_content=None, tool_calls=None))],
+            usage=None),
+        SimpleNamespace(choices=[], usage=usage_obj),
+    ]
+    client = ChatClient.__new__(ChatClient)
+    client._client = SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=lambda **kw: iter(chunks))))
+    client.config = _config(price_input_per_mtok=2.0,
+                            price_output_per_mtok=8.0)
+    result = client._chat_stream({}, lambda _delta: None)
+    assert result.usage == {"prompt_tokens": 12, "completion_tokens": 3,
+                            "total_tokens": 15}
+    assert result.cost == pytest.approx((12 * 2.0 + 3 * 8.0) / 1e6)
+
+
+def test_usage_cost_calculation():
+    from thermoforge_agent.client import _usage_cost
+
+    # 未配置单价 → None（界面只显示 token，不算金额）
+    assert _usage_cost({"prompt_tokens": 10, "completion_tokens": 5},
+                       _config()) is None
+    assert _usage_cost(None, _config(price_input_per_mtok=2.0)) is None
+
+    priced = _config(price_input_per_mtok=2.0, price_output_per_mtok=8.0)
+    assert _usage_cost({"prompt_tokens": 1000, "completion_tokens": 500},
+                       priced) == pytest.approx((1000 * 2 + 500 * 8) / 1e6)
+    # 缓存命中/未命中分开计价；命中单价缺省按输入原价
+    cached = _usage_cost({"prompt_cache_hit_tokens": 800,
+                          "prompt_cache_miss_tokens": 200,
+                          "completion_tokens": 100}, priced)
+    assert cached == pytest.approx((800 * 2 + 200 * 2 + 100 * 8) / 1e6)
+    hit_priced = _config(price_input_per_mtok=2.0, price_output_per_mtok=8.0,
+                         price_input_cache_hit_per_mtok=0.5)
+    assert _usage_cost({"prompt_cache_hit_tokens": 800,
+                        "prompt_cache_miss_tokens": 200,
+                        "completion_tokens": 100},
+                       hit_priced) == pytest.approx(
+        (800 * 0.5 + 200 * 2 + 100 * 8) / 1e6)
+
+
+def test_session_log_records_usage_and_cost(tmp_path):
+    ctx, _ = make_ctx(tmp_path, n_steps=100)
+    usage = {"prompt_tokens": 100, "completion_tokens": 20,
+             "total_tokens": 120}
+    stub = StubClient([
+        ChatResult(content=None, reasoning="先列出数据集",
+                   tool_calls=[ToolCallRequest("c1", "tf_dataset_list", {})],
+                   raw_message={"role": "assistant", "content": None,
+                                "tool_calls": [{
+                                    "id": "c1", "type": "function",
+                                    "function": {"name": "tf_dataset_list",
+                                                 "arguments": "{}"}}]},
+                   usage=usage, cost=0.0004),
+        ChatResult(content="done", usage=usage, cost=0.0004),
+    ])
+    agent = HarnessAgent(_config(), ctx, client=stub,
+                    session_dir=tmp_path / "research" / "agent_sessions")
+    agent.ask("hi")
+    log = next((tmp_path / "research" / "agent_sessions").glob("*.jsonl"))
+    events = [json.loads(line) for line in
+              log.read_text(encoding="utf-8").splitlines()]
+    assistant_events = [e for e in events
+                        if e["type"] == "message" and e["role"] == "assistant"]
+    assert all(e.get("usage") == usage for e in assistant_events)
+    assert all(e.get("cost") == 0.0004 for e in assistant_events)
+    # 内存里的逐次调用日志：两次 chat 各一条，第一条带思维链
+    assert len(agent.usage_log) == 2
+    assert agent.usage_log[0]["reasoning"] == "先列出数据集"
+    assert agent.usage_snapshot() == agent.usage_log
 
 
 # ---------------------------------------------------------------- Schema 生成

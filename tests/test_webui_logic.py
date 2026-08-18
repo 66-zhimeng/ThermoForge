@@ -325,3 +325,65 @@ def test_planner_gives_up_after_max_attempts():
 
     with pytest.raises(PlannerError):
         make_planner(ask, _context())(0, {})
+
+
+def test_planner_accumulates_usage_across_attempts():
+    """规划器经 ask 的函数属性读用量；修复重试是真实调用，要累计。"""
+    replies = [
+        '{"statement": "试试", "view_id": "VIEW-BAD", '
+        '"model": {"category": "data", "estimator": "ridge"}}',
+        '{"statement": "改用真实视图", "view_id": "VIEW-0001", '
+        '"model": {"category": "data", "estimator": "ridge"}}',
+    ]
+    calls: list[str] = []
+
+    def ask(system: str, user: str) -> str:
+        calls.append(user)
+        ask.last_usage = {"prompt_tokens": 100, "completion_tokens": 20}
+        ask.last_cost = 0.001
+        return replies[len(calls) - 1]
+
+    context = _context()
+    plan = make_planner(ask, context)(0, {})
+    assert plan is not None
+    trace = context.traces[-1]
+    assert trace.attempts == 2
+    assert trace.usage == {"prompt_tokens": 200, "completion_tokens": 40}
+    assert trace.cost == pytest.approx(0.002)
+
+
+def test_planner_without_usage_attributes_stays_none():
+    """测试桩 ask 不带 last_usage/last_cost 时，trace 用量为 None 而不是报错。"""
+    def ask(system: str, user: str) -> str:
+        return '{"statement": "x", "view_id": "VIEW-0001", ' \
+               '"model": {"category": "data", "estimator": "ridge"}}'
+
+    context = _context()
+    plan = make_planner(ask, context)(0, {})
+    assert plan is not None
+    assert context.traces[-1].usage is None
+    assert context.traces[-1].cost is None
+
+
+# ---------------------------------------------------------------- 用量绘图数据
+
+
+def test_prepare_usage_bars_and_cumulative_cost():
+    entries = [
+        {"usage": {"prompt_tokens": 100, "completion_tokens": 20},
+         "cost": 0.001},
+        {"usage": {"prompt_tokens": 50, "completion_tokens": 10},
+         "cost": 0.0005},
+        {"usage": None, "cost": None},  # 端点没给用量的调用也占位
+    ]
+    bars = series.prepare_usage(entries, ["Q1·1", "Q1·2", "Q1·3"])
+    assert bars.labels == ["Q1·1", "Q1·2", "Q1·3"]
+    assert bars.prompt_tokens == [100, 50, 0]
+    assert bars.completion_tokens == [20, 10, 0]
+    assert bars.cumulative_cost == pytest.approx([0.001, 0.0015, 0.0015])
+    assert bars.total_prompt == 150 and bars.total_completion == 30
+    assert bars.total_cost == pytest.approx(0.0015)
+    # 全部没有 cost（未配置单价）→ 不画金额线
+    no_cost = series.prepare_usage(
+        [{"usage": {"prompt_tokens": 1, "completion_tokens": 1}}])
+    assert no_cost.cumulative_cost is None and no_cost.total_cost is None

@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from . import PALETTE, SURFACE_COLORS
 from .series import (
+    CoefBars,
     MetricBars,
     MissingRates,
     PredictionSeries,
@@ -18,6 +21,7 @@ from .series import (
     ResidualStats,
     ScatterFit,
     SplitTimeline,
+    UsageBars,
 )
 
 _LAYOUT = dict(
@@ -204,3 +208,63 @@ def _axis_assignment(frame: pd.DataFrame,
     reference = max(magnitudes.values()) or 1.0
     return {name: ("right" if scale > 0 and reference / scale >= 100 else "left")
             for name, scale in magnitudes.items()}
+
+
+def usage_figure(bars: UsageBars, *,
+                 title: str = "每次模型调用的 token 用量",
+                 height: int = 340) -> go.Figure:
+    """输入/输出 tokens 堆叠柱 + 累计金额折线（右轴，配了单价才画）。"""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=bars.labels, y=bars.prompt_tokens,
+                         name="输入 tokens", marker_color=PALETTE["actual"]))
+    fig.add_trace(go.Bar(x=bars.labels, y=bars.completion_tokens,
+                         name="输出 tokens", marker_color=PALETTE["predicted"]))
+    if bars.cumulative_cost is not None:
+        fig.add_trace(go.Scatter(
+            x=bars.labels, y=bars.cumulative_cost,
+            name="累计金额（元）", mode="lines+markers", yaxis="y2",
+            line=dict(color=PALETTE["good"], width=1.8)))
+        fig.update_layout(yaxis2=dict(overlaying="y", side="right",
+                                      title_text="元", showgrid=False))
+    fig.update_layout(barmode="stack")
+    return _finish(fig, title, "模型调用", "tokens", height=height)
+
+
+def coef_bars_figure(bars: CoefBars, *, title: str = "系数") -> go.Figure:
+    """横向条形图：正绿负红，第一个标签在顶部（阅读顺序即特征顺序）。"""
+    colors = [PALETTE["good"] if v >= 0 else PALETTE["bad"]
+              for v in bars.values]
+    fig = go.Figure(go.Bar(x=bars.values, y=bars.labels, orientation="h",
+                           marker_color=colors))
+    fig = _finish(fig, title, bars.unit or "取值", "",
+                  height=max(240, 26 * len(bars.labels) + 140))
+    fig.update_yaxes(autorange="reversed")
+    return fig
+
+
+def structure_flow_figure(nodes: Sequence[tuple[float, float, str]],
+                          edges: Sequence[tuple[int, int]], *,
+                          title: str = "模型结构",
+                          height: int = 260) -> go.Figure:
+    """组合结构框图：nodes 为 (x, y, 文本)，edges 为 (起, 止) 下标对。
+
+    用 annotation 画框和箭头而不是 scatter——纯说明图，不需要坐标轴。
+    """
+    fig = go.Figure()
+    for a, b in edges:
+        fig.add_annotation(x=nodes[b][0], y=nodes[b][1],
+                           ax=nodes[a][0], ay=nodes[a][1],
+                           xref="x", yref="y", axref="x", ayref="y",
+                           showarrow=True, arrowhead=3, arrowsize=1.5,
+                           arrowcolor=PALETTE["reference"], arrowwidth=1.6)
+    for x, y, label in nodes:
+        fig.add_annotation(x=x, y=y, text=label.replace("\n", "<br>"),
+                           showarrow=False, font=dict(size=13),
+                           bgcolor="#ffffff", bordercolor=PALETTE["actual"],
+                           borderwidth=1.4, borderpad=8)
+    xs = [n[0] for n in nodes]
+    ys = [n[1] for n in nodes]
+    fig.update_xaxes(visible=False, range=[min(xs) - 1.0, max(xs) + 1.0])
+    fig.update_yaxes(visible=False, range=[min(ys) - 0.9, max(ys) + 0.9])
+    fig.update_layout(title=title, height=height, **_LAYOUT)
+    return fig

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import streamlit as st
 
@@ -56,6 +56,30 @@ def fmt_time(value: str | None) -> str:
     if not value:
         return "—"
     return str(value).replace("T", " ")[:16]
+
+
+def fmt_tokens(value: float | int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{int(value):,}"
+
+
+def fmt_cost(value: float | None) -> str:
+    """金额（元）。None = 未配置单价，此时界面只显示 token 不算钱。"""
+    if value is None:
+        return "—"
+    return f"¥{value:.4f}"
+
+
+def usage_caption(usage: Mapping[str, Any] | None,
+                  cost: float | None) -> str:
+    """一行用量摘要：输入/输出 tokens + 金额（有单价时）。"""
+    usage = usage or {}
+    parts = [f"输入 {fmt_tokens(usage.get('prompt_tokens'))}",
+             f"输出 {fmt_tokens(usage.get('completion_tokens'))} tokens"]
+    if cost is not None:
+        parts.append(f"约 {fmt_cost(cost)}")
+    return " · ".join(parts)
 
 
 def status_badge(status: str | None) -> str:

@@ -113,6 +113,34 @@ def test_tool_calls_are_recorded_as_events() -> None:
     assert any(event.text == "tf_dataset_list" for event in events)
 
 
+def test_turn_records_reasoning_and_per_call_usage() -> None:
+    """一轮回答要带上思维链与逐次调用用量，供界面展开/画图。"""
+    usage_a = {"prompt_tokens": 100, "completion_tokens": 10}
+    usage_b = {"prompt_tokens": 150, "completion_tokens": 30}
+    session = CopilotSession(client=StubClient([
+        ChatResult(content=None,
+                   tool_calls=[ToolCallRequest(id="c1", name="tf_dataset_list",
+                                               arguments={})],
+                   raw_message={"role": "assistant", "content": None},
+                   reasoning="先查数据集", usage=usage_a, cost=0.001),
+        ChatResult(content="共 3 个数据集。", reasoning="可以回答了",
+                   usage=usage_b, cost=0.002),
+    ]))
+    session.ask("有哪些数据集", _config())
+    _wait_idle(session)
+
+    messages, _, _ = session.snapshot()
+    answer = messages[-1]
+    assert answer.role == "assistant"
+    assert answer.reasoning == "可以回答了"  # 最终答复附带的思维链
+    assert [u["usage"] for u in answer.usages] == [usage_a, usage_b]
+    assert [u["cost"] for u in answer.usages] == [0.001, 0.002]
+    # 轮询接口：本轮两次调用；reset 后清零
+    assert len(session.current_usage()) == 2
+    session.reset()
+    assert session.current_usage() == []
+
+
 def test_error_is_surfaced_not_swallowed() -> None:
     class Boom:
         def chat(self, *args, **kwargs):

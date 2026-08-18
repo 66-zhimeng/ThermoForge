@@ -129,7 +129,10 @@ agent> 已发布 plant-power@1.2.0，六项门禁全部通过……
 环境变量 `TF_AGENT_BASE_URL` / `TF_AGENT_MODEL` 可切换端点与模型（任何
 OpenAI 兼容的 chat completions + function calling 端点都能用）。审批类
 动作（如预处理规则审批）不会直接执行——Agent 会向你弹确认，输入 `y`
-才以 human 身份执行并留痕。会话记录保存在 `research/agent_sessions/`。
+才以 human 身份执行并留痕。会话记录保存在 `research/agent_sessions/`
+（JSONL：用户输入、assistant 回复与思维链、工具调用参数、工具返回信封）。
+需要文献调研时 Agent 可调用 `tf_literature_search`（CrossRef / arXiv /
+Semantic Scholar 免费 API，无需配置；检索结果须带 DOI/URL 引用）。
 
 ---
 
@@ -173,8 +176,12 @@ tf dataset import --path data/你的文件.xlsx
 
 - `tf status`：全局概览
 - `research/experiments/EXP-XXXX/report.json`：单次实验完整指标
+- `research/experiments/EXP-XXXX/planner_trace.json`：该轮 AI 规划的思维链、
+  原始回复与 token 用量（Web 研究任务逐轮自动落盘）
 - `tf model compare`：多次实验对比
 - 模型每次发布产生新版本（`models/plant-power/1.1.2` 这样的目录），旧版本可回滚
+- 模型「内部是什么」（数学公式、结构框图、参数取值与合法范围）在四个地方
+  都能看到：实验结果页、AI 研究页结果区、模型页、报告导出（HTML/MD/PDF）
 
 ---
 

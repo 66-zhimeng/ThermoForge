@@ -33,6 +33,8 @@ planner 协议（Agent 决策点注入）::
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
 
@@ -343,6 +345,7 @@ class ResearchOrchestrator:
             )
 
         exp_id = plan_env["id"]
+        self._persist_planner_trace(exp_id)
         ledger.transition(
             self.goal_id, "EXPERIMENT_RUNNING",
             reason=f"第 {round_number} 轮实验执行: {exp_id}",
@@ -459,6 +462,34 @@ class ResearchOrchestrator:
                 f"连续 {self._no_gain_streak} 轮失败/无增益（§9）",
             )
         return None
+
+    # ---------------------------------------------------------------- 留痕
+
+    def _persist_planner_trace(self, exp_id: str) -> None:
+        """把当轮规划留痕随实验工件落盘：experiments/<exp_id>/planner_trace.json。
+
+        planner 协议只传 plan；思维链/原始回复/逐次用量由规划器挂在函数
+        属性 `last_trace` 上（webui 的 `make_planner` 会挂，同
+        `make_ask` 的 `last_usage` 惯例）。脚本化 planner 没有该属性就
+        跳过。写盘失败不中断研究循环——留痕是附加动作。
+        """
+        trace = getattr(self.planner, "last_trace", None)
+        if is_dataclass(trace) and not isinstance(trace, type):
+            payload = asdict(trace)
+        elif isinstance(trace, Mapping):
+            payload = dict(trace)
+        else:
+            return
+        payload["experiment_id"] = exp_id
+        try:
+            exp_dir = self.ctx.research_root / "experiments" / exp_id
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            (exp_dir / "planner_trace.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2,
+                           default=str) + "\n",
+                encoding="utf-8")
+        except OSError:
+            pass
 
     # ---------------------------------------------------------------- 判定
 

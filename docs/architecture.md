@@ -116,6 +116,8 @@ tf_experiment_run
 tf_experiment_get
 tf_model_compare
 tf_model_publish
+
+tf_literature_search   # 外部文献检索（CrossRef/arXiv/Semantic Scholar，只读）
 ```
 
 每个有副作用的工具必须返回稳定 ID、输入版本、状态和制品位置。Agent 不应通过自由文本猜测一次实验是否成功。

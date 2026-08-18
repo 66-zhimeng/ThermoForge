@@ -44,6 +44,11 @@ class AgentConfig:
     # 出网需要代理的环境（公司网络、受限网络）：形如
     # http://127.0.0.1:7890。留空则沿用 httpx 默认的环境变量行为。
     proxy: str = ""
+    # 用量计价（元 / 1M tokens，agent.toml 的 [pricing] 表）。
+    # 单价随服务商调整，不写默认价——0 表示未配置，界面只显示 token 不算金额。
+    price_input_per_mtok: float = 0.0
+    price_output_per_mtok: float = 0.0
+    price_input_cache_hit_per_mtok: float = 0.0  # 0 = 命中缓存也按输入原价算
 
     @classmethod
     def load(
@@ -63,6 +68,7 @@ class AgentConfig:
                 file_doc = tomllib.load(fp)
         tools_doc = file_doc.get("tools") or {}
         exclude = tuple(tools_doc.get("exclude") or DEFAULT_TOOLS_EXCLUDE)
+        pricing_doc = file_doc.get("pricing") or {}
         api_key = os.environ.get(api_key_env) or file_doc.get("api_key")
         if not api_key:
             return None
@@ -76,6 +82,12 @@ class AgentConfig:
             tools_exclude=exclude,
             proxy=str(os.environ.get("TF_AGENT_PROXY")
                       or file_doc.get("proxy") or ""),
+            price_input_per_mtok=float(
+                pricing_doc.get("input_per_mtok") or 0.0),
+            price_output_per_mtok=float(
+                pricing_doc.get("output_per_mtok") or 0.0),
+            price_input_cache_hit_per_mtok=float(
+                pricing_doc.get("input_cache_hit_per_mtok") or 0.0),
         )
 
 

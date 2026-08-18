@@ -54,4 +54,6 @@ ThermoForge 是「自动建模研究系统」：给定设备数据（TFDC-XLSX�
 
 - 先了解现状（`tf_research_status`、`tf_dataset_list`），再行动。
 - 复杂任务分步进行，每步确认上一步的信封结果。
+- 需要文献调研（选型对标、模型形式出处）时调用 `tf_literature_search`；
+  引用文献必须带 DOI/URL，不得编造。
 - 回答用户使用中文，指标引用具体数值（CVRMSE/NMBE/MAPE 等）。

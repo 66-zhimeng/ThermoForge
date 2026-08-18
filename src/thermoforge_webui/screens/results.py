@@ -13,6 +13,7 @@ from .. import cache
 from ..charts import interactive, series
 from ..services import experiments as exp_service
 from ..services.experiments import SURFACE_LABELS
+from .structure import render_model_structure
 from ..ui import (
     copilot_banner,
     empty_state,
@@ -62,6 +63,7 @@ def _single(summaries: list[exp_service.ExperimentSummary]) -> None:
         _failure(detail)
         return
 
+    _structure_block(detail)
     surfaces = exp_service.surface_options(detail)
     if not surfaces:
         st.warning("实验完成了但没有任何评估面，无法出图。")
@@ -111,6 +113,15 @@ def _failure(detail: exp_service.ExperimentDetail) -> None:
         if text.strip():
             with st.expander("子进程 stderr"):
                 st.code(text[-8000:], language="text")
+
+
+def _structure_block(detail: exp_service.ExperimentDetail) -> None:
+    """模型结构：建模方式、方程与辨识参数——「这个模型到底是什么」。"""
+    if not (detail.directory / "model").is_dir():
+        return
+    st.markdown("#### 模型结构")
+    render_model_structure(detail.directory / "model",
+                           key_prefix=f"results_{detail.experiment_id}")
 
 
 def _metrics_block(detail: exp_service.ExperimentDetail,

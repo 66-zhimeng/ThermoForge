@@ -83,6 +83,8 @@ class PlannerTrace:
     error: str | None = None
     attempts: int = 0
     reasoning: str = ""
+    usage: dict[str, Any] | None = None  # 本轮各次模型调用的用量合计
+    cost: float | None = None            # 按 [pricing] 估算的费用（元）
 
 
 @dataclass
@@ -334,6 +336,10 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
     """造一个符合编排器协议的 planner。
 
     `ask(system, user) -> str` 由调用方注入，方便测试时塞一个假模型。
+
+    当轮的 `PlannerTrace` 同步挂在函数属性 `last_trace` 上（同
+    `make_ask` 的 `last_usage` 惯例）：编排器拿到 EXP-ID 后读它，
+    把思维链/原始回复/用量随实验工件落盘。
     """
 
     def planner(round_index: int,
@@ -342,7 +348,10 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
         trace = PlannerTrace(round_index=round_index,
                              prompt_summary=_summarize_prompt(evidence))
         context.traces.append(trace)
+        planner.last_trace = trace
         feedback = ""
+        usage_acc: dict[str, Any] = {}
+        cost_acc = 0.0
         for attempt in range(1, MAX_REPAIR_ATTEMPTS + 1):
             trace.attempts = attempt
             try:
@@ -350,6 +359,17 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
             except Exception as exc:  # 网络/鉴权等，交给上层显示
                 trace.error = f"{type(exc).__name__}: {exc}"
                 raise PlannerError(trace.error) from exc
+            # ask 闭包把每次调用的用量挂在函数属性上（见 make_ask）；
+            # 修复重试也是真实调用，要累计而不是覆盖
+            call_usage = getattr(ask, "last_usage", None) or {}
+            for key, value in call_usage.items():
+                if isinstance(value, (int, float)):
+                    usage_acc[key] = usage_acc.get(key, 0) + value
+            call_cost = getattr(ask, "last_cost", None)
+            if call_cost:
+                cost_acc += call_cost
+            trace.usage = dict(usage_acc) or None
+            trace.cost = cost_acc or None
             trace.raw_reply = reply
             try:
                 raw = parse_plan(reply)

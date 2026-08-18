@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+from typing import Sequence
 
 import matplotlib
 
@@ -20,6 +21,7 @@ from matplotlib import font_manager  # noqa: E402
 
 from . import PALETTE, SURFACE_COLORS  # noqa: E402
 from .series import (  # noqa: E402
+    CoefBars,
     MetricBars,
     MissingRates,
     PredictionSeries,
@@ -176,4 +178,45 @@ def missing_rates_png(rates: MissingRates) -> bytes:
     ax.invert_yaxis()
     ax.set_title("缺失率排行")
     ax.set_xlabel("缺失率（%）")
+    return _render(fig)
+
+
+def coef_bars_png(bars: CoefBars, *, title: str = "系数") -> bytes:
+    """与 interactive.coef_bars_figure 同数据：正绿负红，首标签在顶。"""
+    height = max(2.2, 0.3 * len(bars.labels) + 1.2)
+    fig, ax = plt.subplots(figsize=(7.4, height))
+    colors = [PALETTE["good"] if v >= 0 else PALETTE["bad"]
+              for v in bars.values]
+    positions = range(len(bars.labels))
+    ax.barh(list(positions), bars.values, color=colors)
+    ax.set_yticks(list(positions))
+    ax.set_yticklabels(bars.labels, fontsize=8)
+    ax.invert_yaxis()
+    ax.set_title(title)
+    ax.set_xlabel(bars.unit or "取值")
+    for index, value in enumerate(bars.values):
+        ax.text(value, index, f" {value:.4g}", va="center", fontsize=8)
+    return _render(fig)
+
+
+def structure_flow_png(nodes: Sequence[tuple[float, float, str]],
+                       edges: Sequence[tuple[int, int]], *,
+                       title: str = "模型结构") -> bytes:
+    """组合结构框图（与 interactive.structure_flow_figure 同数据）。"""
+    fig, ax = plt.subplots(figsize=(7.4, 2.4))
+    for a, b in edges:
+        ax.annotate("", xy=(nodes[b][0], nodes[b][1]),
+                    xytext=(nodes[a][0], nodes[a][1]),
+                    arrowprops=dict(arrowstyle="->",
+                                    color=PALETTE["reference"], lw=1.6))
+    for x, y, label in nodes:
+        ax.text(x, y, label, ha="center", va="center", fontsize=10,
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="white",
+                          edgecolor=PALETTE["actual"], lw=1.4))
+    xs = [n[0] for n in nodes]
+    ys = [n[1] for n in nodes]
+    ax.set_xlim(min(xs) - 1.0, max(xs) + 1.0)
+    ax.set_ylim(min(ys) - 0.9, max(ys) + 0.9)
+    ax.axis("off")
+    ax.set_title(title)
     return _render(fig)

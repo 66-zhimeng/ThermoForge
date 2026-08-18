@@ -12,9 +12,10 @@ import time
 import streamlit as st
 
 from .. import cache, navigation
+from ..charts import interactive, series
 from ..config import agent_config
 from ..services.copilot import CopilotSession
-from ..ui import empty_state
+from ..ui import empty_state, fmt_cost, fmt_tokens, usage_caption
 
 SESSION_KEY = "copilot_session"
 PENDING_QUESTION_KEY = "copilot_pending_question"
@@ -48,6 +49,7 @@ def copilot_page() -> None:
         return
 
     _header(session)
+    _usage_panel(session)
     _history(session)
 
     if session.state == "awaiting_approval":
@@ -85,6 +87,53 @@ def _history(session: CopilotSession) -> None:
     for message in messages:
         with st.chat_message("user" if message.role == "user" else "assistant"):
             st.markdown(message.content)
+            if message.role == "assistant" and (message.reasoning
+                                                or message.usages):
+                _turn_detail(message)
+
+
+def _turn_detail(message) -> None:
+    """一轮回答的思维链 + 逐次模型调用用量（折叠，不打扰阅读主线）。"""
+    total_cost = sum(e.get("cost") or 0.0 for e in message.usages) or None
+    with st.expander(f"思维链与本轮用量（{len(message.usages)} 次模型调用"
+                     f"{(' · 约 ' + fmt_cost(total_cost)) if total_cost else ''}）"):
+        if message.reasoning:
+            st.markdown("**思维链**")
+            st.markdown(message.reasoning)
+        for index, entry in enumerate(message.usages):
+            st.caption(f"第 {index + 1} 次调用　"
+                       + usage_caption(entry.get("usage"), entry.get("cost")))
+
+
+def _usage_panel(session: CopilotSession) -> None:
+    """整场对话的用量查询：总量指标 + 逐次调用堆叠柱/累计金额折线。"""
+    messages, _, _ = session.snapshot()
+    entries, labels = [], []
+    turn = 0
+    for message in messages:
+        if message.role == "user":
+            turn += 1
+        elif message.role == "assistant":
+            for index, entry in enumerate(message.usages):
+                entries.append(entry)
+                labels.append(f"Q{turn}·{index + 1}")
+    for index, entry in enumerate(session.current_usage()):  # 进行中的轮次
+        entries.append(entry)
+        labels.append(f"Q{turn + 1}·{index + 1}*")
+    with st.expander("📊 用量统计", expanded=False):
+        if not entries:
+            st.caption("还没有模型调用。问一句之后，这里会显示逐次调用的 "
+                       "token 与估算金额。")
+            return
+        bars = series.prepare_usage(entries, labels)
+        columns = st.columns(3)
+        columns[0].metric("输入 tokens", fmt_tokens(bars.total_prompt))
+        columns[1].metric("输出 tokens", fmt_tokens(bars.total_completion))
+        columns[2].metric("估算金额", fmt_cost(bars.total_cost),
+                          help="在 harness/agent.toml 的 [pricing] 里配置"
+                               "单价后才会计算金额")
+        st.plotly_chart(interactive.usage_figure(bars), width="stretch")
+        st.caption("横轴 `Q轮·序` 为第几轮提问的第几次模型调用，* 表示进行中。")
 
 
 @st.fragment(run_every=1.5)
@@ -100,6 +149,14 @@ def _progress(session: CopilotSession) -> None:
             st.write(f"{icon} `{stamp}` {event.text}{mark}")
         if not events:
             st.write("🤔 正在想…")
+        live = session.current_usage()
+        if live:
+            bars = series.prepare_usage(live)
+            st.caption(f"已调用模型 {len(live)} 次 · 输入 "
+                       f"{fmt_tokens(bars.total_prompt)} · 输出 "
+                       f"{fmt_tokens(bars.total_completion)} tokens"
+                       + (f" · 约 {fmt_cost(bars.total_cost)}"
+                          if bars.total_cost is not None else ""))
     if not session.busy and state != "awaiting_approval":
         st.rerun(scope="app")  # 跑完了，回主流程去处理跳转
 

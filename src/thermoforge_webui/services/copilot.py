@@ -130,6 +130,9 @@ class Message:
     role: str  # user / assistant
     content: str
     at: float = field(default_factory=time.time)
+    reasoning: str = ""  # 本轮最终答复附带的思维链（端点返回时）
+    usages: list[dict[str, Any]] = field(default_factory=list)
+    """本轮每次模型调用的 {at, kind, usage, cost, reasoning}（迭代级用量）。"""
 
 
 class CopilotSession:
@@ -150,6 +153,7 @@ class CopilotSession:
         self.error: str | None = None
         self.pending_approval: dict[str, Any] | None = None
         self.nav_intent: dict[str, Any] | None = None
+        self._usage_start = 0  # 本轮提问在 agent.usage_log 里的起始下标
 
     # ---- 状态
 
@@ -171,6 +175,16 @@ class CopilotSession:
             self.state = "idle"
             self.error = None
             self.nav_intent = None
+            self._usage_start = 0
+
+    def current_usage(self) -> list[dict[str, Any]]:
+        """本轮提问已发生的模型调用用量（进行中界面轮询用）。"""
+        with self._lock:
+            agent = self._agent
+            start = self._usage_start
+        if agent is None:
+            return []
+        return agent.usage_snapshot()[start:]
 
     # ---- 提问
 
@@ -192,6 +206,8 @@ class CopilotSession:
     def _run(self, question: str, config: Any) -> None:
         try:
             agent = self._ensure_agent(config)
+            with self._lock:
+                self._usage_start = len(agent.usage_log)
             answer = agent.ask(question)
         except Exception as exc:
             with self._lock:
@@ -200,7 +216,13 @@ class CopilotSession:
                 self.events.append(CopilotEvent("error", self.error, ok=False))
             return
         with self._lock:
-            self.messages.append(Message("assistant", answer))
+            usages = agent.usage_log[self._usage_start:]
+            reasoning = next(
+                (e["reasoning"] for e in reversed(usages)
+                 if e.get("reasoning")), "")
+            self.messages.append(Message("assistant", answer,
+                                         reasoning=reasoning,
+                                         usages=list(usages)))
             self.events.append(CopilotEvent("answer", "已给出回答"))
             self.state = "idle"
 

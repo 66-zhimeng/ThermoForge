@@ -2,6 +2,10 @@
 
 `ChatClient.chat()` 返回协议无关的 `ChatResult`，对话循环（agent.py）
 不依赖 SDK 类型——测试用 stub client 注入，不触网。
+
+推理模型返回的思维链（DeepSeek `reasoning_content`、部分端点的
+`reasoning`）归一化进 `ChatResult.reasoning`，仅供会话留痕，
+不回显进后续请求上下文（多数端点不接受该字段回传）。
 """
 
 from __future__ import annotations
@@ -27,6 +31,9 @@ class ChatResult:
     content: str | None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     raw_message: dict[str, Any] = field(default_factory=dict)  # 回显进上下文
+    reasoning: str | None = None  # 思维链：仅留痕，不进 raw_message
+    usage: dict[str, Any] | None = None  # 端点返回的 token 用量（原样字段）
+    cost: float | None = None  # 按 [pricing] 单价估算的费用（元）；未配置为 None
 
 
 class ChatClient:
@@ -77,17 +84,29 @@ class ChatClient:
             return self._chat_stream(kwargs, on_content_delta)
         response = self._client.chat.completions.create(**kwargs)
         message = response.choices[0].message
-        return _from_sdk_message(message)
+        usage = _usage_dict(getattr(response, "usage", None))
+        return _from_sdk_message(message, usage=usage,
+                                 cost=_usage_cost(usage, self.config))
 
     def _chat_stream(self, kwargs: dict[str, Any],
                      on_content_delta: Callable[[str], None]) -> ChatResult:
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_acc: dict[int, dict[str, Any]] = {}
-        stream = self._client.chat.completions.create(stream=True, **kwargs)
+        usage: dict[str, Any] | None = None
+        # include_usage：用量只在最后一个空 choices 的 chunk 里返回
+        stream = self._client.chat.completions.create(
+            stream=True, stream_options={"include_usage": True}, **kwargs)
         for chunk in stream:
             if not chunk.choices:
+                chunk_usage = _usage_dict(getattr(chunk, "usage", None))
+                if chunk_usage:
+                    usage = chunk_usage
                 continue
             delta = chunk.choices[0].delta
+            reasoning_piece = _extract_reasoning(delta)
+            if reasoning_piece:
+                reasoning_parts.append(reasoning_piece)
             if delta.content:
                 content_parts.append(delta.content)
                 on_content_delta(delta.content)
@@ -115,7 +134,10 @@ class ChatClient:
         if raw_calls:
             raw["tool_calls"] = raw_calls
         return ChatResult(content=content, tool_calls=calls,
-                          raw_message=raw)
+                          raw_message=raw,
+                          reasoning="".join(reasoning_parts) or None,
+                          usage=usage,
+                          cost=_usage_cost(usage, self.config))
 
     def check(self, timeout: float = 25.0) -> dict[str, Any]:
         """最小连通性验证（`tf agent --check`）。
@@ -179,7 +201,54 @@ def _make_call(call_id: str, name: str, arguments: str) -> ToolCallRequest:
     return ToolCallRequest(id=call_id, name=name, arguments=args)
 
 
-def _from_sdk_message(message: Any) -> ChatResult:
+def _extract_reasoning(obj: Any) -> str | None:
+    """从 SDK message/delta 上取思维链字段（DeepSeek `reasoning_content`，
+    部分端点用 `reasoning`）；SDK 把未知字段挂在 extra 上，getattr 即可。"""
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(obj, attr, None)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _usage_dict(usage: Any) -> dict[str, Any] | None:
+    """SDK 的 CompletionUsage → 普通 dict（保留 cache hit 等扩展字段）。"""
+    if usage is None:
+        return None
+    model_dump = getattr(usage, "model_dump", None)
+    if callable(model_dump):
+        return {k: v for k, v in model_dump(exclude_none=True).items()
+                if v is not None}
+    if isinstance(usage, Mapping):
+        return dict(usage)
+    return None
+
+
+def _usage_cost(usage: Mapping[str, Any] | None, config: Any) -> float | None:
+    """按 [pricing] 单价把 usage 折算成元；未配置单价返回 None（界面只显示
+    token）。有缓存命中字段时分开计价，命中单价缺省按输入原价算。"""
+    if not usage:
+        return None
+    in_price = float(getattr(config, "price_input_per_mtok", 0.0) or 0.0)
+    out_price = float(getattr(config, "price_output_per_mtok", 0.0) or 0.0)
+    if not in_price and not out_price:
+        return None
+    hit = usage.get("prompt_cache_hit_tokens")
+    miss = usage.get("prompt_cache_miss_tokens")
+    if hit is None and miss is None:
+        input_tokens = usage.get("prompt_tokens") or 0
+        input_cost = input_tokens * in_price
+    else:
+        hit_price = float(
+            getattr(config, "price_input_cache_hit_per_mtok", 0.0)
+            or 0.0) or in_price
+        input_cost = (hit or 0) * hit_price + (miss or 0) * in_price
+    completion_tokens = usage.get("completion_tokens") or 0
+    return (input_cost + completion_tokens * out_price) / 1e6
+
+
+def _from_sdk_message(message: Any, *, usage: dict[str, Any] | None = None,
+                      cost: float | None = None) -> ChatResult:
     calls: list[ToolCallRequest] = []
     raw_calls = []
     for tc in message.tool_calls or []:
@@ -195,4 +264,5 @@ def _from_sdk_message(message: Any) -> ChatResult:
     if raw_calls:
         raw["tool_calls"] = raw_calls
     return ChatResult(content=message.content, tool_calls=calls,
-                      raw_message=raw)
+                      raw_message=raw, reasoning=_extract_reasoning(message),
+                      usage=usage, cost=cost)

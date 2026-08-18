@@ -15,6 +15,7 @@ import pandas as pd
 
 from ..charts import interactive, series, static
 from . import experiments as exp_service
+from . import inspect_model
 from .experiments import STATUS_LABELS, SURFACE_LABELS
 
 # 与「数据质量」页同一套中文口径；报告里不出现 PASS/FAIL
@@ -46,6 +47,8 @@ class Section:
     table_caption: str = ""
     figures: list[Figure] = field(default_factory=list)
     key_values: dict[str, str] = field(default_factory=dict)
+    # 主表之外的附加表（如模型参数明细）：（表题, 数据）
+    extra_tables: list[tuple[str, pd.DataFrame]] = field(default_factory=list)
 
 
 @dataclass
@@ -215,9 +218,81 @@ def _experiment_section(detail: exp_service.ExperimentDetail,
             f"（{physics.get('overall_violations', 0)} / "
             f"{physics.get('n_samples', 0)} 样本）。")
 
+    _attach_model_structure(section, detail, include_charts)
     if include_charts:
         section.figures.extend(_experiment_figures(detail))
     return section
+
+
+def _attach_model_structure(section: Section,
+                            detail: exp_service.ExperimentDetail,
+                            include_charts: bool) -> None:
+    """把「模型内部是什么」写进实验小节：公式（等宽文本）、参数表、结构图。
+
+    与页面「模型结构」区共用 inspect_model 的解析结果；失败实验没有
+    model/ 目录时安静跳过。公式用等宽纯文本而不是 LaTeX——Markdown/PDF
+    管线没有 LaTeX 渲染，且与 params.yaml 的明文同口径。
+    """
+    doc = inspect_model.load_model_doc(detail.directory / "model")
+    if doc is None or doc.kind == "unknown":
+        return
+    section.paragraphs.append(f"建模方式：{doc.summary}。")
+    if doc.equations:
+        lines = list(doc.equations)
+        if doc.substituted:
+            lines.extend(["", "代入辨识参数：", *doc.substituted])
+        section.paragraphs.append("```text\n" + "\n".join(lines) + "\n```")
+    if doc.params:
+        section.extra_tables.append(
+            ("模型参数（辨识取值与合法范围）", _params_frame(doc)))
+    if include_charts:
+        section.figures.extend(_structure_figures(detail.experiment_id, doc))
+
+
+def _params_frame(doc: inspect_model.ModelDoc) -> pd.DataFrame:
+    rows = [{"参数": p.name,
+             "取值": p.value,
+             "单位": p.unit or "—",
+             "合法范围": (f"[{p.bounds[0]:.4g}, {p.bounds[1]:.4g}]"
+                        if p.bounds else "—"),
+             "备注": p.note or "—"}
+            for p in doc.params]
+    return pd.DataFrame(rows)
+
+
+def _structure_figures(experiment_id: str,
+                       doc: inspect_model.ModelDoc) -> list[Figure]:
+    figures: list[Figure] = []
+    if doc.kind == "hybrid":
+        nodes, edges = inspect_model.hybrid_flow_spec(doc)
+        figures.append(Figure(
+            key=f"{experiment_id}_flow", title="组合结构",
+            caption="物理主干给出可解析的 baseline，XGBoost 只修正残差。",
+            _plotly=lambda n=nodes, e=edges: interactive.structure_flow_figure(n, e),
+            _png=lambda n=nodes, e=edges: static.structure_flow_png(n, e)))
+    importance = (doc.xgb or {}).get("importance") or {}
+    if doc.kind in ("hybrid", "lab") and importance:
+        bars = series.prepare_coef_bars(importance, unit="%")
+        title = "残差特征重要性" if doc.kind == "hybrid" else "特征重要性"
+        if bars:
+            figures.append(Figure(
+                key=f"{experiment_id}_importance", title=title,
+                caption="XGBoost gain 占比，前 12 位。",
+                _plotly=lambda b=bars, t=title: interactive.coef_bars_figure(
+                    b, title=t),
+                _png=lambda b=bars, t=title: static.coef_bars_png(
+                    b, title=t)))
+    if doc.kind == "linear" and doc.coefficients:
+        bars = series.prepare_coef_bars(doc.coefficients, unit="每标准差")
+        if bars:
+            figures.append(Figure(
+                key=f"{experiment_id}_coef", title="标准化特征系数",
+                caption="作用在标准化特征上，|w| 可直接比大小。",
+                _plotly=lambda b=bars: interactive.coef_bars_figure(
+                    b, title="标准化特征系数"),
+                _png=lambda b=bars: static.coef_bars_png(
+                    b, title="标准化特征系数")))
+    return figures
 
 
 def _experiment_figures(detail: exp_service.ExperimentDetail) -> list[Figure]:

@@ -215,3 +215,56 @@ def test_planner_exhaustion_is_no_gain_stop(tmp_path):
     result = orch.run()
     assert result["summary"]["stop"]["reason"] == STOP_NO_GAIN
     assert "无可行假设" in result["summary"]["stop"]["detail"]
+
+
+def test_planner_trace_persisted_with_experiment(tmp_path):
+    """规划留痕随实验工件落盘：思维链/原始回复/用量写进实验目录。"""
+    ctx, ref = make_ctx(tmp_path)
+    goal_id = _goal(ctx)  # cvrmse_max=1.0：ridge 一轮即验收达标
+    view_id = _view(ctx, ref)
+
+    def ask(system, user):
+        ask.last_usage = {"prompt_tokens": 12, "completion_tokens": 5,
+                          "total_tokens": 17}
+        ask.last_cost = 0.0003
+        return json.dumps({
+            "statement": "带留痕的假设",
+            "reasoning": "先跑 ridge 基线，便宜且可解释",
+            "view_id": view_id,
+            "model": {"category": "data", "estimator": "ridge",
+                      "hyperparameters": {"alpha": 0.5}},
+        }, ensure_ascii=False)  # 真实模型返回的是原始 UTF-8 文本
+
+    goal = ctx.ledger.get(goal_id)
+    context = PlannerContext(
+        goal={"id": goal_id, **goal["definition"]},
+        views=[ctx.ledger.get(view_id)],
+        dataset_ref=ref,
+    )
+    orch = ResearchOrchestrator(ctx, goal_id, make_planner(ask, context),
+                                dataset_ref=ref)
+    result = orch.run()
+
+    assert result["ok"] is True
+    path = (ctx.research_root / "experiments" / "EXP-0001"
+            / "planner_trace.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["experiment_id"] == "EXP-0001"
+    assert payload["round_index"] == 0
+    assert payload["reasoning"] == "先跑 ridge 基线，便宜且可解释"
+    assert payload["plan"]["view_id"] == view_id
+    assert payload["usage"] == {"prompt_tokens": 12, "completion_tokens": 5,
+                                "total_tokens": 17}
+    assert payload["cost"] == 0.0003
+    assert "带留痕的假设" in payload["raw_reply"]
+
+
+def test_planner_trace_skipped_for_scripted_planner(tmp_path):
+    """脚本化 planner 不带 last_trace：不产生留痕文件，也不报错。"""
+    ctx, ref = make_ctx(tmp_path)
+    goal_id = _goal(ctx)
+    orch = ResearchOrchestrator(ctx, goal_id, _planner(_view(ctx, ref)),
+                                dataset_ref=ref)
+    assert orch.run()["ok"] is True
+    assert not (ctx.research_root / "experiments" / "EXP-0001"
+                / "planner_trace.json").exists()

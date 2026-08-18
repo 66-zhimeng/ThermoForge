@@ -51,6 +51,8 @@ td:first-child,th:first-child{text-align:left}
 blockquote{margin:14px 0;padding:10px 16px;border-left:3px solid var(--accent);
            background:var(--sunk);color:var(--muted)}
 code{background:var(--sunk);padding:1px 5px;border-radius:4px;font-size:.92em}
+pre{background:var(--sunk);border:1px solid var(--line);padding:10px 14px;
+    border-radius:var(--radius);overflow-x:auto;font-size:13px;line-height:1.55}
 footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
        color:var(--muted);font-size:13px}
 </style></head><body><div class="wrap">
@@ -74,6 +76,10 @@ footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
   <div class="tablewrap">{{ section.table_html | safe }}</div>
   {% if section.table_caption %}<p class="cap">{{ section.table_caption }}</p>{% endif %}
   {% endif %}
+  {% for caption, table_html in section.extra_tables_html %}
+  <div class="tablewrap">{{ table_html | safe }}</div>
+  {% if caption %}<p class="cap">{{ caption }}</p>{% endif %}
+  {% endfor %}
   {% for figure in section.figures_html %}
   <div class="fig">
     <h3>{{ figure.title }}</h3>
@@ -89,7 +95,13 @@ footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
 
 
 def _mini_markdown(text: str) -> str:
-    """段落里只支持 **粗体**、`代码` 和开头的 `> 引用`——报告正文用不到更多。"""
+    """段落里只支持 **粗体**、`代码`、开头的 `> 引用` 和 ``` 围栏代码块
+    （模型公式用）——报告正文用不到更多。"""
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.split("\n")
+        body = "\n".join(lines[1:-1])
+        return f"<pre>{html_escape.escape(body)}</pre>"
     escaped = html_escape.escape(text)
     quote = escaped.startswith("&gt; ")
     if quote:
@@ -127,6 +139,9 @@ def _section_view(section: Section, first_figure: list[bool]) -> dict:
                        if section.table is not None and not section.table.empty
                        else ""),
         "table_caption": section.table_caption,
+        "extra_tables_html": [(caption, _table_html(frame))
+                              for caption, frame in section.extra_tables
+                              if frame is not None and not frame.empty],
         "figures_html": figures,
     }
 

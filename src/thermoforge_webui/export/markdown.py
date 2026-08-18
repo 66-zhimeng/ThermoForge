@@ -51,6 +51,12 @@ def _section_markdown(section: Section, images: dict[str, bytes]) -> list[str]:
         lines.extend([_table_markdown(section.table), ""])
         if section.table_caption:
             lines.extend([f"*{section.table_caption}*", ""])
+    for caption, frame in section.extra_tables:
+        if frame is None or frame.empty:
+            continue
+        lines.extend([_table_markdown(frame), ""])
+        if caption:
+            lines.extend([f"*{caption}*", ""])
     for figure in section.figures:
         name = f"{figure.key}.png"
         images[name] = figure.png()

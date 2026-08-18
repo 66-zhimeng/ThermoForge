@@ -170,6 +170,12 @@
       "name": "tf_lab_list",
       "entry": "thermoforge_research.tools:tf_lab_list",
       "side_effect": false
+    },
+    {
+      "name": "tf_literature_search",
+      "entry": "thermoforge_research.tools:tf_literature_search",
+      "side_effect": false,
+      "max_rows": 20
     }
   ]
 }

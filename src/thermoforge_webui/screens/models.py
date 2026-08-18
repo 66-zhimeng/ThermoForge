@@ -15,6 +15,7 @@ import streamlit as st
 
 from ..context import MODELS_ROOT
 from ..ui import copilot_banner, empty_state, fmt_time
+from .structure import render_model_structure
 
 # 版本状态机（model-package §5）：只有回滚是反向边
 STATE_LABELS = {
@@ -113,6 +114,11 @@ def _versions(registry: dict[str, Any]) -> None:
         badge = "　**← 生产中**" if name == production else ""
         with st.expander(f"{icon} `{name}`　{label}{badge}"):
             st.caption(f"内容指纹 `{str(version.get('content_id'))[:24]}…`")
+            artifact = Path(registry["_dir"]) / name / "artifact"
+            if artifact.is_dir():
+                st.markdown("**模型结构**")
+                render_model_structure(
+                    artifact, key_prefix=f"models_{registry['model_id']}_{name}")
             _gates(version, "发布门禁")
             st.markdown("**状态流转**")
             for step in history:
