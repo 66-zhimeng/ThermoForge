@@ -46,11 +46,15 @@ PROMPT_FILES = {
 
 # 位点 → 装载的技能（`harness/skills/<name>.md`，不含扩展名）。
 # 只装到真正做研究的位点：网页副驾负责导航与解读，不直接指挥建模升级。
-# 顺序即装载顺序：取证在前、建模在后，与实际工作顺序一致。
+# 顺序即装载顺序：取证 → 建模 → 诊断，与实际工作顺序一致
+# （残差定位是建模跑完、指标卡住之后才用得上的）。
 SKILL_BINDINGS = {
-    "cli": ("measurement-forensics", "system-identification"),
-    "planner": ("measurement-forensics", "system-identification"),
-    "mcp": ("measurement-forensics", "system-identification"),
+    "cli": ("measurement-forensics", "system-identification",
+            "residual-localization"),
+    "planner": ("measurement-forensics", "system-identification",
+                "residual-localization"),
+    "mcp": ("measurement-forensics", "system-identification",
+            "residual-localization"),
     "copilot": (),
 }
 

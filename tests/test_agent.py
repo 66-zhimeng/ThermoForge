@@ -512,7 +512,8 @@ def test_skills_are_bound_and_fingerprinted():
     """技能装到研究位点、不装到副驾，且计入指纹。"""
     from thermoforge_agent import prompts
 
-    expected = ["measurement-forensics", "system-identification"]
+    expected = ["measurement-forensics", "system-identification",
+                "residual-localization"]
     assert set(expected) <= set(prompts.available_skills())
 
     bound = prompts.skill_registry()
@@ -526,6 +527,12 @@ def test_skills_are_bound_and_fingerprinted():
     assert "现场数据取证" in cli        # 两份技能都拼进去了
     assert "gordon_ng" in cli
     assert "朴素持续" in cli            # §1 的核心教训在位
+    assert "残差定位" in cli            # 第三份技能也拼进去了
+    # 最贵的一条教训（定位到工况带 != 该带缺自由度）必须在位
+    assert "带内偏置是不是常数" in cli
+    # 跨项目迁移进来的两条：导数体检、加权口径由用途决定
+    assert "导数体检" in cli
+    assert "加权口径与用途一致" in cli
     # 副驾没装技能：直接比文件原文，不用「某个词不出现」当代理判据
     # （提示词里正常提到「系统辨识族」就会误伤那种写法）
     copilot_file = prompts.normalize(

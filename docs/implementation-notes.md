@@ -146,7 +146,7 @@ xlsx 单表上限为 1,048,576 行 × 16,384 列。按 60s 分辨率，单表约
 | MAE | `mean(\|y-ŷ\|)` | — |
 | MAPE | `mean(\|y-ŷ\| / \|y\|)`，仅对 `\|y\| ≥ y_floor` 的样本 | 见下 |
 | CVRMSE | `RMSE / mean(y)` | `mean(y) ≈ 0` 时未定义 |
-| NMBE | `sum(y-ŷ) / (n · mean(y))` | 见下 |
+| NMBE | `sum(y-ŷ) / (n · mean(y))` | 见下；**符号：正 = 模型低估**（实测高于预测） |
 
 ### 5.1 MAPE 的零分母
 
