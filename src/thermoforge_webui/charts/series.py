@@ -184,11 +184,12 @@ class SplitTimeline:
     @property
     def caption(self) -> str:
         gap = self.purge_seconds + self.embargo_seconds
-        text = (f"purge {self.purge_seconds:.0f}s + embargo "
-                f"{self.embargo_seconds:.0f}s = 边界间隙 {gap / 60:.0f} 分钟")
+        text = ("按时间先后切成 训练→验证→测试（不是随机抽）；边界处 "
+                f"purge {self.purge_seconds:.0f}s + embargo "
+                f"{self.embargo_seconds:.0f}s = 间隙 {gap / 60:.0f} 分钟")
         if self.dropped:
-            text += f" · 丢弃 {self.dropped} 个跨界样本"
-        return text
+            text += f"，丢弃 {self.dropped} 个跨界样本"
+        return text + "，防止未来信息漏进训练。"
 
 
 _SEGMENT_LABELS = {"train": "训练", "validate": "验证", "test": "测试"}

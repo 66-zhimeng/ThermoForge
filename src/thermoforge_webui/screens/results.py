@@ -13,6 +13,7 @@ from .. import cache
 from ..charts import interactive, series
 from ..services import experiments as exp_service
 from ..services.experiments import SURFACE_LABELS
+from thermoforge_research import usage as usage_service
 from .structure import render_model_structure
 from ..ui import (
     copilot_banner,
@@ -22,6 +23,8 @@ from ..ui import (
     fmt_time,
     metric_row,
     status_badge,
+    usage_caption,
+    usage_entries,
 )
 
 COMPARE_METRICS = ("CVRMSE", "R2", "NMBE", "MAPE", "RMSE", "MAE")
@@ -59,6 +62,7 @@ def _single(summaries: list[exp_service.ExperimentSummary]) -> None:
         return
 
     _header(detail)
+    _usage_block(detail)
     if detail.status != "completed":
         _failure(detail)
         return
@@ -101,6 +105,24 @@ def _header(detail: exp_service.ExperimentDetail) -> None:
     columns[3].caption(f"**假设**\n\n`{report.get('hypothesis_id') or '—'}`")
     columns[4].caption(f"**耗时**\n\n{fmt_seconds(report.get('duration_seconds'))}"
                        f"　{fmt_time(report.get('started_at'))}")
+
+
+def _usage_block(detail: exp_service.ExperimentDetail) -> None:
+    """该实验归账的 token 用量与思维链：规划留痕 + 副驾会话里归到它的份额。
+
+    放在失败分支之前：实验跑挂了，规划它花掉的 token 也是账。
+    """
+    view = usage_service.experiment_view(cache.usage_book(),
+                                         detail.experiment_id)
+    if not view.entries:
+        return
+    st.markdown("#### Token 用量与思维链")
+    st.caption("合计：" + usage_caption(
+        {"prompt_tokens": view.prompt_tokens,
+         "completion_tokens": view.completion_tokens}, view.cost)
+        + f"　·　模型调用 {view.calls:.0f} 次　·　"
+          "规则见「AI 研究 → 用量与留痕」页签说明")
+    usage_entries(view.entries)
 
 
 def _failure(detail: exp_service.ExperimentDetail) -> None:

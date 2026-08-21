@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")  # 无显示环境，必须在 pyplot 之前设定
 
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager  # noqa: E402
+from matplotlib import font_manager, mathtext  # noqa: E402
 
 from . import PALETTE, SURFACE_COLORS  # noqa: E402
 from .series import (  # noqa: E402
@@ -220,3 +220,51 @@ def structure_flow_png(nodes: Sequence[tuple[float, float, str]],
     ax.axis("off")
     ax.set_title(title)
     return _render(fig)
+
+
+# ---------------------------------------------------------------- 公式渲染
+
+MATH_DPI = 300  # 公式 PNG 的分辨率；PDF 按 72pt/inch 换算自然宽度
+_MATHTEXT_PARSER = mathtext.MathTextParser("path")
+
+
+def _parseable(line: str) -> bool:
+    """mathtext 只支持 LaTeX 子集，先验证再画，画不了就退成等宽文本。"""
+    try:
+        _MATHTEXT_PARSER.parse(f"${line}$")
+        return True
+    except Exception:
+        return False
+
+
+def _math_figure(lines: Sequence[str]):
+    n = max(1, len(lines))
+    fig = plt.figure(figsize=(7.4, max(0.55, 0.45 * n)))
+    for index, line in enumerate(lines):
+        y = 1.0 - (index + 0.5) / n
+        if _parseable(line):
+            fig.text(0.03, y, f"${line}$", fontsize=13, va="center")
+        else:
+            fig.text(0.03, y, line, fontsize=10, va="center",
+                     family="monospace")
+    return fig
+
+
+def math_lines_png(lines: Sequence[str]) -> bytes:
+    """LaTeX 公式行 → PNG（mathtext 离线渲染，不需要系统装 LaTeX）。"""
+    fig = _math_figure(lines)
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=MATH_DPI, bbox_inches="tight",
+                transparent=True)
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def math_lines_svg(lines: Sequence[str]) -> str:
+    """LaTeX 公式行 → 内联 SVG 字符串（去掉 XML 头，直接嵌 HTML）。"""
+    fig = _math_figure(lines)
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="svg", bbox_inches="tight", transparent=True)
+    plt.close(fig)
+    svg = buffer.getvalue().decode("utf-8")
+    return svg[svg.index("<svg"):]

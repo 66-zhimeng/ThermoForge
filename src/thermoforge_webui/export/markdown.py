@@ -47,6 +47,12 @@ def _section_markdown(section: Section, images: dict[str, bytes]) -> list[str]:
         lines.append("")
     for paragraph in section.paragraphs:
         lines.extend([paragraph, ""])
+    for block in section.math_blocks:
+        # 一行一个 $$ 块：多行塞同一个 $$ 里 KaTeX 会忽略换行、串成一行
+        for line in block.lines:
+            lines.extend(["$$", line, "$$", ""])
+        if block.caption:
+            lines.extend([f"*{block.caption}*", ""])
     if section.table is not None and not section.table.empty:
         lines.extend([_table_markdown(section.table), ""])
         if section.table_caption:

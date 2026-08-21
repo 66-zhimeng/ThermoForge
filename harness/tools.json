@@ -92,6 +92,21 @@
       "side_effect": false
     },
     {
+      "name": "tf_usage_overview",
+      "entry": "thermoforge_research.tools:tf_usage_overview",
+      "side_effect": false
+    },
+    {
+      "name": "tf_goal_usage",
+      "entry": "thermoforge_research.tools:tf_goal_usage",
+      "side_effect": false
+    },
+    {
+      "name": "tf_experiment_usage",
+      "entry": "thermoforge_research.tools:tf_experiment_usage",
+      "side_effect": false
+    },
+    {
       "name": "tf_hypothesis_create",
       "entry": "thermoforge_research.tools:tf_hypothesis_create",
       "side_effect": true,

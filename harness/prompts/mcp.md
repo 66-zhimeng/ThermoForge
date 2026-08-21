@@ -17,3 +17,11 @@ ThermoForge 是数据中心暖通的物理-数据混合建模研究系统。所�
   `category=lab` + `hyperparameters.lab` 开实验跑真实数据；改模型就改源码重交
   （自动进新版本），走不通的版本用 `tf_lab_deprecate` 停掉。
 - 实验按时间切分、子进程隔离执行、种子固定，同机重跑指标应逐位一致。
+
+## 查账
+
+- 想知道某个目标/假设/实验花了多少 token、思维链是什么：`tf_usage_overview`
+  看全局面，`tf_goal_usage` / `tf_experiment_usage` 看逐条留痕（含思维链，
+  实验级还带原始回复）。数字与网页控制台「用量与留痕」页签同源。
+- 注意账里只有经过本系统自带 Agent 的调用——你自己这个进程的对话 token
+  不在账内。

@@ -30,6 +30,7 @@ PALETTE = {
 SURFACE_COLORS = {
     "train": PALETTE["train"],
     "validate": PALETTE["validate"],
+    "test": PALETTE["test"],  # 切分图的测试段；漏掉会 fallback 成训练灰
     "A": PALETTE["test"],
     "B": "#16a34a",
     "C": "#15803d",

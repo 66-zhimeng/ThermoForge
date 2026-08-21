@@ -10,12 +10,15 @@ TTL 而不是永久缓存：实验可能由后台线程或另一个终端产生�
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
-from .context import tool_context
+from thermoforge_research import usage
+
+from .context import RESEARCH_ROOT, tool_context
 from .services import catalog, experiments
 
 _TTL = 20  # 秒
@@ -74,6 +77,28 @@ def goals() -> list[dict[str, Any]]:
     if not ctx.research_root.exists():
         return []
     return ctx.ledger.list_goals()
+
+
+@st.cache_data(ttl=_TTL, show_spinner=False)
+def _session_turns(path: str, mtime: float, size: int) -> list[usage.TurnUsage]:
+    """单会话文件解析。mtime/size 进缓存键：文件只增不改，变了就重解析。"""
+    return usage.parse_session_file(Path(path))
+
+
+@st.cache_data(ttl=_TTL, show_spinner="正在统计用量…")
+def usage_book() -> usage.UsageBook:
+    """全量归账账本：会话逐文件增量缓存，planner trace 与谱系每次现扫。"""
+    session_dir = RESEARCH_ROOT / "agent_sessions"
+    turns: list[usage.TurnUsage] = []
+    if session_dir.is_dir():
+        for path in sorted(session_dir.glob("*.jsonl")):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            turns.extend(_session_turns(str(path), stat.st_mtime,
+                                        stat.st_size))
+    return usage.build_book(RESEARCH_ROOT, turns)
 
 
 @st.cache_data(ttl=_TTL, show_spinner=False)

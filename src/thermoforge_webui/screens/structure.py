@@ -14,7 +14,7 @@ import streamlit as st
 
 from ..charts import interactive, series
 from ..services import inspect_model
-from ..services.inspect_model import ModelDoc, ParamRow, load_model_doc
+from ..services.inspect_model import ModelDoc, ParamRow, SymbolRow, load_model_doc
 
 
 def render_model_structure(directory: str | Path,
@@ -29,6 +29,8 @@ def render_model_structure(directory: str | Path,
         return
     st.markdown(f"**{doc.summary}**　`{doc.format}`")
     _equations(doc)
+    if doc.symbols:
+        _symbols_table(doc.symbols)
     if doc.kind == "hybrid":
         _hybrid_body(doc, key_prefix)
     elif doc.kind == "linear":
@@ -118,6 +120,18 @@ def _xgb_spec(doc: ModelDoc) -> None:
             f"`{k}` {'递增' if v > 0 else '递减'}" for k, v in mono.items()))
 
 
+def _symbols_table(symbols: tuple[SymbolRow, ...]) -> None:
+    st.dataframe(pd.DataFrame([{
+        "符号": s.symbol,
+        "含义": s.meaning,
+        "角色": s.role,
+        "单位": s.unit or "—",
+        "数据列": s.column or "—",
+    } for s in symbols]), hide_index=True, width="stretch")
+    st.caption("符号说明：输入 = 数据列直接给；中间量 = 方程内部推出；"
+               "参数 = 辨识/设定值；输出 = 预测目标。")
+
+
 def _params_table(params: tuple[ParamRow, ...]) -> None:
     def _bounds(row: ParamRow) -> str:
         if not row.bounds:
@@ -126,6 +140,7 @@ def _params_table(params: tuple[ParamRow, ...]) -> None:
 
     st.dataframe(pd.DataFrame([{
         "参数": p.name,
+        "符号": p.symbol or "—",
         "取值": f"{p.value:.6g}" if p.value is not None else "—",
         "单位": p.unit or "—",
         "合法范围": _bounds(p),

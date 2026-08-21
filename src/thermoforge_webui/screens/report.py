@@ -124,6 +124,11 @@ def _preview(document) -> None:
                     columns[index % len(columns)].metric(key, value)
             for paragraph in section.paragraphs:
                 st.markdown(paragraph)
+            for block in section.math_blocks:
+                for line in block.lines:
+                    st.latex(line)
+                if block.caption:
+                    st.caption(block.caption)
             if section.table is not None and not section.table.empty:
                 st.dataframe(section.table, width="stretch",
                              hide_index=True)

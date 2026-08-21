@@ -12,6 +12,7 @@ import pandas as pd
 from jinja2 import Environment
 from markupsafe import Markup
 
+from ..charts import static
 from ..services.reports import ReportDocument, Section
 
 _TEMPLATE = """<!doctype html>
@@ -53,6 +54,8 @@ blockquote{margin:14px 0;padding:10px 16px;border-left:3px solid var(--accent);
 code{background:var(--sunk);padding:1px 5px;border-radius:4px;font-size:.92em}
 pre{background:var(--sunk);border:1px solid var(--line);padding:10px 14px;
     border-radius:var(--radius);overflow-x:auto;font-size:13px;line-height:1.55}
+.math{overflow-x:auto;margin:14px 0}
+.math svg{max-width:100%;height:auto}
 footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
        color:var(--muted);font-size:13px}
 </style></head><body><div class="wrap">
@@ -72,6 +75,10 @@ footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
   </dl>
   {% endif %}
   {% for paragraph in section.paragraphs %}{{ paragraph | md }}{% endfor %}
+  {% for math in section.math_html %}
+  <div class="math">{{ math.svg | safe }}</div>
+  {% if math.caption %}<p class="cap">{{ math.caption }}</p>{% endif %}
+  {% endfor %}
   {% if section.table_html %}
   <div class="tablewrap">{{ section.table_html | safe }}</div>
   {% if section.table_caption %}<p class="cap">{{ section.table_caption }}</p>{% endif %}
@@ -135,6 +142,10 @@ def _section_view(section: Section, first_figure: list[bool]) -> dict:
         "title": section.title,
         "key_values": section.key_values,
         "paragraphs": section.paragraphs,
+        # 公式 SVG 很小（KB 级），不值得走 Figure 那套惰性渲染
+        "math_html": [{"svg": static.math_lines_svg(block.lines),
+                       "caption": block.caption}
+                      for block in section.math_blocks],
         "table_html": (_table_html(section.table)
                        if section.table is not None and not section.table.empty
                        else ""),

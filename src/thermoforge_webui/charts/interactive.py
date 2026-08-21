@@ -103,21 +103,27 @@ def split_timeline_figure(timeline: SplitTimeline) -> go.Figure:
     """时间切分横条图：一眼看出三段的位置、长度，以及边界间隙。"""
     fig = go.Figure()
     for segment in timeline.segments:
+        # plotly 日期轴的内部表示是「epoch 毫秒数」：x 直接给 Timedelta 会把
+        # 整条轴渲染成时长（P255DT12H… 这种），必须换成毫秒再声明 type=date
+        base_ms = segment.start.value / 1e6  # Timestamp.value 是纳秒
+        width_ms = (segment.end - segment.start).total_seconds() * 1000.0
         fig.add_trace(go.Bar(
-            x=[segment.end - segment.start], y=["切分"], base=[segment.start],
+            x=[width_ms], y=["切分"], base=[base_ms],
             orientation="h", name=f"{segment.label}（{segment.count or 0}）",
             marker=dict(color=SURFACE_COLORS.get(
                 segment.name, PALETTE["train"])),
-            hovertemplate=(f"{segment.label}<br>%{{base|%Y-%m-%d %H:%M}} → "
+            hovertemplate=(f"{segment.label}<br>"
+                           f"{segment.start:%Y-%m-%d %H:%M} → "
                            f"{segment.end:%Y-%m-%d %H:%M}"
                            f"<br>{segment.count or 0} 个样本<extra></extra>")))
     for boundary in timeline.boundaries:
-        fig.add_vline(x=boundary, line=dict(color=PALETTE["gap"], width=2))
+        fig.add_vline(x=boundary.value / 1e6,
+                      line=dict(color=PALETTE["gap"], width=2))
     fig.update_layout(barmode="stack", title="时间切分与边界间隙",
                       height=220, showlegend=True, **{
                           k: v for k, v in _LAYOUT.items()
                           if k not in ("hovermode",)})
-    fig.update_xaxes(title_text="时间", gridcolor=PALETTE["grid"])
+    fig.update_xaxes(title_text="时间", gridcolor=PALETTE["grid"], type="date")
     fig.update_yaxes(title_text="", showticklabels=False)
     return fig
 

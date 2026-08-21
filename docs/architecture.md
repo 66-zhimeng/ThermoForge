@@ -118,6 +118,10 @@ tf_model_compare
 tf_model_publish
 
 tf_literature_search   # 外部文献检索（CrossRef/arXiv/Semantic Scholar，只读）
+
+tf_usage_overview      # token 用量总览（按目标归账，只读）
+tf_goal_usage          # 单目标明细：按假设/实验分解 + 逐条思维链（只读）
+tf_experiment_usage    # 单实验明细：规划留痕含原始回复（只读）
 ```
 
 每个有副作用的工具必须返回稳定 ID、输入版本、状态和制品位置。Agent 不应通过自由文本猜测一次实验是否成功。

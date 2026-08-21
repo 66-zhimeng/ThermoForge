@@ -32,13 +32,29 @@ TOP_IMPORTANCE = 12
 
 @dataclass(frozen=True)
 class ParamRow:
-    """一个可展示参数：取值 + 单位 + 合法范围（有的话）+ 备注。"""
+    """一个可展示参数：取值 + 单位 + 合法范围（有的话）+ 备注。
+
+    `symbol` 是它在公式里的数学符号（如工件键 r_evaporator 对应 R_e），
+    让参数表和公式对得上。
+    """
 
     name: str
     value: float | None
     unit: str = ""
     bounds: tuple[float, float] | None = None
     note: str = ""
+    symbol: str = ""
+
+
+@dataclass(frozen=True)
+class SymbolRow:
+    """公式符号说明：角色区分 输入（数据列直给）/ 参数 / 中间量 / 输出。"""
+
+    symbol: str
+    meaning: str
+    unit: str = ""
+    role: str = ""
+    column: str = ""  # 输入对应的数据列（逻辑名经 inputs 映射后的真列名）
 
 
 @dataclass(frozen=True)
@@ -57,6 +73,7 @@ class ModelDoc:
     substituted: tuple[str, ...] = ()
     latex: tuple[str, ...] = ()
     params: tuple[ParamRow, ...] = ()
+    symbols: tuple[SymbolRow, ...] = ()
     inputs: dict[str, str] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
     coefficients: dict[str, float] = field(default_factory=dict)
@@ -119,10 +136,11 @@ def _linear(meta: Mapping[str, Any]) -> ModelDoc:
                f"{len(coefs)} 个标准化特征加权求和")
     terms = "".join(f" {'+' if w >= 0 else '−'} {abs(w):.4g}·z_{name}"
                     for name, w in coefs.items())
-    params = [ParamRow("intercept", intercept, note="截距（目标单位）")]
+    params = [ParamRow("intercept", intercept, note="截距（目标单位）",
+                       symbol="b")]
     if is_ridge:
         params.append(ParamRow("alpha", float(alpha or 0.0),
-                               note="岭回归正则强度"))
+                               note="岭回归正则强度", symbol="α"))
     return ModelDoc(
         kind="linear", format=LINEAR_FORMAT, summary=summary,
         equations=("z_i = (x_i − mean_i) / std_i　（训练集均值/标准差，"
@@ -132,6 +150,11 @@ def _linear(meta: Mapping[str, Any]) -> ModelDoc:
         latex=(r"z_i = \dfrac{x_i - \mu_i}{\sigma_i}",
                r"\hat{y} = b + \sum_i w_i\, z_i"),
         params=tuple(params),
+        symbols=(SymbolRow("x_i", "原始特征", "—", "输入"),
+                 SymbolRow("z_i", "标准化特征（训练集均值/标准差）", "1", "中间量"),
+                 SymbolRow("w_i", "特征系数", "目标单位/标准差", "参数"),
+                 SymbolRow("b", "截距", "目标单位", "参数"),
+                 SymbolRow("ŷ", "预测目标", "目标单位", "输出")),
         notes=("系数作用在标准化特征上：|w| 可直接比大小，"
                "含义是「该特征每动一个标准差，目标动多少」。",),
         coefficients=coefs, intercept=intercept,
@@ -157,8 +180,13 @@ def _physics_family(directory: Path) -> ModelDoc:
     return _physics_v1(doc, equations, inputs)
 
 
-def _param_rows(params: Mapping[str, Any]) -> list[ParamRow]:
-    """params.yaml 的 parameters 段 → 展示行（递归展开嵌套段）。"""
+def _param_rows(params: Mapping[str, Any],
+                symbols: Mapping[str, str] | None = None) -> list[ParamRow]:
+    """params.yaml 的 parameters 段 → 展示行（递归展开嵌套段）。
+
+    `symbols` 把工件键名映射到公式符号（如 r_evaporator → R_e）。
+    """
+    symbols = symbols or {}
     rows: list[ParamRow] = []
     for name, entry in params.items():
         if not isinstance(entry, Mapping):
@@ -171,18 +199,21 @@ def _param_rows(params: Mapping[str, Any]) -> list[ParamRow]:
                 unit=str(entry.get("unit") or ""),
                 bounds=(tuple(float(b) for b in bounds)
                         if isinstance(bounds, (list, tuple)) else None),
-                note=str(entry.get("note") or "")))
+                note=str(entry.get("note") or ""),
+                symbol=symbols.get(str(name), "")))
         else:  # 嵌套段（cop_coefficients / curves.capft…）：名称带前缀展开
             for sub, sub_entry in entry.items():
                 if isinstance(sub_entry, Mapping) and "value" in sub_entry:
                     bounds = sub_entry.get("bounds")
+                    key = f"{name}.{sub}"
                     rows.append(ParamRow(
-                        f"{name}.{sub}",
+                        key,
                         float(sub_entry["value"]),
                         unit=str(sub_entry.get("unit") or ""),
                         bounds=(tuple(float(b) for b in bounds)
                                 if isinstance(bounds, (list, tuple)) else None),
-                        note=str(sub_entry.get("note") or "")))
+                        note=str(sub_entry.get("note") or ""),
+                        symbol=symbols.get(key, symbols.get(str(name), ""))))
     return rows
 
 
@@ -211,6 +242,10 @@ def _physics_v1(doc: Mapping[str, Any], equations: tuple[str, ...],
     cop = params.get("cop_coefficients") or {}
     c = {name: (cop.get(name) or {}).get("value") for name in ("c0", "c1", "c2", "c3")}
     ident = doc.get("identification") or {}
+    param_symbols = {"rated_capacity_kw": "Q_rated", "rated_power_kw": "P_rated",
+                     "rho": "ρ", "cp": "C_p",
+                     "cop_coefficients.c0": "c0", "cop_coefficients.c1": "c1",
+                     "cop_coefficients.c2": "c2", "cop_coefficients.c3": "c3"}
     return ModelDoc(
         kind="physics_v1", format=PHYSICS_V1_FORMAT,
         summary="能量平衡物理模型 v1：Q=m·Cp·ΔT，COP 线性回归，P=Q/COP",
@@ -220,7 +255,23 @@ def _physics_v1(doc: Mapping[str, Any], equations: tuple[str, ...],
         latex=(r"Q = \frac{\rho\, f_{chw}}{3600}\, C_p\, (T_{ret} - T_{sup})",
                r"COP = c_0 + c_1 T_{chws} + c_2 T_{cws} + c_3\, PLR",
                r"P = Q \,/\, COP"),
-        params=tuple(_param_rows(params)),
+        params=tuple(_param_rows(params, param_symbols)),
+        symbols=(SymbolRow("f_chw", "冷冻水流量", "kg/h", "输入",
+                           inputs.get("chw_flow", "")),
+                 SymbolRow("T_sup", "冷冻水供水温度", "℃", "输入",
+                           inputs.get("chw_supply_temp", "")),
+                 SymbolRow("T_ret", "冷冻水回水温度", "℃", "输入",
+                           inputs.get("chw_return_temp", "")),
+                 SymbolRow("T_cws", "冷却水供水温度", "℃", "输入",
+                           inputs.get("cw_supply_temp", "")),
+                 SymbolRow("ρ", "水密度", "kg/m³", "定值"),
+                 SymbolRow("C_p", "定压比热", "kJ/(kg·K)", "定值"),
+                 SymbolRow("Q_rated", "额定冷量", "kW", "参数"),
+                 SymbolRow("c0…c3", "COP 回归系数", "1", "参数"),
+                 SymbolRow("Q", "制冷量", "kW", "中间量"),
+                 SymbolRow("PLR", "部分负荷率 Q/Q_rated", "1", "中间量"),
+                 SymbolRow("COP", "能效比", "1", "中间量"),
+                 SymbolRow("P", "冷机功率", "kW", "输出")),
         inputs=inputs,
         notes=tuple(_identification_notes(ident)),
     )
@@ -258,6 +309,12 @@ def _physics_v2(doc: Mapping[str, Any], equations: tuple[str, ...],
     proxy = (ident.get("condenser_proxy") or {})
     if proxy.get("selected"):
         notes.append(f"冷凝侧温度代理：{proxy['selected']}（按辨识残差选出）")
+    param_symbols = {"rated_capacity_kw": "Q_rated", "rated_power_kw": "P_rated",
+                     "rho": "ρ", "cp": "C_p",
+                     "curves.capft": "CAPFT", "curves.eirft": "EIRFT",
+                     "curves.eirfplr": "EIRFPLR",
+                     "input_normalization.t_chws": "u_chws",
+                     "input_normalization.t_cond": "u_cond"}
     return ModelDoc(
         kind="physics_v2", format=PHYSICS_V2_FORMAT,
         summary="能量平衡物理模型 v2（DOE-2 三曲线）：CAPFT / EIRFT / EIRFPLR",
@@ -266,7 +323,29 @@ def _physics_v2(doc: Mapping[str, Any], equations: tuple[str, ...],
         latex=(r"Q = \frac{\rho\, f_{chw}}{3600}\, C_p\, (T_{ret} - T_{sup})",
                r"PLR = \frac{Q}{Q_{rated} \cdot units \cdot CAPFT}",
                r"P = P_{rated} \cdot units \cdot PLR \cdot EIRFT \cdot EIRFPLR"),
-        params=tuple(_param_rows(params)),
+        params=tuple(_param_rows(params, param_symbols)),
+        symbols=(SymbolRow("f_chw", "冷冻水流量", "kg/h", "输入",
+                           inputs.get("chw_flow", "")),
+                 SymbolRow("T_sup", "冷冻水供水温度", "℃", "输入",
+                           inputs.get("chw_supply_temp", "")),
+                 SymbolRow("T_ret", "冷冻水回水温度", "℃", "输入",
+                           inputs.get("chw_return_temp", "")),
+                 SymbolRow("T_cond", "冷凝侧温度（或代理）", "℃", "输入",
+                           inputs.get("cw_supply_temp", "")),
+                 SymbolRow("units", "运行台数", "1", "输入",
+                           inputs.get("run_count", "")),
+                 SymbolRow("ρ", "水密度", "kg/m³", "定值"),
+                 SymbolRow("C_p", "定压比热", "kJ/(kg·K)", "定值"),
+                 SymbolRow("Q_rated", "单台额定冷量", "kW", "参数"),
+                 SymbolRow("P_rated", "单台额定功率", "kW", "参数"),
+                 SymbolRow("Q", "制冷量", "kW", "中间量"),
+                 SymbolRow("u_chws", "归一化冷冻供水温度", "1", "中间量"),
+                 SymbolRow("u_cond", "归一化冷凝侧温度", "1", "中间量"),
+                 SymbolRow("CAPFT", "容量-温度双二次曲线", "1", "中间量"),
+                 SymbolRow("EIRFT", "EIR-温度双二次曲线", "1", "中间量"),
+                 SymbolRow("EIRFPLR", "EIR-负荷率曲线", "1", "中间量"),
+                 SymbolRow("PLR", "部分负荷率", "1", "中间量"),
+                 SymbolRow("P", "冷机功率", "kW", "输出")),
         inputs=inputs,
         notes=tuple(notes),
     )
@@ -295,11 +374,24 @@ def _gordon_ng(meta: Mapping[str, Any]) -> ModelDoc:
                r"Q_c = \frac{T_{ci}\, K}{1 - R_c\, K}",
                r"P = Q_c - Q_e"),
         params=(ParamRow("r_evaporator", p.get("r_evaporator"), "K/kW",
-                         note="蒸发器换热热阻"),
+                         note="蒸发器换热热阻", symbol="R_e"),
                 ParamRow("r_condenser", p.get("r_condenser"), "K/kW",
-                         note="冷凝器换热热阻"),
+                         note="冷凝器换热热阻", symbol="R_c"),
                 ParamRow("delta_s_internal", p.get("delta_s_internal"), "kW/K",
-                         note="内部熵产（不可逆损失）")),
+                         note="内部熵产（不可逆损失）", symbol="ΔS_int")),
+        symbols=(SymbolRow("Q_e", "制冷量（蒸发器侧）", "kW", "输入",
+                           inputs.get("cooling_load", "")),
+                 SymbolRow("T_ei", "冷冻水进水温度", "K", "输入",
+                           inputs.get("t_evap_out", "")),
+                 SymbolRow("T_ci", "冷却水进水温度", "K", "输入",
+                           inputs.get("t_cond_in", "")),
+                 SymbolRow("R_e", "蒸发器换热热阻", "K/kW", "参数"),
+                 SymbolRow("R_c", "冷凝器换热热阻", "K/kW", "参数"),
+                 SymbolRow("ΔS_int", "内部熵产（不可逆损失）", "kW/K", "参数"),
+                 SymbolRow("T_e", "蒸发温度", "K", "中间量"),
+                 SymbolRow("K", "总熵流率（含不可逆项）", "kW/K", "中间量"),
+                 SymbolRow("Q_c", "冷凝排热量", "kW", "中间量"),
+                 SymbolRow("P", "压缩机功率", "kW", "输出")),
         inputs=inputs,
         notes=tuple(notes),
     )
@@ -325,9 +417,27 @@ def _eps_ntu(meta: Mapping[str, Any]) -> ModelDoc:
                r"\varepsilon = \frac{1 - e^{-NTU(1-C_r)}}{1 - C_r\, e^{-NTU(1-C_r)}}",
                r"Q = \varepsilon\, C_{min}\, (T_{hot,in} - T_{cold,in})"),
         params=(ParamRow("ua0", p.get("ua0"), "kW/K",
-                         note="基准传热能力（单位流量下）"),
+                         note="基准传热能力（单位流量下）", symbol="UA_0"),
                 ParamRow("beta", p.get("beta"), "1",
-                         note="冷侧热阻占比权重")),
+                         note="冷侧热阻占比权重", symbol="β")),
+        symbols=(SymbolRow("T_hot,in", "热侧进口水温", "℃", "输入",
+                           inputs.get("t_hot_in", "")),
+                 SymbolRow("T_cold,in", "冷侧进口水温", "℃", "输入",
+                           inputs.get("t_cold_in", "")),
+                 SymbolRow("f_hot", "热侧流量", "m³/h", "输入",
+                           inputs.get("f_hot", "")),
+                 SymbolRow("f_cold", "冷侧流量", "m³/h", "输入",
+                           inputs.get("f_cold", "")),
+                 SymbolRow("units", "运行台数", "1", "输入",
+                           str(meta.get("n_units") or "")),
+                 SymbolRow("UA_0", "基准传热能力", "kW/K", "参数"),
+                 SymbolRow("β", "冷侧热阻占比权重", "1", "参数"),
+                 SymbolRow("C", "热容流率 f·ρ·Cp/3600", "kW/K", "中间量"),
+                 SymbolRow("UA", "实际传热能力", "kW/K", "中间量"),
+                 SymbolRow("NTU", "传热单元数 UA/C_min", "1", "中间量"),
+                 SymbolRow("C_r", "热容流率比 C_min/C_max", "1", "中间量"),
+                 SymbolRow("ε", "换热器效能", "1", "中间量"),
+                 SymbolRow("Q", "换热量", "kW", "输出")),
         inputs=inputs,
         notes=tuple(notes),
     )
@@ -391,12 +501,18 @@ def _hybrid(directory: Path, meta: Mapping[str, Any]) -> ModelDoc:
         "ŷ = ŷ_主干 + Σ_t g_t(z)　（t = 1..n_trees，g_t 为回归树）")
     latex = tuple(base.latex if base else ()) + (
         r"\hat{y} = f_{base}(x) + \sum_{t=1}^{T} g_t(z)",)
+    symbols = tuple(base.symbols if base else ()) + (
+        SymbolRow("ŷ_base", "物理主干预测 f_base(x)", "目标单位", "中间量"),
+        SymbolRow("z", "标准化残差特征", "1", "中间量"),
+        SymbolRow("g_t", "第 t 棵回归树（XGBoost）", "—", "参数"),
+        SymbolRow("ŷ", "最终预测（主干 + 残差修正）", "目标单位", "输出"))
     return ModelDoc(
         kind="hybrid", format=HYBRID_FORMAT, summary=summary,
         equations=equations,
         substituted=tuple(base.substituted if base else ()),
         latex=latex,
         params=tuple(base.params if base else ()),
+        symbols=symbols,
         inputs=dict(base.inputs if base else {}),
         notes=tuple(base.notes if base else ()),
         base=base,
@@ -429,8 +545,20 @@ def hybrid_flow_spec(doc: ModelDoc) -> tuple[list[tuple[float, float, str]],
 
 def _lab(directory: Path, meta: Mapping[str, Any]) -> ModelDoc:
     fmt = str(meta.get("format") or "")
-    columns = [str(c) for c in meta.get("columns") or []]
-    params = {str(k): v for k, v in (meta.get("params") or {}).items()}
+    # 输入列键名由模块作者自定，几种写法都认（columns/cols/input_order/…）
+    columns = [str(c) for c in
+               (meta.get("columns") or meta.get("cols")
+                or meta.get("input_order") or meta.get("feature_columns")
+                or [])]
+    raw_params = meta.get("params") or {}
+    if isinstance(raw_params, Mapping):
+        params: dict[str, Any] = {str(k): v for k, v in raw_params.items()}
+        gbdt = True
+    else:
+        # 自定义函数形式按位置存拟合系数（list）：键名按位置生成 p0/p1/…
+        params = {f"p{index}": value
+                  for index, value in enumerate(raw_params)}
+        gbdt = False
     booster_file = str(meta.get("booster_file") or "booster.json")
     importance = _booster_importance(directory / booster_file)
     source_path = directory / "lab_source.py"
@@ -442,11 +570,19 @@ def _lab(directory: Path, meta: Mapping[str, Any]) -> ModelDoc:
             lab_source = None
     return ModelDoc(
         kind="lab", format=fmt,
-        summary=f"模型实验室模块（{fmt}）：GBDT 直接回归，{len(columns)} 个输入列",
-        equations=("ŷ = Σ_t g_t(x)　（梯度提升树，模型实验室模块）",),
-        latex=(r"\hat{y} = \sum_{t=1}^{T} g_t(x)",),
+        summary=(f"模型实验室模块（{fmt}）：GBDT 直接回归，{len(columns)} 个输入列"
+                 if gbdt else
+                 f"模型实验室模块（{fmt}）：自定义函数形式，{len(columns)} 个输入列"),
+        equations=("ŷ = Σ_t g_t(x)　（梯度提升树，模型实验室模块）",)
+        if gbdt else
+        ("ŷ = f(x; θ)　（模型实验室自定义函数形式，θ 为拟合系数）",),
+        latex=(r"\hat{y} = \sum_{t=1}^{T} g_t(x)",)
+        if gbdt else (r"\hat{y} = f(x;\theta)",),
+        symbols=(SymbolRow("x", "输入特征", "—", "输入"),
+                 SymbolRow("g_t", "第 t 棵提升树（GBDT）", "—", "参数"),
+                 SymbolRow("ŷ", "预测目标", "目标单位", "输出")),
         xgb={"params": params, "n_trees": params.get("n_estimators"),
-             "monotone_constraints": {}, "seed": None,
+             "monotone_constraints": {}, "seed": meta.get("seed"),
              "importance": importance},
         lab_source=lab_source,
         raw=dict(meta),

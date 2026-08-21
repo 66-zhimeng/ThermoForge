@@ -81,6 +81,7 @@ from thermoforge_runtime.registry import ModelRegistry
 
 from .errors import ResearchError
 from . import litsearch
+from . import usage
 from .model_lab import (
     LabError,
     LabStore,
@@ -884,6 +885,177 @@ def tf_research_status(
             "unverified_hypotheses": [
                 h["id"] for h in ctx.ledger.unverified_hypotheses(goal_id)],
             "failed_experiments": ctx.ledger.failed_experiments(goal_id),
+        },
+    ))
+
+
+# ---------------------------------------------------------------- 用量归账查询
+#
+# 与网页控制台「AI 研究 → 用量与留痕」页签同一份聚合（`usage.py`），
+# 外部 Agent 经 MCP 也能查到和页面一致的数字与思维链。
+
+
+def _usage_book(ctx: ToolContext
+                ) -> tuple[usage.UsageBook, list[usage.TurnUsage]]:
+    """全量归账账本 + 会话轮次。会话文件多，每次调用全量扫——这是低频
+    查询工具，正确性优先；界面侧的高频读取另有 st.cache_data 增量缓存。"""
+    session_dir = ctx.research_root / "agent_sessions"
+    turns: list[usage.TurnUsage] = []
+    scanned = 0
+    if session_dir.is_dir():
+        for path in sorted(session_dir.glob("*.jsonl")):
+            turns.extend(usage.parse_session_file(path))
+            scanned += 1
+    book = usage.build_book(ctx.research_root, turns)
+    book.scanned_sessions = scanned
+    return book, turns
+
+
+def _usage_entry_dict(entry: usage.UsageEntry, *, include_raw: bool = False
+                      ) -> dict[str, Any]:
+    """UsageEntry → 信封里的结构化条目（思维链带标签，raw_reply 按需）。"""
+    out: dict[str, Any] = {
+        "at": entry.at,
+        "source": entry.source,
+        "detail": entry.detail or None,
+        "question": entry.question or None,
+        "prompt_tokens": round(entry.prompt_tokens),
+        "completion_tokens": round(entry.completion_tokens),
+        "cost": entry.cost,
+        "calls": round(entry.calls, 2),
+        "share": entry.share,
+    }
+    if entry.reasoning:
+        out["reasoning"] = [
+            {"label": (entry.reasoning_labels[i]
+                       if i < len(entry.reasoning_labels) else "思维链"),
+             "text": text}
+            for i, text in enumerate(entry.reasoning)
+        ]
+    if include_raw and entry.raw_reply:
+        out["raw_reply"] = entry.raw_reply
+    return out
+
+
+def _usage_row(view: usage.EntityUsage) -> dict[str, Any]:
+    return {
+        "id": view.entity_id,
+        "prompt_tokens": round(view.prompt_tokens),
+        "completion_tokens": round(view.completion_tokens),
+        "cost": view.cost,  # None = 未在 agent.toml 配置 [pricing] 单价
+        "calls": round(view.calls, 1),
+    }
+
+
+_ATTRIBUTION_NOTE = (
+    "规划留痕精确归到实验并沿 report.json 的 refs 上卷假设/目标；"
+    "会话轮次在对对象做创建/运行/发布时均摊归账，只读轮次围绕唯一对象或"
+    "同一目标时归账，跨目标总览/对比进未归账；外部 Agent（MCP）自己进程的"
+    "对话 token 不在账内——账里只有经过本系统自带 Agent 的调用。")
+
+
+def tf_usage_overview(ctx: ToolContext) -> dict[str, Any]:
+    """Token 用量总览：按研究目标的归账汇总 + 规划/会话/未归账三块总量。
+
+    与网页控制台「AI 研究 → 用量与留痕」页签同源同数。要某个目标或实验的
+    逐条思维链，用 tf_goal_usage / tf_experiment_usage。
+    """
+    tool = "tf_usage_overview"
+    book, turns = _usage_book(ctx)
+    goal_ids = sorted(
+        {g for g, _ in book.experiment_refs.values() if g}
+        | {g for g in book.hypothesis_refs.values() if g}
+        | {e for e in book.per_entity if e.startswith("RG-")})
+    rows = []
+    for goal_id in goal_ids:
+        view = usage.goal_view(book, goal_id)
+        if not view.total.entries:
+            continue
+        try:
+            name = (ctx.ledger.get(goal_id) or {}).get("name")
+        except (KeyError, ValueError):
+            name = None
+        rows.append({**_usage_row(view.total), "goal_id": goal_id,
+                     "name": name,
+                     "hypotheses": len(view.hypotheses),
+                     "experiments": len(view.experiments)})
+    planner_entries = [e for entries in book.per_entity.values()
+                       for e in entries if e.source == "规划"]
+    unassigned = usage.unassigned_view(book)
+    return _finish(ctx, make_envelope(
+        tool, status="OK",
+        summary={
+            "attribution": _ATTRIBUTION_NOTE,
+            "sessions_scanned": book.scanned_sessions,
+            "planner_traces": book.planner_traces,
+            "orphan_planner_traces": book.orphan_traces,
+            "planner_tokens": {
+                "prompt": round(sum(e.prompt_tokens for e in planner_entries)),
+                "completion": round(sum(e.completion_tokens
+                                        for e in planner_entries)),
+            },
+            "session_tokens": {
+                "prompt": round(sum(t.prompt_tokens for t in turns)),
+                "completion": round(sum(t.completion_tokens for t in turns)),
+                "turns": len(turns),
+            },
+            "unassigned": {**_usage_row(unassigned)},
+            "goals": rows,
+        },
+    ))
+
+
+def tf_goal_usage(ctx: ToolContext, goal_id: str) -> dict[str, Any]:
+    """单个研究目标的归账明细：总量、按假设/实验分解、逐条思维链留痕。"""
+    tool = "tf_goal_usage"
+    try:
+        goal = ctx.ledger.get(goal_id)
+    except (KeyError, ValueError) as exc:
+        return _error_envelope(ctx, tool, exc, inputs={"goal_id": goal_id})
+    book, _turns = _usage_book(ctx)
+    view = usage.goal_view(book, goal_id)
+    entries = sorted(view.total.entries, key=lambda e: e.at, reverse=True)
+    return _finish(ctx, make_envelope(
+        tool, id=goal_id, status="OK", inputs={"goal_id": goal_id},
+        summary={
+            "goal": {"goal_id": goal_id, "name": goal.get("name"),
+                     "status": goal.get("status")},
+            "attribution": _ATTRIBUTION_NOTE,
+            "total": _usage_row(view.total),
+            "hypotheses": [
+                {**_usage_row(v),
+                 "statement": (book.hypothesis_statement.get(v.entity_id)
+                               or "")[:200]}
+                for v in view.hypotheses],
+            "experiments": [_usage_row(v) for v in view.experiments],
+            # 新的在前；raw_reply 在目标级不带（太长），到 tf_experiment_usage 拿
+            "entries": [_usage_entry_dict(e) for e in entries],
+        },
+    ))
+
+
+def tf_experiment_usage(ctx: ToolContext, experiment_id: str) -> dict[str, Any]:
+    """单个实验的归账明细：规划留痕（思维链/原始回复/用量）+ 会话份额。"""
+    tool = "tf_experiment_usage"
+    exp_dir = ctx.research_root / "experiments" / experiment_id
+    if not exp_dir.is_dir():
+        return _error_envelope(ctx, tool,
+                               KeyError(f"实验不存在: {experiment_id}"),
+                               inputs={"experiment_id": experiment_id})
+    book, _turns = _usage_book(ctx)
+    view = usage.experiment_view(book, experiment_id)
+    goal_id, hypothesis_id = book.experiment_refs.get(
+        experiment_id, (None, None))
+    return _finish(ctx, make_envelope(
+        tool, id=experiment_id, status="OK",
+        inputs={"experiment_id": experiment_id},
+        summary={
+            "goal_id": goal_id,
+            "hypothesis_id": hypothesis_id,
+            "attribution": _ATTRIBUTION_NOTE,
+            "total": _usage_row(view),
+            "entries": [_usage_entry_dict(e, include_raw=True)
+                        for e in view.entries],
         },
     ))
 
@@ -1829,6 +2001,9 @@ TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "tf_goal_create": tf_goal_create,
     "tf_goal_get": tf_goal_get,
     "tf_research_status": tf_research_status,
+    "tf_usage_overview": tf_usage_overview,
+    "tf_goal_usage": tf_goal_usage,
+    "tf_experiment_usage": tf_experiment_usage,
     "tf_hypothesis_create": tf_hypothesis_create,
     "tf_experiment_plan": tf_experiment_plan,
     "tf_experiment_run": tf_experiment_run,

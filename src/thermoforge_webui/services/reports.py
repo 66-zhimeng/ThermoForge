@@ -40,6 +40,19 @@ class Figure:
 
 
 @dataclass
+class MathBlock:
+    """一段 LaTeX 公式（来自模型工件的 latex 字段）。
+
+    Markdown 走 `$$` 原生数学（GitHub/VSCode/Typora 都渲染）；HTML/PDF 用
+    matplotlib mathtext 离线渲染成 SVG/PNG，不引 LaTeX/KaTeX 依赖。
+    """
+
+    key: str
+    lines: tuple[str, ...]
+    caption: str = ""
+
+
+@dataclass
 class Section:
     title: str
     paragraphs: list[str] = field(default_factory=list)
@@ -47,6 +60,7 @@ class Section:
     table_caption: str = ""
     figures: list[Figure] = field(default_factory=list)
     key_values: dict[str, str] = field(default_factory=dict)
+    math_blocks: list[MathBlock] = field(default_factory=list)
     # 主表之外的附加表（如模型参数明细）：（表题, 数据）
     extra_tables: list[tuple[str, pd.DataFrame]] = field(default_factory=list)
 
@@ -227,21 +241,32 @@ def _experiment_section(detail: exp_service.ExperimentDetail,
 def _attach_model_structure(section: Section,
                             detail: exp_service.ExperimentDetail,
                             include_charts: bool) -> None:
-    """把「模型内部是什么」写进实验小节：公式（等宽文本）、参数表、结构图。
+    """把「模型内部是什么」写进实验小节：公式、参数表、结构图。
 
     与页面「模型结构」区共用 inspect_model 的解析结果；失败实验没有
-    model/ 目录时安静跳过。公式用等宽纯文本而不是 LaTeX——Markdown/PDF
-    管线没有 LaTeX 渲染，且与 params.yaml 的明文同口径。
+    model/ 目录时安静跳过。符号式走 LaTeX（MathBlock，各导出格式各自渲染）；
+    代入辨识参数的数值式是带中文注释的纯文本，保留等宽代码块。
     """
     doc = inspect_model.load_model_doc(detail.directory / "model")
     if doc is None or doc.kind == "unknown":
         return
     section.paragraphs.append(f"建模方式：{doc.summary}。")
-    if doc.equations:
-        lines = list(doc.equations)
-        if doc.substituted:
-            lines.extend(["", "代入辨识参数：", *doc.substituted])
-        section.paragraphs.append("```text\n" + "\n".join(lines) + "\n```")
+    if doc.latex:
+        section.math_blocks.append(MathBlock(
+            key=f"{detail.experiment_id}_equations", lines=doc.latex,
+            caption="模型方程（符号式）。"))
+    elif doc.equations:
+        section.paragraphs.append("```text\n" + "\n".join(doc.equations)
+                                  + "\n```")
+    if doc.substituted:
+        section.paragraphs.append(
+            "```text\n代入辨识参数：\n" + "\n".join(doc.substituted) + "\n```")
+    if doc.symbols:
+        section.extra_tables.append(
+            ("符号说明（输入=数据列直给，中间量=方程内部推出）",
+             pd.DataFrame([{"符号": s.symbol, "含义": s.meaning, "角色": s.role,
+                            "单位": s.unit or "—", "数据列": s.column or "—"}
+                           for s in doc.symbols])))
     if doc.params:
         section.extra_tables.append(
             ("模型参数（辨识取值与合法范围）", _params_frame(doc)))
@@ -251,6 +276,7 @@ def _attach_model_structure(section: Section,
 
 def _params_frame(doc: inspect_model.ModelDoc) -> pd.DataFrame:
     rows = [{"参数": p.name,
+             "符号": p.symbol or "—",
              "取值": p.value,
              "单位": p.unit or "—",
              "合法范围": (f"[{p.bounds[0]:.4g}, {p.bounds[1]:.4g}]"

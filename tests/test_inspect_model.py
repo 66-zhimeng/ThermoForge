@@ -57,7 +57,8 @@ def _gordon_ng_dir(root: Path) -> Path:
         "format": GN_FORMAT,
         "parameters": {"r_evaporator": 0.0012, "r_condenser": 0.0008,
                        "delta_s_internal": 0.45},
-        "inputs": {"q_e": "cooling_load", "t_ci": "cond_in_temp"},
+        "inputs": {"cooling_load": "cooling_load", "t_evap_out": "t_evap_out",
+                   "t_cond_in": "t_cond_in"},
         "n_train": 3000,
         "q_floor": 50.0,
     })
@@ -175,6 +176,23 @@ def test_hybrid_parsed_with_live_booster(tmp_path: Path) -> None:
     assert len(nodes) == 5 and (0, 1) in edges and (4, 2) in edges
 
 
+def test_lab_with_positional_params(tmp_path: Path) -> None:
+    """实验室自定义函数形式把拟合系数按位置存成 list（不是 GBDT 的 dict），
+    输入列的键名也由模块作者自定——两种写法都得能读，不能抛异常。"""
+    directory = tmp_path / "lab"
+    directory.mkdir()
+    _write_json(directory / "model.json", {
+        "format": "thermoforge.lab.fan_law_static",
+        "params": [37.99, 2.40, -4.42],
+        "cols": ["fan_freq_mean", "fan_run_count"],
+    })
+    doc = inspect_model.load_model_doc(directory)
+    assert doc is not None and doc.kind == "lab"
+    assert doc.xgb["params"] == {"p0": 37.99, "p1": 2.40, "p2": -4.42}
+    assert "自定义函数形式" in doc.summary
+    assert "2 个输入列" in doc.summary
+
+
 # ---------------------------------------------------------------- 图数据
 
 
@@ -199,16 +217,35 @@ def test_static_pngs_are_real_pngs() -> None:
     assert static.structure_flow_png(nodes, edges).startswith(b"\x89PNG")
 
 
+def test_math_lines_render_offline() -> None:
+    """mathtext 离线渲染：不装 LaTeX 也能出公式图。"""
+    lines = [r"T_e = T_{ei} - Q_e\, R_e", r"P = Q_c - Q_e"]
+    assert static.math_lines_png(lines).startswith(b"\x89PNG")
+    svg = static.math_lines_svg(lines)
+    assert svg.startswith("<svg") and "<?xml" not in svg
+
+
+def test_math_lines_fall_back_on_bad_latex() -> None:
+    """某行 LaTeX 解析不了就退成等宽文本，不能炸掉整份报告。"""
+    lines = [r"\this_is_not_latex{", "P = Q_c - Q_e"]
+    assert static.math_lines_png(lines).startswith(b"\x89PNG")
+    assert static.math_lines_svg(lines).startswith("<svg")
+
+
 # ---------------------------------------------------------------- 报告渲染
 
 
 def _document_with_structure() -> ReportDocument:
+    from thermoforge_webui.services.reports import MathBlock
+
     frame = pd.DataFrame([{"参数": "r_evaporator", "取值": 0.0012,
                            "单位": "K/kW", "合法范围": "—", "备注": "蒸发器热阻"}])
     section = Section(
         title="实验 EXP-9001",
         paragraphs=["建模方式：测试。",
-                    "```text\nP = Q_c - Q_e\n```"],
+                    "```text\n代入辨识参数：\nP = Q_c - Q_e\n```"],
+        math_blocks=[MathBlock(key="eq", lines=(r"T_e = T_{ei} - Q_e\, R_e",),
+                               caption="模型方程（符号式）。")],
         extra_tables=[("模型参数（辨识取值与合法范围）", frame)])
     return ReportDocument(title="结构测试", subtitle="",
                           generated_at="2026-01-01", sections=[section],
@@ -220,6 +257,7 @@ def test_extra_tables_render_in_all_formats() -> None:
     html = render_html(document)
     assert "r_evaporator" in html and "模型参数" in html
     assert "<pre>" in html and "```" not in html
+    assert 'class="math"' in html and "<svg" in html  # 公式内联 SVG
 
     payload = render_markdown_bundle(document, basename="report")
     import io
@@ -227,6 +265,7 @@ def test_extra_tables_render_in_all_formats() -> None:
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         text = archive.read("report.md").decode("utf-8")
     assert "r_evaporator" in text and "```text" in text
+    assert "$$\nT_e = T_{ei}" in text  # 公式走 $$ 原生数学
 
     pdf = render_pdf(document)
     assert pdf.startswith(b"%PDF")
@@ -235,5 +274,29 @@ def test_extra_tables_render_in_all_formats() -> None:
 def test_params_frame_shape(tmp_path: Path) -> None:
     doc = inspect_model.load_model_doc(_gordon_ng_dir(tmp_path))
     frame = _params_frame(doc)
-    assert list(frame.columns) == ["参数", "取值", "单位", "合法范围", "备注"]
+    assert list(frame.columns) == ["参数", "符号", "取值", "单位",
+                                   "合法范围", "备注"]
     assert len(frame) == 3
+    assert list(frame["符号"]) == ["R_e", "R_c", "ΔS_int"]
+
+
+def test_symbols_legend_covers_roles(tmp_path: Path) -> None:
+    """符号表要说清谁是输入、谁是中间量、谁是输出，并给出输入的数据列。"""
+    doc = inspect_model.load_model_doc(_gordon_ng_dir(tmp_path))
+    roles = {s.symbol: s.role for s in doc.symbols}
+    assert roles["Q_e"] == "输入" and roles["T_e"] == "中间量"
+    assert roles["P"] == "输出" and roles["R_e"] == "参数"
+    # 输入行带数据列，参数行不带
+    by_symbol = {s.symbol: s for s in doc.symbols}
+    assert by_symbol["Q_e"].column == "cooling_load"
+    assert by_symbol["R_e"].column == ""
+    # 参数表的符号都能在符号表里找到
+    legend = {s.symbol for s in doc.symbols}
+    assert all(p.symbol in legend for p in doc.params)
+
+
+def test_hybrid_symbols_extend_base(tmp_path: Path) -> None:
+    doc = inspect_model.load_model_doc(_hybrid_dir(tmp_path))
+    symbols = [s.symbol for s in doc.symbols]
+    assert "Q_e" in symbols  # 主干的符号继承下来
+    assert symbols[-4:] == ["ŷ_base", "z", "g_t", "ŷ"]

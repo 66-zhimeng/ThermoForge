@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import streamlit as st
 
@@ -142,6 +142,35 @@ def _envelope_error(envelope: dict[str, Any]) -> str:
 def caption_list(items: list[str]) -> None:
     for item in items:
         st.caption(item)
+
+
+def usage_entries(entries: Iterable[Any]) -> None:
+    """逐条渲染归账后的用量 + 思维链（研究页/结果页共用）。
+
+    条目是 `thermoforge_research.usage.UsageEntry`。思维链与原始回复各自
+    折叠——外层不能再套 expander（Streamlit 不允许 expander 套 expander），
+    所以调用方要用标题或 container 分区，不要把本函数放进折叠条里。
+    """
+    for entry in entries:
+        head = f"`{fmt_time(entry.at)}`　**{entry.source}**"
+        if entry.detail:
+            head += f"　{entry.detail}"
+        st.markdown(head)
+        if entry.question:
+            st.caption(f"问：{entry.question}")
+        st.caption(usage_caption(
+            {"prompt_tokens": entry.prompt_tokens,
+             "completion_tokens": entry.completion_tokens}, entry.cost))
+        labels = list(getattr(entry, "reasoning_labels", None) or [])
+        for index, reasoning in enumerate(entry.reasoning):
+            label = (labels[index] if index < len(labels) else
+                     "思维链" if len(entry.reasoning) == 1
+                     else f"思维链（第 {index + 1} 次调用）")
+            with st.expander(label):
+                st.markdown(reasoning)
+        if entry.raw_reply:
+            with st.expander("规划原始回复"):
+                st.code(entry.raw_reply[:4000] or "（空）", language="json")
 
 
 def empty_state(title: str, hint: str, icon: str = "📭") -> None:

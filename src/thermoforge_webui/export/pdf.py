@@ -28,6 +28,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from ..charts import static as static_charts
 from ..services.reports import ReportDocument, Section
 
 CJK_FONT = "STSong-Light"
@@ -146,6 +147,22 @@ def _image(payload: bytes) -> Image:
     return Image(io.BytesIO(payload), width=PAGE_WIDTH, height=height * scale)
 
 
+def _math_image(payload: bytes) -> Image:
+    """公式按自然尺寸排（MATH_DPI 换算成点），超宽才缩到版心宽。"""
+    from PIL import Image as PILImage
+
+    with PILImage.open(io.BytesIO(payload)) as handle:
+        width_px, height_px = handle.size
+    width = width_px * 72.0 / static_charts.MATH_DPI
+    height = height_px * 72.0 / static_charts.MATH_DPI
+    if width > PAGE_WIDTH:
+        height *= PAGE_WIDTH / width
+        width = PAGE_WIDTH
+    image = Image(io.BytesIO(payload), width=width, height=height)
+    image.hAlign = "CENTER"
+    return image
+
+
 def _section_flowables(section: Section, styles: dict) -> list:
     flowables: list = [Paragraph(section.title, styles["h2"])]
     if section.key_values:
@@ -161,6 +178,10 @@ def _section_flowables(section: Section, styles: dict) -> list:
                                           styles["code"]))
         else:
             flowables.append(Paragraph(_inline(paragraph), styles["body"]))
+    for block in section.math_blocks:
+        flowables.append(_math_image(static_charts.math_lines_png(block.lines)))
+        if block.caption:
+            flowables.append(Paragraph(block.caption, styles["caption"]))
     if section.table is not None and not section.table.empty:
         flowables.extend([_table(section.table, styles), Spacer(1, 4)])
         if section.table_caption:
