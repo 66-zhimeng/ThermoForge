@@ -164,6 +164,7 @@ class ResearchSession:
             self._emit("plan", plan.get("statement", ""), plan=dict(plan),
                        round_index=round_index,
                        reasoning=_latest_reasoning(planner_context),
+                       cot=_latest_cot(planner_context),
                        usage=_latest_usage(planner_context),
                        cost=_latest_cost(planner_context))
             if self.mode == MODE_STEP and not self._await_approval(plan):
@@ -211,6 +212,11 @@ def _latest_reasoning(context: PlannerContext) -> str:
     return context.traces[-1].reasoning if context.traces else ""
 
 
+def _latest_cot(context: PlannerContext) -> str:
+    """端点返回的思维链（reasoning_content），与计划自带的 reasoning 分开。"""
+    return context.traces[-1].cot if context.traces else ""
+
+
 def _latest_usage(context: PlannerContext) -> dict[str, Any] | None:
     return context.traces[-1].usage if context.traces else None
 
@@ -222,8 +228,9 @@ def _latest_cost(context: PlannerContext) -> float | None:
 def make_ask(config) -> Callable[[str, str], str]:
     """把 `ChatClient` 包成规划器要的 `ask(system, user) -> str`。
 
-    用量挂在函数属性 `last_usage`/`last_cost` 上：ask 协议只是
-    `str -> str`，测试塞的假模型不带这两个属性，planner 读到 None 即可。
+    用量挂在函数属性 `last_usage`/`last_cost` 上，端点思维链挂在
+    `last_reasoning` 上：ask 协议只是 `str -> str`，测试塞的假模型不带
+    这些属性，planner 读到 None 即可。
     """
     from thermoforge_agent.client import ChatClient
 
@@ -236,10 +243,12 @@ def make_ask(config) -> Callable[[str, str], str]:
         ])
         ask.last_usage = result.usage
         ask.last_cost = result.cost
+        ask.last_reasoning = result.reasoning
         return result.content or ""
 
     ask.last_usage = None
     ask.last_cost = None
+    ask.last_reasoning = None
     return ask
 
 

@@ -392,6 +392,7 @@ class ModelRegistry:
         unmet: list[str] = []
         checks = (
             ("cvrmse_max", "CVRMSE", lambda v, lim: v <= lim),
+            ("r2_min", "R2", lambda v, lim: v >= lim),
             ("mape_max", "MAPE", lambda v, lim: v <= lim),
             ("nmbe_abs_max", "NMBE", lambda v, lim: abs(v) <= lim),
             ("physics_violation_rate_max", "physics_violation_rate",

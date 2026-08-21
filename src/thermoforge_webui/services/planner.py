@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
+from thermoforge_core.canonical import canonical_json
+from thermoforge_models.lab import parse_inputs
 from thermoforge_research.model_catalog import (
     PHYSICS_BALANCE,
     PHYSICS_IDENTIFICATION,
@@ -74,7 +76,7 @@ class PlannerError(RuntimeError):
 
 @dataclass
 class PlannerTrace:
-    """一轮规划的留痕，界面上要能看到模型到底说了什么。"""
+    """一轮规划的留痕，界面上要能看到模型到底说了什么、想了什么。"""
 
     round_index: int
     prompt_summary: str
@@ -82,7 +84,8 @@ class PlannerTrace:
     plan: dict[str, Any] | None = None
     error: str | None = None
     attempts: int = 0
-    reasoning: str = ""
+    reasoning: str = ""  # 计划 JSON 自带的「为什么这么选」字段
+    cot: str = ""        # 端点返回的思维链（reasoning_content），与上一行是两回事
     usage: dict[str, Any] | None = None  # 本轮各次模型调用的用量合计
     cost: float | None = None            # 按 [pricing] 估算的费用（元）
 
@@ -144,13 +147,27 @@ PLAN_SCHEMA_HINT = """{
   "basis": ["EXP-0003"],
   "view_id": "VIEW-0001",
   "model": {
-    "category": "physics|data|hybrid",
+    "category": "physics|data|hybrid|lab",
     "physics": "cooling_balance_v2",
     "estimator": null,
     "residual": null,
     "hyperparameters": {}
   },
   "y_floor": null
+}
+
+内置闭集表达不了的函数形式，在同一份 JSON 里加 lab_module，编排器会先提交
+它过门禁（AST 扫描 + 子进程五连检），过了就在本轮直接引用，不需要人审批；
+没过会把失败明细给你，下一轮改代码重交。此时 model.category 填 "lab"：
+
+{
+  ... 上面那些字段 ...,
+  "model": {"category": "lab", "hyperparameters": {"lab": "模块名"}},
+  "lab_module": {
+    "name": "fan_law_static",
+    "description": "一句话说明这个函数形式在建模什么",
+    "source": "完整的 Python 模块源码字符串"
+  }
 }"""
 
 
@@ -182,7 +199,13 @@ def build_prompt(context: PlannerContext, round_index: int,
         },
         "dataset_ref": context.dataset_ref,
         "available_views": views_desc,
-        "available_lab_modules": list(context.lab_refs),
+        # 带上每个模块声明要吃的列。只给 ref 时规划器看不出「这个模块只读
+        # frequency」，于是反复用换视图冒充换实验（RG-0028 四轮同指标）。
+        "available_lab_modules": [
+            {"ref": m.get("ref"), "reads_columns": m.get("input_roles") or [],
+             "description": m.get("description")}
+            for m in context.lab_modules if m.get("runnable", True)
+        ] or list(context.lab_refs),
         "model_menu": MODEL_MENU,
         "evidence": _trim_evidence(evidence),
     }
@@ -239,7 +262,12 @@ def validate_plan(
     也能让模型拿着错误重试一次。
     """
     if "stop" in plan:
-        return None, None  # 明确停止，不是错误
+        # 明确停止，不是错误。**理由必须带出去**：模型判断「为什么做不到」
+        # 往往是整轮研究最有价值的产出（比如「瓶颈是缺阀位测点」——那会
+        # 直接变成给现场的加表建议）。此前这里返回 (None, None)，停止文本
+        # 落在地上，编排器只记下一句通用的「planner 无可行假设」。
+        return {"stop": str(plan["stop"]),
+                "reasoning": str(plan.get("reasoning") or "")}, None
     if "needs_human" in plan:
         return {"needs_human": str(plan["needs_human"]),
                 "statement": str(plan.get("statement") or "需要人工确认"),
@@ -257,7 +285,17 @@ def validate_plan(
     model = plan.get("model")
     if not isinstance(model, Mapping):
         return None, "缺少 model 对象"
-    error = _validate_model(model, context)
+    # 同一轮里新交的模块还不在 context.lab_refs 里（那份清单是进本轮时的
+    # 快照），要先认下它，否则「提交 + 立刻引用」永远过不了校验。
+    pending = plan.get("lab_module")
+    pending_lab = (str((pending or {}).get("name") or "").strip()
+                   if isinstance(pending, Mapping) else "")
+    error = _validate_model(model, context, pending_lab=pending_lab or None)
+    if error:
+        return None, error
+    pending_source = (str((pending or {}).get("source") or "")
+                      if isinstance(pending, Mapping) else "")
+    error = _lab_view_error(context, view_id, model, pending_source or None)
     if error:
         return None, error
 
@@ -281,12 +319,36 @@ def validate_plan(
             f"basis 包含不可用 ID：{unknown_basis}；"
             f"可引用：{sorted(basis_candidates)}")
 
+    duplicate = _duplicate_of(context, view_id, model)
+    if duplicate is not None:
+        # round_index < 0 是补进来的历史实验（跨进程去重），不是本次运行的轮次
+        where = (f"第 {duplicate} 轮" if duplicate >= 0 else "本目标此前跑过的某个实验")
+        return None, (
+            f"这个计划和{where}等价（模块真正会读的列 + 模型 + 超参都相同）："
+            "确定性实验重跑只会得到逐位一样的指标，白烧一轮。**注意 lab 模块"
+            "只读它 INPUT_ROLES 声明的列，视图里多出来的列它不看——所以光换"
+            "视图不算换实验。**要换就换真的：改 INPUT_ROLES 让模块吃上新列"
+            "（tf_lab_submit 提交新版本）、换模型类别、或换超参量级。"
+            "若确实没有新招可试，回 {\"stop\": \"没有可试的新假设\"}。")
+
     result: dict[str, Any] = {
         "statement": statement,
         "basis": basis,
         "view_id": view_id,
         "model": dict(model),
     }
+    lab_module = plan.get("lab_module")
+    if lab_module is not None:
+        if not isinstance(lab_module, Mapping):
+            return None, "lab_module 必须是对象 {name, source, description?}"
+        lab_name = str(lab_module.get("name") or "").strip()
+        lab_source = str(lab_module.get("source") or "")
+        if not lab_name or not lab_source.strip():
+            return None, "lab_module 必须同时给 name 和 source（模块完整源码）"
+        result["lab_module"] = {
+            "name": lab_name, "source": lab_source,
+            "description": str(lab_module.get("description") or "") or None,
+        }
     if plan.get("y_floor") is not None:
         try:
             result["y_floor"] = float(plan["y_floor"])
@@ -297,8 +359,204 @@ def validate_plan(
     return result, None
 
 
+def _normalize_hyperparameters(
+    hyperparameters: Mapping[str, Any], lab_refs: Sequence[str] = (),
+) -> dict[str, Any]:
+    """把「写法不同但跑起来一样」的超参归一，否则去重形同虚设。
+
+    两处坑，都是实测烧掉整轮才发现的（RG-0021 十一轮里六轮是重复）：
+
+    - `inputs` 是角色→列名的映射字符串，`;` 与 `,` 等价、条目顺序无关
+      （见 `thermoforge_models.lab.parse_inputs`）。`"a=a;b=b"` 与
+      `"b=b,a=a"` 是同一件事，按原始字符串比对却是两件。
+    - `lab` 引用可以是裸名也可以是 `name@vN`。裸名在 runner 侧解析成最新
+      版本，所以 `"m"` 与 `"m@v3"`（当 v3 是最新时）跑的是同一份代码。
+    """
+    out: dict[str, Any] = {}
+    latest = {}
+    for ref in lab_refs:
+        name, _, version = str(ref).partition("@v")
+        if version.isdigit():
+            latest[name] = max(latest.get(name, 0), int(version))
+    for key in sorted(hyperparameters):
+        value = hyperparameters[key]
+        if key == "inputs":
+            parsed = parse_inputs(value)
+            value = sorted(f"{k}={v}" for k, v in (parsed or {}).items())
+        elif key == "lab":
+            name, sep, version = str(value).partition("@v")
+            if not sep and name in latest:
+                value = f"{name}@v{latest[name]}"
+        out[str(key)] = value
+    return out
+
+
+#: 视图特征之外、runner 一定会带上的结构列（模块可以直接读）
+_STRUCTURAL_COLUMNS = ("object_id", "timestamp")
+
+
+def _lab_roles(context: PlannerContext | None, model: Mapping[str, Any],
+               pending_source: str | None = None) -> list[str] | None:
+    """模块声明要吃哪些角色列；查不到返回 None（不是空列表——空列表是
+    「通用模型，不挑列」这个明确语义）。"""
+    hp = model.get("hyperparameters") or {}
+    lab_ref = str(hp.get("lab") or "").strip()
+    if not lab_ref:
+        return None
+    name, _, version = lab_ref.partition("@v")
+    if context is not None:
+        matched = [m for m in context.lab_modules
+                   if str(m.get("name")) == name
+                   and (not version or str(m.get("version")) == version)]
+        if matched:
+            latest = max(matched, key=lambda m: int(m.get("version") or 0))
+            roles = latest.get("input_roles")
+            if roles is not None:
+                return [str(r) for r in roles]
+    if pending_source:
+        return _roles_from_source(pending_source)
+    return None
+
+
+def _roles_from_source(source: str) -> list[str] | None:
+    """从模块源码里读 INPUT_ROLES 字面量（同轮提交 + 立刻引用时用得上）。
+
+    只认字面量：靠计算得出的声明这里读不到，返回 None 退回宽松处理。
+    """
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "INPUT_ROLES"
+                   for t in node.targets):
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except (ValueError, SyntaxError):
+            return None
+        # dict 时取键（同 `_lab_check.py` 的 `list(INPUT_ROLES)`）
+        if isinstance(value, Mapping):
+            return [str(k) for k in value]
+        if isinstance(value, (list, tuple)):
+            return [str(v) for v in value]
+        return None
+    return None
+
+
+def _effective_columns(roles: Sequence[str],
+                       hyperparameters: Mapping[str, Any]) -> list[str]:
+    """角色名经 `inputs` 映射后，模块真正会去 df 里取的列名。"""
+    mapping = parse_inputs(hyperparameters.get("inputs")) or {}
+    return [str(mapping.get(role, role)) for role in roles]
+
+
+def _view_of(context: PlannerContext, view_id: str) -> Mapping[str, Any]:
+    for view in context.views:
+        if str(view.get("id")) == view_id:
+            return view.get("definition") or {}
+    return {}
+
+
+def _lab_view_error(context: PlannerContext, view_id: str,
+                    model: Mapping[str, Any],
+                    pending_source: str | None) -> str | None:
+    """模块声明的列，视图里到底有没有。
+
+    这道检查在实验之前，是因为**五连检结构上检不出列名写错**：
+    `_lab_check.py` 用模块自己声明的 INPUT_ROLES 造合成数据，声明成
+    `fan_freq_mean` 就喂 `fan_freq_mean`，五检全绿。等真跑到实数据上才
+    `KeyError`——8-19 的 RG-0028 就这样连废三轮（EXP-0153/0155/0156，真
+    实列名是 `tower_freq_mean` / `bank_fan_count`）。
+    """
+    if str(model.get("category") or "") != "lab":
+        return None
+    roles = _lab_roles(context, model, pending_source)
+    if not roles:                      # 未知或通用模型，不设卡
+        return None
+    definition = _view_of(context, view_id)
+    available = {str(c) for c in (definition.get("features") or [])}
+    available.update(_STRUCTURAL_COLUMNS)
+    if definition.get("target"):
+        available.add(str(definition["target"]))
+    columns = _effective_columns(roles, model.get("hyperparameters") or {})
+    missing = [c for c in columns if c not in available]
+    if not missing:
+        return None
+    return (
+        f"模块声明要吃的列 {missing} 在 {view_id} 里不存在——真跑起来会 "
+        f"KeyError，白烧一轮。该视图可用列：{sorted(available)}。"
+        "要么换一个含这些列的视图，要么用 tf_lab_submit 提交把 INPUT_ROLES "
+        "改成真实列名的新版本，要么用 hyperparameters.inputs 把角色映射到"
+        "真实列名（形如 \"role=column;role2=column2\"）。")
+
+
+def _fingerprint_scope(context: PlannerContext | None, view_id: str,
+                       model: Mapping[str, Any]) -> dict[str, Any]:
+    """决定「换了视图算不算换了实验」。
+
+    对内置路线，视图 ID 就是范围。对 `category=lab` 不成立：模块把
+    INPUT_ROLES 写死，视图里多出来的列它根本不读——换视图跑出来的指标
+    逐位相同。8-19 的 RG-0028 EXP-0158/0163/0164/0165 就是同一个
+    `ct_fan_tower_shared_b`（只声明 `frequency`）在三张视图上跑了四遍，
+    CVRMSE 全是 0.0645，查重却因为 view_id 不同而放行。所以 lab 路线按
+    **模块真正会读的列 + 目标**来算范围。
+    """
+    if str(model.get("category") or "") == "lab" and context is not None:
+        roles = _lab_roles(context, model)
+        if roles is not None:
+            definition = _view_of(context, view_id)
+            columns = _effective_columns(
+                roles, model.get("hyperparameters") or {})
+            return {"target": definition.get("target"),
+                    "columns": sorted(set(columns))}
+    return {"view_id": view_id}
+
+
+def _plan_fingerprint(view_id: str, model: Mapping[str, Any],
+                      lab_refs: Sequence[str] = (),
+                      context: PlannerContext | None = None) -> str:
+    """决定实验结果的三件事：数据范围 + 模型路线 + 超参。种子由编排器固定。"""
+    payload = {
+        "scope": _fingerprint_scope(context, view_id, model),
+        "category": model.get("category"),
+        "physics": model.get("physics"),
+        "estimator": model.get("estimator"),
+        "residual": model.get("residual"),
+        "hyperparameters": _normalize_hyperparameters(
+            model.get("hyperparameters") or {}, lab_refs),
+    }
+    return canonical_json(payload)
+
+
+def _duplicate_of(context: PlannerContext, view_id: str,
+                  model: Mapping[str, Any]) -> int | None:
+    """这一计划是否与本次运行里已提交过的某一轮完全相同。
+
+    实验是确定性的（固定种子 + 环境锁），同指纹重跑必然得到逐位一样的指标。
+    没有这道拦截时，规划器会在停滞后反复重交同一个计划——实测 8-18 的
+    EXP-0083/0084、8-19 的 EXP-0092~0096 都是这么烧掉的，编排器的无增益
+    计数还得等满 N 轮才停。
+    """
+    lab_refs = list(context.lab_refs)
+    target = _plan_fingerprint(view_id, model, lab_refs, context)
+    for trace in context.traces:
+        plan = trace.plan
+        if not plan or not plan.get("view_id") or not plan.get("model"):
+            continue
+        if _plan_fingerprint(str(plan["view_id"]), plan["model"],
+                             lab_refs, context) == target:
+            return trace.round_index
+    return None
+
+
 def _validate_model(model: Mapping[str, Any],
-                    context: PlannerContext | None = None) -> str | None:
+                    context: PlannerContext | None = None,
+                    *, pending_lab: str | None = None) -> str | None:
     category = str(model.get("category") or "")
     if category not in MODEL_MENU:
         return f"model.category={category!r} 不可用，只能是 {list(MODEL_MENU)}"
@@ -325,6 +583,8 @@ def _validate_model(model: Mapping[str, Any],
         if context is not None:
             name = lab_ref.partition("@v")[0]
             known = {r.partition("@v")[0] for r in context.lab_refs}
+            if pending_lab:
+                known.add(pending_lab.partition("@v")[0])
             if context.lab_refs and name not in known:
                 return (f"lab 引用 {lab_ref!r} 不在可用清单里，"
                         f"可选：{context.lab_refs}；新模块先用 tf_lab_submit "
@@ -359,7 +619,7 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
             except Exception as exc:  # 网络/鉴权等，交给上层显示
                 trace.error = f"{type(exc).__name__}: {exc}"
                 raise PlannerError(trace.error) from exc
-            # ask 闭包把每次调用的用量挂在函数属性上（见 make_ask）；
+            # ask 闭包把每次调用的用量/思维链挂在函数属性上（见 make_ask）；
             # 修复重试也是真实调用，要累计而不是覆盖
             call_usage = getattr(ask, "last_usage", None) or {}
             for key, value in call_usage.items():
@@ -368,6 +628,9 @@ def make_planner(ask: Callable[[str, str], str], context: PlannerContext):
             call_cost = getattr(ask, "last_cost", None)
             if call_cost:
                 cost_acc += call_cost
+            # 端点思维链（reasoning_content）：与 raw_reply 同规则，留最后一次
+            # 尝试的——它和最终被采纳/最终失败的那次回复对应
+            trace.cot = getattr(ask, "last_reasoning", None) or ""
             trace.usage = dict(usage_acc) or None
             trace.cost = cost_acc or None
             trace.raw_reply = reply

@@ -80,6 +80,13 @@ class AgentConfig:
                    or file_doc.get("model") or DEFAULT_MODEL),
             stream=bool(stream) if stream is not None else False,
             tools_exclude=exclude,
+            # 60s 默认是给交互界面的（久了和卡死没法区分）。无人值守跑长提示
+            # 的推理模型时明显不够——实测规划器单次要 2~7 分钟，60s 直接
+            # APITimeoutError。字段本来就在，只是此前 load() 没读，写了不生效。
+            timeout_seconds=float(os.environ.get("TF_AGENT_TIMEOUT")
+                                  or file_doc.get("timeout_seconds") or 60.0),
+            max_retries=int(os.environ.get("TF_AGENT_MAX_RETRIES")
+                            or file_doc.get("max_retries") or 1),
             proxy=str(os.environ.get("TF_AGENT_PROXY")
                       or file_doc.get("proxy") or ""),
             price_input_per_mtok=float(

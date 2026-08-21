@@ -670,11 +670,18 @@ def tf_dataset_modelability(
     target: str | None = None,
     candidate_inputs: Sequence[str] | None = None,
     object_model: str | None = None,
+    same_origin_corr: float | None = None,
 ) -> dict[str, Any]:
     """可建模性报告（G3 语义层检查）。FAIL = 存在 blocker，不得进入建模。
 
     target/candidate_inputs 可由 `goal_id` 从账本中的 Research Goal 定义
     读取；完整报告始终落 artifact，信封只带摘要（§11）。
+
+    `same_origin_corr` 覆盖同源阻断阈值（默认 0.98，implementation-notes §14
+    写明是待标定的参考值）。**只在能说清「高相关是物理耦合而非同源」时才动**：
+    该检查同时兜住了没有派生元数据的循环论证（F1 `power~current_percent`
+    r=0.9955），调高即放松那道网。用了什么阈值会写进报告 artifact 的
+    `config` 段，事后可查。
     """
     tool = "tf_dataset_modelability"
     try:
@@ -687,10 +694,13 @@ def tf_dataset_modelability(
             object_model = object_model or definition.get("object_model")
         if not target or not candidate_inputs:
             raise ValueError("必须提供 goal_id 或显式 target + candidate_inputs")
+        config = (ModelabilityConfig(same_origin_corr=float(same_origin_corr))
+                  if same_origin_corr is not None else None)
         report = build_modelability_report(
             ctx.vault, ref, target=str(target),
             candidate_inputs=[str(c) for c in candidate_inputs],
             object_model=object_model, registry=ctx.tfom_registry,
+            config=config,
         )
     except (VaultError, KeyError, ValueError) as exc:
         return _error_envelope(ctx, tool, exc, inputs={"ref": ref,
@@ -1005,8 +1015,19 @@ def _metrics_summary(report: Mapping[str, Any]) -> dict[str, Any]:
         for name, surf in (metrics.get("surfaces") or {}).items()
     }
     physics = report.get("physics") or {}
+    # 滚动交叉验证的折间汇总必须进信封：它是一整类 Goal 声明的**判据面**
+    # （acceptance.evaluated_on=rolling_cv）。信封里没有，编排器与 Agent
+    # 就只能拿面 A/validate 去判 —— 判据面声明了却判在别的面上，等于没声明
+    # （实测 EXP-0090：滚动 R²=0.978 达标，却因信封里读不到而没触发验收）。
+    # 只带汇总数值，逐折明细仍在 metrics.json artifact 里。
+    rolling = metrics.get("rolling_cv") or {}
     return {
         "surfaces": surfaces,
+        "rolling_cv": ({"n_folds": rolling.get("n_folds"),
+                        "n_folds_skipped": rolling.get("n_folds_skipped"),
+                        "n_samples": rolling.get("n_samples"),
+                        "metrics": rolling.get("metrics")}
+                       if rolling.get("n_folds") else None),
         "physics_overall_rate": physics.get("overall_rate"),
         "duration_seconds": report.get("duration_seconds"),
         "environment_lock": report.get("environment_lock"),

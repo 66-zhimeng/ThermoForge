@@ -363,6 +363,10 @@ def run(spec_path: Path) -> dict[str, Any]:
     y_train = train_df[target].to_numpy(np.float64)
     _fit(model, train_df, y_train, features)
     model_dir = exp_dir / "model"
+    # 目录必须先建好：`_lab_check` 在调 save() 前是 mkdir 过的，这里不建
+    # 就意味着「过了五连检的模块仍可能在真实实验里 FileNotFoundError」——
+    # 五连检的承诺是「过了就能跑」，两边的前置条件必须一致（实测 EXP-0100）。
+    model_dir.mkdir(parents=True, exist_ok=True)
     model.save(model_dir)
     if lab_module is not None:
         # 发布包自包含：lab 源码随模型制品走（artifact/lab_source.py），

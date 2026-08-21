@@ -102,25 +102,38 @@ def _sha256_file(path: Path) -> str:
 # ---------------------------------------------------------------- golden 样本
 
 
+#: 交给模型但不属于签名输入的记账列。必须与 `_child._model_frame` 的口径
+#: 一致：runner 给模型的是「视图特征 + 记账列」，打包时若只给特征，逐台
+#: 标定的模块（按 object_id 分组取参数）在建 golden 时就 KeyError，等于
+#: 「实验里跑得通的模型打不了包」。
+BOOKKEEPING_COLUMNS = ("object_id", "timestamp")
+
+
 def boundary_rows(
     df: pd.DataFrame, features: Sequence[str]
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """golden 输入样本：每个特征的 min/max 所在整行 + 首行（覆盖工况边界）。
 
     implementation-notes §14 待决策 #6：样本选取覆盖工况边界而非随机抽样。
+
+    记账列（object_id/timestamp）原样带出，不做数值转换 —— 它们不是模型
+    输入，而是逐台模型用来取参数的分组键。
     """
-    rows: list[dict[str, float]] = []
+    rows: list[dict[str, Any]] = []
     seen: set[int] = set()
     idxs: list[int] = [0]
     for feat in features:
         col = pd.to_numeric(df[feat], errors="coerce")
         idxs.extend([int(col.idxmin()), int(col.idxmax())])
+    keep = [c for c in BOOKKEEPING_COLUMNS if c in df.columns]
     for idx in idxs:
         if idx in seen:
             continue
         seen.add(idx)
         row = df.loc[idx]
-        rows.append({f: float(row[f]) for f in features})
+        entry: dict[str, Any] = {c: row[c] for c in keep}
+        entry.update({f: float(row[f]) for f in features})
+        rows.append(entry)
     return rows
 
 
@@ -190,7 +203,10 @@ def build_model_package(
     if missing:
         raise ValueError(f"golden 输入缺少签名特征: {missing}")
     model = load_model_artifact(dest / "artifact")
-    preds = model.predict(golden_df[feature_order])
+    # 与 `_child._model_frame` 同口径：记账列在前，签名特征在后
+    predict_cols = [c for c in BOOKKEEPING_COLUMNS if c in golden_df.columns]
+    predict_cols += [c for c in feature_order if c not in predict_cols]
+    preds = model.predict(golden_df[predict_cols])
     for port in sig_model.outputs:
         golden_df[f"output__{port.property_code}"] = preds
     golden_path = dest / "golden.parquet"

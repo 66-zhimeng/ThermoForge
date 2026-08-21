@@ -19,6 +19,7 @@ from ..charts import interactive, series
 from ..config import agent_config
 from ..context import RESEARCH_ROOT, tool_context
 from ..services import catalog
+from thermoforge_research import usage as usage_service
 from ..services.experiments import CATEGORY_LABELS
 from ..services.planner import PlannerContext
 from ..services.research import (
@@ -37,6 +38,7 @@ from ..ui import (
     fmt_metric,
     fmt_tokens,
     usage_caption,
+    usage_entries,
 )
 
 SESSION_KEY = "research_session"
@@ -92,14 +94,16 @@ def _setup() -> None:
         empty_state("Vault 里还没有数据集", "先去「数据」页导入数据。", icon="🤖")
         return
 
-    tab_run, tab_goal, tab_view = st.tabs(["开始研究", "① 新建研究目标",
-                                           "② 新建数据视图"])
+    tab_run, tab_goal, tab_view, tab_usage = st.tabs(
+        ["开始研究", "① 新建研究目标", "② 新建数据视图", "📊 用量与留痕"])
     with tab_goal:
         _goal_form(revisions)
     with tab_view:
         _view_form(revisions)
     with tab_run:
         _run_form(config, revisions)
+    with tab_usage:
+        _usage_tab()
 
 
 def _goal_form(revisions) -> None:
@@ -136,13 +140,17 @@ def _goal_form(revisions) -> None:
                        icon="⚠️")
 
         st.markdown("**验收标准**")
-        acc = st.columns(4)
+        acc = st.columns(5)
         cvrmse_max = acc[0].number_input("CVRMSE ≤", value=0.13, step=0.01,
                                          format="%.3f")
-        nmbe_abs_max = acc[1].number_input("|NMBE| ≤", value=0.02, step=0.01,
+        # 0 = 不设 R² 门槛。R² 与 CVRMSE 不能互相替代：换算依赖判据面的 CV_y。
+        r2_min = acc[1].number_input("R² ≥", value=0.0, step=0.05, min_value=0.0,
+                                     max_value=1.0, format="%.2f",
+                                     help="0 表示不设 R² 门槛")
+        nmbe_abs_max = acc[2].number_input("|NMBE| ≤", value=0.02, step=0.01,
                                            format="%.3f")
-        latency_max = acc[2].number_input("推理延迟(ms) ≤", value=5.0, step=1.0)
-        max_experiments = acc[3].number_input("最多实验数", value=10, step=1,
+        latency_max = acc[3].number_input("推理延迟(ms) ≤", value=5.0, step=1.0)
+        max_experiments = acc[4].number_input("最多实验数", value=10, step=1,
                                               min_value=1)
         description = st.text_area(
             "说明（写清禁用了什么、为什么）",
@@ -157,6 +165,7 @@ def _goal_form(revisions) -> None:
                 "candidate_inputs": inputs,
                 "acceptance": {
                     "cvrmse_max": float(cvrmse_max),
+                    "r2_min": float(r2_min) if r2_min > 0 else None,
                     "nmbe_abs_max": float(nmbe_abs_max),
                     "inference_latency_ms_max": float(latency_max),
                 },
@@ -225,6 +234,116 @@ def _create_view(definition: dict[str, Any]) -> None:
     envelope = tf_dataset_materialize(tool_context(), definition)
     if envelope_result(envelope, success="视图已登记"):
         cache.invalidate()
+
+
+# ---------------------------------------------------------------- 用量与留痕
+
+
+def _usage_tab() -> None:
+    """按研究对象归账的 token 用量与思维链（历史浏览，不是本次运行）。
+
+    数据来源：`thermoforge_research/usage.py` 的归账账本——planner_trace
+    精确归实验，副驾/CLI 会话按工具实际操作过的对象归账。
+    """
+    st.caption(
+        "规划留痕精确归到实验；副驾/CLI 会话在**对对象做了创建/运行/发布**"
+        "（多对象均摊）、**或只读轮次围绕唯一对象/同一目标**时才归账，"
+        "跨目标的总览/对比类问答进「未归账」。只统计经过本系统自带 Agent "
+        "的调用——经 MCP 由外部 Agent 驱动的研究，token 烧在外部进程里，"
+        "这里看不见；用量留痕是后加的功能，早期会话只留调用次数、没有 "
+        "token 数；未产出实验的规划轮次（模型判断停下）也不在账上。")
+    goals = cache.goals()
+    if not goals:
+        empty_state("还没有研究目标", "先在「① 新建研究目标」页签建一个。",
+                    icon="🎯")
+        return
+    labels = {str(g["id"]): f"{g['id']} · {g.get('name') or '—'}"
+              for g in goals}
+    goal_id = str(st.selectbox("研究目标", options=list(labels),
+                               format_func=lambda k: labels[k],
+                               key="usage_goal"))
+    book = cache.usage_book()
+    tree = usage_service.goal_view(book, goal_id)
+
+    columns = st.columns(4)
+    columns[0].metric("输入 tokens", fmt_tokens(tree.total.prompt_tokens))
+    columns[1].metric("输出 tokens", fmt_tokens(tree.total.completion_tokens))
+    columns[2].metric("估算金额", fmt_cost(tree.total.cost),
+                      help="在 harness/agent.toml 的 [pricing] 里配置单价后"
+                           "才会计算金额")
+    columns[3].metric("模型调用", f"{tree.total.calls:.0f} 次")
+
+    if not tree.total.entries:
+        st.info("这个目标下还没有归账的用量：它可能完全由外部 Agent（MCP）"
+                "驱动，或相关会话留痕已被清理。", icon="📭")
+
+    _usage_tables(tree, book)
+
+    st.markdown("#### 思维链留痕")
+    _usage_entity_section(f"直接关联 {goal_id}", tree.direct)
+    for view in tree.hypotheses:
+        statement = book.hypothesis_statement.get(view.entity_id) or ""
+        _usage_entity_section(
+            f"假设 {view.entity_id}（含下属实验）　{statement[:40]}…"
+            if len(statement) > 40 else
+            f"假设 {view.entity_id}（含下属实验）　{statement}",
+            view)
+    exp_labels = {item.experiment_id: item.model_label
+                  for item in cache.experiment_list()}
+    for view in tree.experiments:
+        _usage_entity_section(
+            f"实验 {view.entity_id}　{exp_labels.get(view.entity_id, '')}",
+            view)
+
+    unassigned = usage_service.unassigned_view(book)
+    if unassigned.entries:
+        st.caption(
+            f"全局另有输入 {fmt_tokens(unassigned.prompt_tokens)} / 输出 "
+            f"{fmt_tokens(unassigned.completion_tokens)} tokens（"
+            f"{unassigned.calls:.0f} 次调用）的通用问答未归到具体对象。")
+
+
+def _usage_tables(tree: usage_service.GoalUsage,
+                  book: usage_service.UsageBook) -> None:
+    """假设级 / 实验级两张分解表。金额为 None = 未配置单价，显示 —。"""
+    if tree.hypotheses:
+        st.markdown("**按假设**（含各自下属实验的用量）")
+        st.dataframe(
+            [{"假设": view.entity_id,
+              "陈述": (book.hypothesis_statement.get(view.entity_id)
+                       or "")[:60],
+              "输入 tokens": fmt_tokens(view.prompt_tokens),
+              "输出 tokens": fmt_tokens(view.completion_tokens),
+              "估算金额": fmt_cost(view.cost)}
+             for view in tree.hypotheses],
+            width="stretch", hide_index=True)
+    if tree.experiments:
+        st.markdown("**按实验**（仅实验自己名下，不含假设级上卷）")
+        exp_labels = {item.experiment_id: item.model_label
+                      for item in cache.experiment_list()}
+        st.dataframe(
+            [{"实验": view.entity_id,
+              "路线": exp_labels.get(view.entity_id, "—"),
+              "输入 tokens": fmt_tokens(view.prompt_tokens),
+              "输出 tokens": fmt_tokens(view.completion_tokens),
+              "估算金额": fmt_cost(view.cost)}
+             for view in tree.experiments],
+            width="stretch", hide_index=True)
+
+
+def _usage_entity_section(title: str,
+                          view: usage_service.EntityUsage) -> None:
+    """一个实体的思维链区块。不用 expander 包：条目内的思维链本身就是
+    折叠条，Streamlit 不允许折叠条套折叠条。"""
+    if not view.entries:
+        return
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        st.caption("合计：" + usage_caption(
+            {"prompt_tokens": view.prompt_tokens,
+             "completion_tokens": view.completion_tokens}, view.cost)
+            + f"　·　模型调用 {view.calls:.0f} 次")
+        usage_entries(view.entries)
 
 
 def _run_form(config, revisions) -> None:
@@ -355,8 +474,12 @@ def _events(session: ResearchSession) -> None:
                 if usage or cost is not None:
                     st.caption("本轮规划用量：" + usage_caption(usage, cost))
                 reasoning = event.payload.get("reasoning")
+                cot = event.payload.get("cot")
+                if cot:
+                    with st.expander("思维链（端点 CoT）"):
+                        st.markdown(cot)
                 if reasoning:
-                    with st.expander("思维链"):
+                    with st.expander("规划理由"):
                         st.markdown(reasoning)
                 plan = event.payload.get("plan") or {}
                 category = str((plan.get("model") or {}).get("category") or "")
@@ -462,7 +585,10 @@ def _outcome(session: ResearchSession) -> None:
                                + usage_caption(trace.usage, trace.cost))
                 if trace.error:
                     st.caption(f"最后一次错误：{trace.error}")
+                if trace.cot:
+                    with st.expander("思维链（端点 CoT）", expanded=False):
+                        st.markdown(trace.cot)
                 if trace.reasoning:
-                    with st.expander("思维链", expanded=False):
+                    with st.expander("规划理由", expanded=False):
                         st.markdown(trace.reasoning)
                 st.code(trace.raw_reply[:2000] or "（空）", language="json")

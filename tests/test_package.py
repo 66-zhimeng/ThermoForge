@@ -120,3 +120,25 @@ def test_boundary_rows_dedup_and_first_row():
     rows = boundary_rows(df, list(FEATURES))
     assert rows[0] == {f: float(df[f].iloc[0]) for f in FEATURES}
     assert len(rows) <= 1 + 2 * len(FEATURES)
+
+
+def test_boundary_rows_carry_bookkeeping_columns():
+    """记账列必须原样带进 golden，否则逐台标定的模型打不了包。
+
+    实测 RG-0023：`pump_power_per_object_affinity_v1` 在实验里跑到 1.86%，
+    打包时却 `KeyError: 'object_id'` —— runner 的 `_model_frame` 给模型的是
+    「视图特征 + object_id/timestamp」，而 `build_model_package` 只给
+    `golden_df[feature_order]`，两边契约不一致。
+    """
+    df = training_frame()
+    df = df.assign(object_id=["P01"] * len(df))
+
+    rows = boundary_rows(df, list(FEATURES))
+    assert all("object_id" in r for r in rows)
+    assert rows[0]["object_id"] == "P01"
+    # 特征仍是浮点，记账列不做数值转换
+    assert all(isinstance(r[f], float) for f in FEATURES for r in rows)
+
+    # 表里没有记账列时不得凭空造列
+    plain = boundary_rows(training_frame(), list(FEATURES))
+    assert all("object_id" not in r for r in plain)

@@ -102,6 +102,35 @@ def test_prepare_split_returns_none_without_ranges():
     assert series.prepare_split({"counts": {}}) is None
 
 
+def test_split_timeline_figure_uses_date_axis():
+    """回归：x 直接传 Timedelta 会让 plotly 把整条轴渲染成时长串
+    （P255DT12H0M0S）；必须换算成 epoch 毫秒并声明 type="date"。"""
+    from thermoforge_webui.charts import interactive
+
+    split = {
+        "train_range": ["2025-01-01T00:00:00+00:00", "2025-03-01T00:00:00+00:00"],
+        "validate_range": ["2025-03-01T00:45:00+00:00", "2025-04-01T00:00:00+00:00"],
+        "test_range": ["2025-04-01T00:00:00+00:00", "2025-05-01T00:00:00+00:00"],
+        "b1": "2025-03-01T00:00:00+00:00", "b2": "2025-04-01T00:00:00+00:00",
+        "counts": {"train": 100, "validate": 20, "test": 20},
+        "purge_seconds": 0.0, "embargo_seconds": 2700.0,
+    }
+    fig = interactive.split_timeline_figure(series.prepare_split(split))
+    payload = fig.to_plotly_json()
+    assert payload["layout"]["xaxis"]["type"] == "date"
+    train = payload["data"][0]
+    assert train["base"] == [pd.Timestamp(split["train_range"][0]).value / 1e6]
+    expected_ms = (pd.Timestamp(split["train_range"][1])
+                   - pd.Timestamp(split["train_range"][0])).total_seconds() * 1000
+    assert train["x"] == [expected_ms]
+    shapes = payload["layout"]["shapes"]
+    assert [s["x0"] for s in shapes] == [
+        pd.Timestamp(split[key]).value / 1e6 for key in ("b1", "b2")]
+    # 三段颜色必须两两不同（SURFACE_COLORS 漏了 "test" 会撞成训练灰）
+    colors = [trace["marker"]["color"] for trace in payload["data"]]
+    assert len(set(colors)) == 3
+
+
 def _summary(experiment_id: str, cvrmse: float | None,
              r2: float | None = None, started: str = "2025-01-01") -> ExperimentSummary:
     metrics: dict[str, float | None] = {}
@@ -248,6 +277,74 @@ def test_validate_plan_rejects_unimplemented_estimator():
     assert result is None and "lightgbm" in error
 
 
+def test_validate_plan_rejects_repeat_of_an_earlier_round():
+    """确定性实验重跑必然得到逐位一样的指标，重复计划要当场拦住。"""
+    from thermoforge_webui.services.planner import PlannerTrace
+
+    context = _context()
+    trace = PlannerTrace(round_index=0, prompt_summary="")
+    trace.plan = {"statement": "第一轮", "view_id": "VIEW-0001",
+                  "model": {"category": "data", "estimator": "ridge",
+                            "hyperparameters": {"alpha": 1.0}}}
+    context.traces.append(trace)
+
+    # 超参键序不同但内容相同 → 仍算重复
+    repeat = {"statement": "再试一次", "basis": ["EXP-0001"],
+              "view_id": "VIEW-0001",
+              "model": {"category": "data", "estimator": "ridge",
+                        "hyperparameters": {"alpha": 1.0}}}
+    result, error = validate_plan(repeat, context, 1)
+    assert result is None and "第 0 轮等价" in error
+
+    # 跨进程补进来的历史实验用 round_index<0 标记，报错文案不能出现「第 -1 轮」
+    history = _context()
+    old = PlannerTrace(round_index=-1, prompt_summary="历史")
+    old.plan = dict(trace.plan)
+    history.traces.append(old)
+    result, error = validate_plan(repeat, history, 1)
+    assert result is None and "此前跑过" in error and "-1" not in error
+
+    # 换了超参量级就不是重复
+    changed = {**repeat, "model": {"category": "data", "estimator": "ridge",
+                                   "hyperparameters": {"alpha": 5.0}}}
+    assert validate_plan(changed, context, 1)[0] is not None
+
+
+def test_duplicate_detection_normalizes_inputs_and_lab_ref():
+    """写法不同但跑起来一样的超参，必须算同一个计划。
+
+    实测 RG-0021 十一轮里六轮是重复：`inputs` 换了分隔符或条目顺序、
+    `lab` 有时写裸名有时写 name@vN，逐字符比对全都漏掉了。
+    """
+    from thermoforge_webui.services.planner import PlannerTrace
+
+    context = _context()
+    context.lab_modules = [{"ref": "m@v1", "runnable": True}]
+    trace = PlannerTrace(round_index=0, prompt_summary="")
+    trace.plan = {"view_id": "VIEW-0001", "model": {
+        "category": "lab",
+        "hyperparameters": {"lab": "m@v1", "inputs": "a=a;b=b;c=c"}}}
+    context.traces.append(trace)
+
+    def plan_with(hyperparameters):
+        return {"statement": "再来", "basis": ["EXP-0001"],
+                "view_id": "VIEW-0001",
+                "model": {"category": "lab",
+                          "hyperparameters": hyperparameters}}
+
+    # 逗号分隔、条目乱序、lab 写裸名 —— 三种写法都是同一个实验
+    for hp in ({"lab": "m@v1", "inputs": "a=a,b=b,c=c"},
+               {"lab": "m@v1", "inputs": "c=c;a=a;b=b"},
+               {"lab": "m", "inputs": "b=b;c=c;a=a"}):
+        result, error = validate_plan(plan_with(hp), context, 1)
+        assert result is None and "等价" in (error or ""), hp
+
+    # 真的多了一列就不是重复
+    result, _ = validate_plan(
+        plan_with({"lab": "m@v1", "inputs": "a=a;b=b;c=c;d=d"}), context, 1)
+    assert result is not None
+
+
 def test_validate_plan_requires_basis_after_first_round():
     plan = {"statement": "试试", "view_id": "VIEW-0001", "basis": [],
             "model": {"category": "data", "estimator": "ridge"}}
@@ -293,9 +390,14 @@ def test_validate_plan_accepts_hybrid_with_physics_and_residual():
     assert error is None and result["model"]["category"] == "hybrid"
 
 
-def test_validate_plan_stop_returns_none_without_error():
-    result, error = validate_plan({"stop": "没有新想法了"}, _context(), 2)
-    assert result is None and error is None
+def test_validate_plan_keeps_the_stop_reason():
+    """规划器主动收工时，它给的理由必须带出去——那常常就是结论本身。"""
+    result, error = validate_plan(
+        {"stop": "瓶颈是缺阀位测点，不是缺模型", "reasoning": "残差随阻力走"},
+        _context(), 2)
+    assert error is None
+    assert result["stop"] == "瓶颈是缺阀位测点，不是缺模型"
+    assert result["reasoning"] == "残差随阻力走"
 
 
 def test_planner_retries_once_with_the_error_fed_back():
@@ -387,3 +489,95 @@ def test_prepare_usage_bars_and_cumulative_cost():
     no_cost = series.prepare_usage(
         [{"usage": {"prompt_tokens": 1, "completion_tokens": 1}}])
     assert no_cost.cumulative_cost is None and no_cost.total_cost is None
+
+
+def _lab_context() -> PlannerContext:
+    """三张视图共享一个数据集，特征集逐张变宽 —— RG-0028 的真实形状。"""
+    def view(vid, features):
+        return {"id": vid, "definition": {"dataset": "D@rev_0001",
+                                          "target": "power",
+                                          "features": features}}
+    context = PlannerContext(
+        goal={"id": "RG-0001", "target": "power",
+              "candidate_inputs": ["frequency", "tower_freq_mean",
+                                   "ambient_t"]},
+        views=[view("VIEW-0001", ["frequency"]),
+               view("VIEW-0002", ["frequency", "tower_freq_mean"]),
+               view("VIEW-0003", ["frequency", "tower_freq_mean",
+                                  "ambient_t"])],
+        dataset_ref="D@rev_0001")
+    context.lab_modules = [
+        {"ref": "freq_only@v1", "name": "freq_only", "version": 1,
+         "runnable": True, "input_roles": ["frequency"]},
+        {"ref": "with_ambient@v1", "name": "with_ambient", "version": 1,
+         "runnable": True, "input_roles": ["frequency", "ambient_t"]},
+        {"ref": "typo@v1", "name": "typo", "version": 1, "runnable": True,
+         "input_roles": ["fan_freq_mean"]},
+    ]
+    return context
+
+
+def _lab_plan(view_id: str, lab: str, inputs: str | None = None) -> dict:
+    hyperparameters = {"lab": lab}
+    if inputs:
+        hyperparameters["inputs"] = inputs
+    return {"statement": "试试", "basis": ["EXP-0001"], "view_id": view_id,
+            "model": {"category": "lab", "hyperparameters": hyperparameters}}
+
+
+def test_swapping_view_is_not_a_new_experiment_for_a_lab_module():
+    """lab 模块只读 INPUT_ROLES 声明的列，换视图跑出来逐位相同。
+
+    实测 RG-0028：`ct_fan_tower_shared_b`（只声明 frequency）在三张视图上
+    跑了四遍，CVRMSE 全是 0.0645，而查重因为 view_id 不同全部放行 —— 七轮
+    里三轮就这么烧掉了。
+    """
+    from thermoforge_webui.services.planner import PlannerTrace
+
+    context = _lab_context()
+    trace = PlannerTrace(round_index=0, prompt_summary="")
+    trace.plan = _lab_plan("VIEW-0001", "freq_only@v1")
+    context.traces.append(trace)
+
+    for view_id in ("VIEW-0001", "VIEW-0002", "VIEW-0003"):
+        result, error = validate_plan(
+            _lab_plan(view_id, "freq_only@v1"), context, 1)
+        assert result is None, f"{view_id} 应判为重复"
+        assert "等价" in error
+
+    # 换成真读了新列的模块，才算换实验
+    result, _ = validate_plan(
+        _lab_plan("VIEW-0003", "with_ambient@v1"), context, 1)
+    assert result is not None
+
+
+def test_lab_module_declaring_a_column_no_view_has_is_rejected():
+    """五连检拿模块自己声明的列名造合成数据，列名编错了它照样全绿。
+
+    实测 RG-0028 的 EXP-0153/0155/0156 三轮全崩在
+    `KeyError: 'fan_freq_mean'`（真实列名是 `tower_freq_mean`）——这道检查
+    要在实验之前拦下来，而不是等子进程炸。
+    """
+    context = _lab_context()
+    result, error = validate_plan(_lab_plan("VIEW-0003", "typo@v1"),
+                                  context, 1)
+    assert result is None
+    assert "fan_freq_mean" in error and "tower_freq_mean" in error
+
+    # 用 inputs 把角色映射到真实列名，就该放行
+    result, _ = validate_plan(
+        _lab_plan("VIEW-0003", "typo@v1", "fan_freq_mean=tower_freq_mean"),
+        context, 1)
+    assert result is not None
+
+
+def test_lab_roles_are_read_from_a_same_round_submission():
+    """同轮提交 + 立刻引用的模块还不在清单里，得从源码读 INPUT_ROLES。"""
+    context = _lab_context()
+    plan = _lab_plan("VIEW-0001", "brand_new@v1")
+    plan["lab_module"] = {
+        "name": "brand_new",
+        "source": "INPUT_ROLES = ['ambient_t']\nMODEL_FORMAT = 'x'\n",
+    }
+    result, error = validate_plan(plan, context, 1)
+    assert result is None and "ambient_t" in error   # VIEW-0001 没这一列

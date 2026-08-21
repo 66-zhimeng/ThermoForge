@@ -48,6 +48,7 @@ from .tools import (
     tf_experiment_plan,
     tf_experiment_run,
     tf_hypothesis_create,
+    tf_lab_submit,
     tf_research_status,
 )
 
@@ -72,6 +73,11 @@ STOP_REASONS = (
 )
 
 _DEFAULT_SPLIT = {"train": 0.70, "validate": 0.15, "test": 0.15}
+#: 判据面为 rolling_cv 时的默认滚动切分（周步长扩窗，与冷机/板换两条线同口径）
+_DEFAULT_ROLLING_CV = {
+    "enabled": True, "mode": "expanding", "horizon_seconds": 604800.0,
+    "step_seconds": 604800.0, "initial_train_fraction": 0.3, "max_folds": 12,
+}
 _ALL_METRICS = ["RMSE", "MAE", "MAPE", "CVRMSE", "NMBE", "R2"]
 
 Planner = Callable[[int, Mapping[str, Any]], Mapping[str, Any] | None]
@@ -79,6 +85,33 @@ Planner = Callable[[int, Mapping[str, Any]], Mapping[str, Any] | None]
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+
+def _lab_failure_detail(env: Mapping[str, Any]) -> str:
+    """把实验室门禁的**可操作明细**摊平成一句话。
+
+    信封里 `summary["error"]` 只是一句「静态扫描不通过」/「结构校验未通过」，
+    真正能照着改的东西在 `summary["violations"]`（AST 逐条）和
+    `summary["validation"]["checks"][].detail`（五连检逐项）里。这段 detail
+    会进轮次记录，下一轮原样喂给规划器——只给那句概括，等于让它蒙着眼改
+    代码。实测 RG-0023 七轮里五轮废在模块提交，五次拿到的都是同一句废话。
+    """
+    summary = env.get("summary") or {}
+    parts: list[str] = []
+    error = summary.get("error")
+    if error:
+        parts.append(str(error))
+    violations = summary.get("violations")
+    if violations:
+        parts.append("违规项：" + "；".join(str(v) for v in violations)[:600])
+    validation = summary.get("validation") or {}
+    failed = [c for c in (validation.get("checks") or []) if not c.get("ok")]
+    if failed:
+        parts.append("未过检查：" + "；".join(
+            f"{c.get('name')}({c.get('detail') or '无说明'})" for c in failed
+        )[:600])
+    return " | ".join(parts) if parts else str(summary)[:400]
 
 
 class ResearchOrchestrator:
@@ -105,6 +138,8 @@ class ResearchOrchestrator:
         min_coverage_days: float = 1.0,
         max_rounds: int = 50,
         random_seed: int = 20260808,
+        same_origin_corr: float | None = None,
+        rolling_horizon_seconds: float | None = None,
     ):
         self.ctx = ctx
         self.goal_id = goal_id
@@ -116,6 +151,13 @@ class ResearchOrchestrator:
         self.min_coverage_days = float(min_coverage_days)
         self.max_rounds = int(max_rounds)
         self.random_seed = int(random_seed)
+        # G3 同源阻断阈值覆盖：None = 用 ModelabilityConfig 默认（0.98）
+        self.same_origin_corr = same_origin_corr
+        # 滚动折的窗口长度覆盖：折太短会让折内 CV_y 趋近 0，R² 折均被
+        # 「退化折」支配（实测风机功耗周折：R² 折均 0.055，而折内最好 0.989、
+        # 最差 −3.92，CVRMSE 全程 1.2~4.9%）。此时 R² 衡量的是那一周目标
+        # 波动大不大，不是模型好不好。
+        self.rolling_horizon_seconds = rolling_horizon_seconds
 
         self.rounds: list[dict[str, Any]] = []
         self.best_cvrmse: float | None = None
@@ -229,7 +271,8 @@ class ResearchOrchestrator:
             actor=self.ctx.actor,
         )
         env = tf_dataset_modelability(self.ctx, self.dataset_ref,
-                                      goal_id=self.goal_id)
+                                      goal_id=self.goal_id,
+                                      same_origin_corr=self.same_origin_corr)
         artifact = next((a for a in env.get("artifacts", [])
                          if a.get("kind") == "modelability_report"), None)
         if env["status"] == "FAIL":
@@ -287,21 +330,84 @@ class ResearchOrchestrator:
 
     # ---------------------------------------------------------------- 单轮
 
+    def _submit_lab_module(
+        self, round_number: int, plan: Mapping[str, Any]
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """计划自带模块源码时先过实验室门禁，再让本轮引用它。
+
+        返回 `(本轮是否作废, 停止决定)`。两者必须分开：校验没过时
+        `_record_failure` 只在无增益streak 满了才给出停止决定，返回 None
+        代表「还能继续下一轮」——如果把它直接当成 `_run_round` 的返回值，
+        本轮就会带着一个根本不存在的模块继续跑下去（TFML-003 直接崩）。
+
+        校验没过不是致命错：把 `_lab_check` 的失败明细当作本轮失败记下来，
+        规划器下一轮能看见「哪一项没过」并改代码——这正是实验室设计里
+        「看指标、改代码、再提交新版本」的闭环，只是主体换成了编排器。
+        """
+        module = plan.get("lab_module")
+        if not module:
+            return False, None
+        env = tf_lab_submit(
+            self.ctx, str(module["name"]), str(module["source"]),
+            description=module.get("description"),
+        )
+        if not env["ok"]:
+            return True, self._record_failure(
+                round_number, None, None,
+                f"实验室模块 {module['name']!r} 未过校验: "
+                + _lab_failure_detail(env),
+            )
+        # 引用锁到刚过校验的那一版：name@vN，避免并发提交后指向别的版本
+        ref = str(env.get("id") or module["name"])
+        hyperparameters = dict(plan["model"].get("hyperparameters") or {})
+        hyperparameters["lab"] = ref
+        plan["model"]["hyperparameters"] = hyperparameters
+        return False, None
+
     def _run_round(
         self, round_index: int, definition: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         ledger = self.ctx.ledger
         round_number = round_index + 1
         evidence = self._evidence()
-        plan = self.planner(round_index, evidence)
+        try:
+            plan = self.planner(round_index, evidence)
+        except Exception:
+            # 规划本身报错（解析失败/重复计划等）：trace 还在 last_trace 上，
+            # 落盘后再抛——这一轮的 token 与思维链不该跟着异常一起丢
+            self._persist_orphan_trace(round_number, "planner_error")
+            raise
         if plan is None:
+            self._persist_orphan_trace(round_number, "no_hypothesis")
             return self._stop(
                 STOP_NO_GAIN, "planner 无可行假设（§2：STOPPED: no useful hypothesis）",
             )
+        if plan.get("stop"):
+            # 规划器主动收工：把它自己的理由原样留痕。这句话常常就是结论
+            # 本身（「瓶颈是缺某个测点」之类），丢掉等于把最有价值的产出扔了。
+            self._persist_orphan_trace(round_number, "planner_stop")
+            return self._stop(
+                STOP_NO_GAIN, f"planner 主动停止：{plan['stop']}",
+                evidence={"planner_reasoning": plan.get("reasoning") or None},
+            )
         if plan.get("needs_human"):
+            self._persist_orphan_trace(round_number, "needs_human")
             return self._stop(
                 STOP_HUMAN_CONFIRMATION, str(plan["needs_human"]),
             )
+
+        # 内置闭集表达不了的函数形式 → 规划器可以随计划附一份模块源码。
+        # 没有这条通道时，规划器只能停下来要人代交（实测 RG-0017：它自己
+        # 诊断出需要 P=n·a·(f/50)^b+c，却只能 human_confirmation_required），
+        # 「模型实验室是自治的」就只对会话式 agent 成立，对编排器不成立。
+        # 安全性仍由实验室自己的门禁保证：AST 扫描 + 子进程五连检。
+        aborted, stop = self._submit_lab_module(round_number, plan)
+        if stop is not None:
+            self._persist_orphan_trace(round_number, "lab_gate_failed")
+            return stop
+        if aborted:
+            self._persist_orphan_trace(round_number, "lab_gate_failed")
+            return None  # 本轮已记为失败，把改代码的机会留给下一轮
 
         ledger.transition(
             self.goal_id, "HYPOTHESIS_GENERATION",
@@ -312,6 +418,7 @@ class ResearchOrchestrator:
             basis=list(plan.get("basis") or ()),
         )
         if not hyp_env["ok"]:
+            self._persist_orphan_trace(round_number, "registration_failed")
             return self._record_failure(
                 round_number, None, None,
                 f"假设创建失败: {hyp_env['summary'].get('error')}",
@@ -327,9 +434,9 @@ class ResearchOrchestrator:
             "dataset_view": str(plan["view_id"]),
             "model": dict(plan["model"]),
             "target": str(definition.get("target")),
-            "validation": dict(plan.get("validation") or {
-                "temporal_split": dict(_DEFAULT_SPLIT),
-            }),
+            "validation": self._validation_spec(
+                definition, plan,
+                rolling_horizon_seconds=self.rolling_horizon_seconds),
             "metrics": list(_ALL_METRICS),
             "physics_tests": {"enabled": True},
             "runtime": {
@@ -339,6 +446,7 @@ class ResearchOrchestrator:
         }
         plan_env = tf_experiment_plan(self.ctx, exp_doc)
         if not plan_env["ok"]:
+            self._persist_orphan_trace(round_number, "registration_failed")
             return self._record_failure(
                 round_number, hyp_env["id"], None,
                 f"实验计划登记失败: {plan_env['summary'].get('error')}",
@@ -368,7 +476,9 @@ class ResearchOrchestrator:
             )
 
         summary = run_env["summary"]
-        primary = self._primary_metrics(summary)
+        acceptance = definition.get("acceptance") or {}
+        primary = self._primary_metrics(
+            summary, str(acceptance.get("evaluated_on") or "auto"))
         finding = ledger.create_finding(
             f"第 {round_number} 轮 {exp_id}: "
             f"主测试面指标 {primary or '无可用指标'}",
@@ -376,6 +486,7 @@ class ResearchOrchestrator:
             hypothesis_id=hyp_env["id"],
             reason="编排器结构化发现（research-loop §3）",
         )
+        unmet = self._acceptance_unmet(acceptance, summary)
         record = {
             "round": round_number,
             "hypothesis_id": hyp_env["id"],
@@ -383,6 +494,9 @@ class ResearchOrchestrator:
             "finding_id": finding["id"],
             "status": "completed",
             "primary_metrics": primary,
+            # 差在哪一项，规划器下一轮要看见 —— 只给「当前最优 CVRMSE」
+            # 它读不出「R² 还差多少」，容易原地重复同一个计划。
+            "acceptance_unmet": unmet,
             "physics_overall_rate": summary.get("physics_overall_rate"),
             "duration_seconds": summary.get("duration_seconds"),
         }
@@ -393,8 +507,6 @@ class ResearchOrchestrator:
             reason=f"第 {round_number} 轮模型评审: {exp_id}",
             actor=self.ctx.actor, inputs=[exp_id, finding["id"]],
         )
-        acceptance = definition.get("acceptance") or {}
-        unmet = self._acceptance_unmet(acceptance, summary)
         if not unmet:
             if (definition.get("approval_required") or []):
                 return self._stop(
@@ -465,20 +577,28 @@ class ResearchOrchestrator:
 
     # ---------------------------------------------------------------- 留痕
 
-    def _persist_planner_trace(self, exp_id: str) -> None:
-        """把当轮规划留痕随实验工件落盘：experiments/<exp_id>/planner_trace.json。
+    def _trace_payload(self) -> dict[str, Any] | None:
+        """当轮规划留痕（挂在 planner 函数属性 last_trace 上）→ 可序列化 dict。
 
         planner 协议只传 plan；思维链/原始回复/逐次用量由规划器挂在函数
         属性 `last_trace` 上（webui 的 `make_planner` 会挂，同
         `make_ask` 的 `last_usage` 惯例）。脚本化 planner 没有该属性就
-        跳过。写盘失败不中断研究循环——留痕是附加动作。
+        返回 None，调用方跳过。
         """
         trace = getattr(self.planner, "last_trace", None)
         if is_dataclass(trace) and not isinstance(trace, type):
-            payload = asdict(trace)
-        elif isinstance(trace, Mapping):
-            payload = dict(trace)
-        else:
+            return asdict(trace)
+        if isinstance(trace, Mapping):
+            return dict(trace)
+        return None
+
+    def _persist_planner_trace(self, exp_id: str) -> None:
+        """把当轮规划留痕随实验工件落盘：experiments/<exp_id>/planner_trace.json。
+
+        写盘失败不中断研究循环——留痕是附加动作。
+        """
+        payload = self._trace_payload()
+        if payload is None:
             return
         payload["experiment_id"] = exp_id
         try:
@@ -491,29 +611,96 @@ class ResearchOrchestrator:
         except OSError:
             pass
 
+    def _persist_orphan_trace(self, round_number: int, kind: str) -> None:
+        """未产出实验的规划轮次落盘：planner_rounds/<goal>/round_NNN_<kind>.json。
+
+        「模型想了想决定停下 / 规划报错 / 等人拍板 / 门禁没过」这些轮次的
+        token 与思维链此前只存在于内存里；落盘后用量归账（usage.py）能把
+        它们归到目标级，界面与 tf_goal_usage 都能看到。写盘失败不中断
+        研究循环——留痕是附加动作。
+        """
+        payload = self._trace_payload()
+        if payload is None:
+            return
+        payload.update({"goal_id": self.goal_id,
+                        "round_number": round_number, "orphan_kind": kind})
+        try:
+            out_dir = self.ctx.research_root / "planner_rounds" / self.goal_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%H%M%S%f")
+            path = out_dir / f"round_{round_number:03d}_{kind}_{stamp}.json"
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2,
+                           default=str) + "\n",
+                encoding="utf-8")
+        except OSError:
+            pass
+
     # ---------------------------------------------------------------- 判定
 
     @staticmethod
-    def _primary_metrics(summary: Mapping[str, Any]) -> dict[str, Any] | None:
+    def _primary_metrics(summary: Mapping[str, Any],
+                         evaluated_on: str = "auto") -> dict[str, Any] | None:
+        """判据面指标。**必须与发布门禁、模型比较同调**（tools 里那两处已同调）。
+
+        判在哪个面不是细节：同一个模型在面 A 与滚动交叉验证上能差三倍
+        （实测冷机 hybrid：面 A 15.9%、滚动 4.9%）。Goal 钉了
+        `evaluated_on` 却仍按 C→A→validate 判，等于门槛压根没落到声明的
+        口径上（实测 EXP-0090 因此漏判达标）。
+        """
+        if evaluated_on == "rolling_cv":
+            rolling = summary.get("rolling_cv") or {}
+            return (dict(rolling.get("metrics") or {})
+                    if rolling.get("n_folds") else None)
         surfaces = summary.get("surfaces") or {}
-        for name in ("C", "A", "validate"):
+        order = (("C", "A", "validate") if evaluated_on in ("auto", "", None)
+                 else (evaluated_on,))
+        for name in order:
             surf = surfaces.get(name) or {}
             if surf.get("n_samples"):
                 return dict(surf.get("metrics") or {})
         return None
 
     @staticmethod
+    def _validation_spec(
+        definition: Mapping[str, Any], plan: Mapping[str, Any],
+        *, rolling_horizon_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """实验切分：默认 0.70/0.15/0.15，**判据面要什么就必须算什么**。
+
+        目标声明 `acceptance.evaluated_on = "rolling_cv"` 却只跑 temporal_split
+        时，验收指标恒为 None —— 每一轮都判不了，循环空转到无增益为止
+        （实测 EXP-0083/0084/0089）。规划器没给或给了但没开滚动块的，
+        这里补开；规划器显式给的参数一律保留。
+        """
+        validation = dict(plan.get("validation") or {})
+        validation.setdefault("temporal_split", dict(_DEFAULT_SPLIT))
+        acceptance = (definition.get("acceptance") or {})
+        if str(acceptance.get("evaluated_on")) == "rolling_cv":
+            rolling = dict(validation.get("rolling_cv") or {})
+            if not rolling.get("enabled"):
+                rolling = {**_DEFAULT_ROLLING_CV, **rolling, "enabled": True}
+            if rolling_horizon_seconds:
+                rolling["horizon_seconds"] = float(rolling_horizon_seconds)
+                rolling["step_seconds"] = float(rolling_horizon_seconds)
+            validation["rolling_cv"] = rolling
+        return validation
+
+    @staticmethod
     def _acceptance_unmet(
         acceptance: Mapping[str, Any], summary: Mapping[str, Any]
     ) -> list[str]:
-        """硬性验收条件（与发布门禁 TFM-1003 同口径：主测试面 C→A→validate）。"""
-        metrics = ResearchOrchestrator._primary_metrics(summary) or {}
+        """硬性验收条件（与发布门禁 TFM-1003 同口径：判据面由 Goal 钉死）。"""
+        evaluated_on = str(acceptance.get("evaluated_on") or "auto")
+        metrics = ResearchOrchestrator._primary_metrics(
+            summary, evaluated_on) or {}
         values: dict[str, Any] = dict(metrics)
         if summary.get("physics_overall_rate") is not None:
             values["physics_violation_rate"] = summary["physics_overall_rate"]
         unmet: list[str] = []
         checks = (
             ("cvrmse_max", "CVRMSE", lambda v, lim: v <= lim),
+            ("r2_min", "R2", lambda v, lim: v >= lim),
             ("mape_max", "MAPE", lambda v, lim: v <= lim),
             ("nmbe_abs_max", "NMBE", lambda v, lim: abs(v) <= lim),
             ("physics_violation_rate_max", "physics_violation_rate",

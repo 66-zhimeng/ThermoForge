@@ -53,6 +53,11 @@ class Acceptance(BaseModel):
 
     evaluated_on: Literal["auto", "C", "A", "validate", "rolling_cv"] = "auto"
     cvrmse_max: float | None = Field(default=None, ge=0)
+    #: R² 下限。与 `cvrmse_max` 不等价：`R² = 1 − (CVRMSE/CV_y)²`，同一个
+    #: CVRMSE 在 `CV_y` 不同的判据面上对应完全不同的 R²（手册 §7.14）。
+    #: 需求方常直接给 R² 目标，此前只能人工换算成 CVRMSE，换算依赖当轮
+    #: 评估窗的 `CV_y`，换个窗就失真 —— 故单列一项由机器判定。
+    r2_min: float | None = Field(default=None, le=1)
     mape_max: float | None = Field(default=None, ge=0)
     nmbe_abs_max: float | None = Field(default=None, ge=0)
     physics_violation_rate_max: float | None = Field(default=None, ge=0, le=1)

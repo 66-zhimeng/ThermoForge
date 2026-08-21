@@ -342,6 +342,12 @@ class LabStore:
                 "content_hash": meta["content_hash"],
                 "description": meta.get("description"),
                 "validation_ok": (meta.get("validation") or {}).get("ok"),
+                # 模块声明要吃哪些角色列。五连检只能拿模块自己声明的名字造
+                # 合成数据，检不出「声明的列在任何视图里都不存在」——所以这
+                # 份声明必须外露，让规划器侧拿真实视图对一遍（见 planner.py
+                # `_lab_view_error`）。
+                "input_roles": list(
+                    (meta.get("validation") or {}).get("input_roles") or []),
             })
         return out
 

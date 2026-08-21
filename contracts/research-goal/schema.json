@@ -86,6 +86,19 @@
           ],
           "default": null,
           "title": "Physics Violation Rate Max"
+        },
+        "r2_min": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "R2 Min"
         }
       },
       "title": "Acceptance",
