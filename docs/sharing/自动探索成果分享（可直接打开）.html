@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无人值守的十二天</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+img,svg{max-width:100%;height:auto}
+</style>
+<style>
+:root{
+  --paper:#EEF2F3;
+  --surface:#F8FAFA;
+  --surface-2:#E3EAEC;
+  --ink:#16232B;
+  --ink-2:#52646E;
+  --ink-3:#7C8D95;
+  --accent:#0B6E80;
+  --accent-soft:#D6E8EB;
+  --alarm:#A0521B;
+  --alarm-soft:#F2E3D4;
+  --good:#2C6E52;
+  --rule:#C6D2D5;
+  --rule-strong:#9DAEB3;
+
+  --serif:"Source Han Serif SC","Noto Serif CJK SC","Songti SC",SimSun,"STSong",Georgia,serif;
+  --sans:"Source Han Sans SC","Noto Sans CJK SC","PingFang SC","Microsoft YaHei","Hiragino Sans GB",-apple-system,"Segoe UI",sans-serif;
+  --mono:"Cascadia Code","JetBrains Mono",Consolas,"SF Mono","Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D1417;
+    --surface:#141E22;
+    --surface-2:#1C282D;
+    --ink:#DCE6E8;
+    --ink-2:#95A8AF;
+    --ink-3:#6E828A;
+    --accent:#48B9CA;
+    --accent-soft:#16333A;
+    --alarm:#E09A55;
+    --alarm-soft:#332415;
+    --good:#5CB98C;
+    --rule:#26343A;
+    --rule-strong:#3C4E55;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D1417;
+  --surface:#141E22;
+  --surface-2:#1C282D;
+  --ink:#DCE6E8;
+  --ink-2:#95A8AF;
+  --ink-3:#6E828A;
+  --accent:#48B9CA;
+  --accent-soft:#16333A;
+  --alarm:#E09A55;
+  --alarm-soft:#332415;
+  --good:#5CB98C;
+  --rule:#26343A;
+  --rule-strong:#3C4E55;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16.5px;
+  line-height:1.75;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px;margin-inline:auto;padding-inline:clamp(1.25rem,4vw,3.5rem)}
+p,li{max-width:68ch}
+h1,h2,h3{text-wrap:balance;font-family:var(--serif);font-weight:600;line-height:1.3}
+a{color:var(--accent);text-underline-offset:3px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:.1em .35em}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 页眉 ---------- */
+.masthead{border-bottom:1px solid var(--rule-strong);padding-block:clamp(3rem,7vw,5.5rem) 2.5rem}
+.eyebrow{
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 1.5rem
+}
+h1{font-size:clamp(2rem,5.2vw,3.4rem);margin:0 0 1.25rem;letter-spacing:-.01em}
+.deck{font-size:clamp(1.05rem,2vw,1.22rem);color:var(--ink-2);margin:0;max-width:60ch}
+
+.tally{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:3rem
+}
+.tally div{background:var(--surface);padding:1.1rem 1.25rem}
+.tally b{display:block;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  font-size:1.9rem;line-height:1.15;font-weight:600;color:var(--accent)}
+.tally span{display:block;font-size:.8rem;color:var(--ink-2);margin-top:.3rem}
+
+/* ---------- 阅读路径 ---------- */
+.paths{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.5rem;
+  padding-block:2rem;border-bottom:1px solid var(--rule)}
+.paths h4{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 .6rem;font-weight:500}
+.paths ol{margin:0;padding-left:1.1rem;font-size:.92rem;color:var(--ink-2)}
+
+/* ---------- 章节骨架 ---------- */
+.sec{padding-block:clamp(2.75rem,6vw,4.5rem);border-bottom:1px solid var(--rule)}
+.sec:last-of-type{border-bottom:none}
+.sec-head{margin-bottom:2rem}
+.sec-head .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);display:block;margin-bottom:.55rem}
+.sec-head h2{font-size:clamp(1.5rem,3.2vw,2.1rem);margin:0}
+.sec-head .sub{color:var(--ink-2);margin:.75rem 0 0;font-size:1rem}
+@media (min-width:1000px){
+  .sec{display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:2.75rem}
+  .sec-head{margin-bottom:0}
+  .sec-head .kicker{margin-bottom:.4rem}
+  .sec-head h2{font-size:1.28rem;line-height:1.4}
+  .sec-head .sub{font-size:.88rem}
+}
+.body>*:first-child{margin-top:0}
+.body>*:last-child{margin-bottom:0}
+
+/* ---------- 闭环 ---------- */
+.loop{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
+  border:1px solid var(--rule);background:var(--surface);padding:1.25rem;margin:1.75rem 0}
+.loop .node{font-family:var(--mono);font-size:.82rem;padding:.4rem .7rem;
+  background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.loop .arrow{color:var(--ink-3);font-size:.85rem}
+.loop .back{flex-basis:100%;font-size:.8rem;color:var(--ink-2);
+  border-top:1px dashed var(--rule-strong);padding-top:.7rem;margin-top:.35rem}
+
+/* ---------- 护栏证据条 ---------- */
+.rail{border:1px solid var(--rule);margin:1.5rem 0;background:var(--surface)}
+.rail+.rail{margin-top:-1px}
+.rail-top{padding:1rem 1.25rem}
+.rail-top h3{margin:0 0 .4rem;font-size:1.04rem}
+.rail-top p{margin:0;font-size:.93rem;color:var(--ink-2)}
+.caught{
+  border-top:1px solid var(--rule);background:var(--alarm-soft);
+  padding:.85rem 1.25rem .95rem;display:grid;grid-template-columns:auto 1fr;
+  gap:.9rem;align-items:start
+}
+.caught .tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--alarm);border:1px solid var(--alarm);
+  padding:.15rem .45rem;white-space:nowrap;margin-top:.15rem}
+.caught p{margin:0;font-size:.9rem;color:var(--ink);max-width:60ch}
+
+/* ---------- 自我否定 ---------- */
+.flip{border-left:3px solid var(--alarm);padding:.15rem 0 .15rem 1.15rem;margin:1.6rem 0}
+.flip h4{margin:0 0 .45rem;font-family:var(--sans);font-size:.95rem;font-weight:600}
+.flip p{margin:0;font-size:.92rem;color:var(--ink-2)}
+.flip .then{color:var(--alarm);font-weight:600}
+
+/* ---------- 表格 ---------- */
+.slab{overflow-x:auto;margin:1.75rem 0;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:520px}
+th,td{padding:.6rem .85rem;text-align:left;border-bottom:1px solid var(--rule)}
+thead th{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:500;background:var(--surface-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.meter{display:block;height:5px;background:var(--accent);margin-top:.35rem}
+.meter.warn{background:var(--alarm)}
+caption{caption-side:bottom;text-align:left;padding:.7rem .85rem;font-size:.8rem;
+  color:var(--ink-3);border-top:1px solid var(--rule)}
+
+/* ---------- 产能柱 ---------- */
+.chart{display:grid;grid-template-columns:repeat(6,1fr);gap:.75rem;align-items:stretch;
+  grid-auto-rows:200px;
+  border:1px solid var(--rule);background:var(--surface);padding:1.5rem 1.25rem 1rem;margin:1.75rem 0}
+.chart .col{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:.5rem;height:100%}
+.chart .bar{width:100%;background:var(--accent);min-height:3px}
+.chart .col.peak .bar{background:var(--alarm)}
+.chart .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.85rem;font-weight:600}
+.chart .d{font-family:var(--mono);font-size:.68rem;color:var(--ink-3);
+  border-top:1px solid var(--rule);width:100%;text-align:center;padding-top:.4rem}
+
+/* ---------- 提示块 ---------- */
+.note{border:1px solid var(--rule-strong);background:var(--surface);padding:1.15rem 1.35rem;margin:1.75rem 0}
+.note.candid{border-color:var(--alarm);background:var(--alarm-soft)}
+.note h4{margin:0 0 .55rem;font-family:var(--mono);font-size:.72rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--alarm);font-weight:500}
+.note.plain h4{color:var(--accent)}
+.note p{margin:0 0 .6rem;font-size:.93rem}
+.note p:last-child{margin-bottom:0}
+
+/* ---------- 可迁移清单 ---------- */
+.take{border-top:1px solid var(--rule);padding:1.1rem 0}
+.take:first-of-type{border-top:none}
+.take h4{margin:0 0 .4rem;font-size:1rem;font-family:var(--sans);font-weight:600}
+.take p{margin:0;font-size:.92rem;color:var(--ink-2)}
+.take .why{display:block;margin-top:.4rem;font-size:.86rem;color:var(--ink-3)}
+
+details{border:1px solid var(--rule);background:var(--surface);margin:1.5rem 0}
+summary{cursor:pointer;padding:.8rem 1.15rem;font-family:var(--mono);font-size:.8rem;
+  letter-spacing:.05em;color:var(--accent);list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸ ";color:var(--ink-3)}
+details[open] summary::before{content:"▾ "}
+details[open] summary{border-bottom:1px solid var(--rule)}
+.det-body{padding:1.1rem 1.15rem}
+.det-body>*:first-child{margin-top:0}
+.det-body>*:last-child{margin-bottom:0}
+.det-body ul{padding-left:1.15rem;font-size:.92rem}
+
+footer{padding-block:2.5rem 4rem;color:var(--ink-3);font-size:.82rem;
+  border-top:1px solid var(--rule-strong)}
+footer p{max-width:70ch;margin:0 0 .5rem}
+
+ul.tight{padding-left:1.15rem}
+ul.tight li{margin-bottom:.4rem}
+.lede{font-size:1.05rem;color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">ThermoForge · 内部技术分享 · 2026-08</p>
+  <h1>无人值守的十二天</h1>
+  <p class="deck">一个让 AI 自己提假设、自己写模型代码、自己跑实验、自己推翻结论的研究系统。这份材料讲三件事：它怎么跑起来的、为什么敢信它的结论、以及十二天换回了什么。</p>
+
+  <div class="tally">
+    <div><b>12</b><span>天（8/08 – 8/20）</span></div>
+    <div><b>169</b><span>次实验</span></div>
+    <div><b>107</b><span>次跑 AI 自著代码</span></div>
+    <div><b>13</b><span>个生产级模型包</span></div>
+    <div><b>1</b><span>人</span></div>
+  </div>
+</header>
+
+<nav class="paths">
+  <div>
+    <h4>只有十分钟</h4>
+    <ol>
+      <li><a href="#idea">三条核心理念</a></li>
+      <li><a href="#value">效益账与交底</a></li>
+      <li><a href="#take">可以直接抄的五条</a></li>
+    </ol>
+  </div>
+  <div>
+    <h4>想看怎么做到的</h4>
+    <ol>
+      <li><a href="#loop">自动探索怎么转</a></li>
+      <li><a href="#pilots">主驾与副驾</a></li>
+      <li><a href="#guard">六道护栏与实证</a></li>
+      <li><a href="#flip">它怎么否定自己</a></li>
+    </ol>
+  </div>
+</nav>
+
+<!-- ===================== 问题 ===================== -->
+<section class="sec" id="what">
+  <div class="sec-head">
+    <span class="kicker">背景</span>
+    <h2>先说要解决的问题</h2>
+  </div>
+  <div class="body">
+    <p class="lede">给一个数据中心冷站建一套能仿真的数字模型——冷机、板换、冷冻泵、冷却塔风机，每台的功耗、换热量、流量、出水温度都要能算。</p>
+    <p>传统做法是人来做：一个懂暖通又懂建模的工程师，读数据、挑特征、试模型、调参、验证、写报告。瓶颈不在算力，在<strong>人的串行带宽</strong>——一个假设要试一天，一个设备要试两周，而这个站有五类设备、十几台机器。</p>
+    <p>ThermoForge 换了个思路：把「研究」这件事本身拆成机器可执行的循环，让 AI 在护栏里自己转，人只在定目标和拍板验收时出现。</p>
+  </div>
+</section>
+
+<!-- ===================== 理念 ===================== -->
+<section class="sec" id="idea">
+  <div class="sec-head">
+    <span class="kicker">核心理念</span>
+    <h2>三条不让步的原则</h2>
+    <p class="sub">整套系统的设计都是这三条推出来的。</p>
+  </div>
+  <div class="body">
+
+    <div class="take">
+      <h4>一 · 智能体永远碰不到原始数据</h4>
+      <p>AI 的全部能力经过 32 个工具，每个工具返回同一个信封结构。响应体硬顶 32 KB，采样最多 200 行。它看不到整张表，只能提问。</p>
+      <span class="why">为什么：能直接读全量数据的模型，会不自觉地把答案背进特征里。限制它的视野，等于强制它做真正的建模而不是记忆。</span>
+    </div>
+
+    <div class="take">
+      <h4>二 · 只有一个地方允许 AI 写代码，而那里完全无人审批</h4>
+      <p>模型实验室。AI 提交一个单文件模型模块，系统做静态扫描加子进程五连检，通过即 <code>validated</code>，直接就能拿去跑真实数据。全流程<strong>没有人类审批环节</strong>。</p>
+      <span class="why">为什么：模型是假设，该由证据杀死，不是由排队审批拖死。对照组是数据预处理——它改的是数据本身，所以强制 <code>actor=human</code> 才能生效。改假设放开，改数据收紧。</span>
+    </div>
+
+    <div class="take">
+      <h4>三 · 没有证据链的结论不算结论</h4>
+      <p>151 条假设、169 次实验、87 条发现，每条发现都挂着支撑它的实验编号；每个模型包都带着数据血缘和研究血缘。可以从任何一个结论反查到它是哪次实验、哪版代码、哪个数据修订跑出来的。</p>
+      <span class="why">为什么：这是「敢信」的全部基础。AI 跑得再多，不可追溯就等于零。</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===================== 机制 ===================== -->
+<section class="sec" id="loop">
+  <div class="sec-head">
+    <span class="kicker">怎么跑起来的</span>
+    <h2>自动探索的闭环</h2>
+    <p class="sub">技术同事重点看这节。</p>
+  </div>
+  <div class="body">
+    <p>人只做一件事：写下研究目标——预测什么、允许用哪些输入、验收标准是多少。剩下的循环机器自己转：</p>
+
+    <div class="loop">
+      <span class="node">目标</span><span class="arrow">→</span>
+      <span class="node">假设</span><span class="arrow">→</span>
+      <span class="node">实验</span><span class="arrow">→</span>
+      <span class="node">证据</span><span class="arrow">→</span>
+      <span class="node">结论</span><span class="arrow">→</span>
+      <span class="node">知识</span>
+      <span class="back">↺ 知识回流成新假设。达标则停，连续若干轮无增益也停——不会空转烧钱。</span>
+    </div>
+
+    <p>关键的一环是<strong>模型实验室</strong>。AI 不是在预设模型里挑参数，而是真的写一个新模型出来：</p>
+
+    <div class="slab">
+      <table>
+        <caption>AI 自著模型模块的准入流程。任何一步不过，模块拿不到 validated，实验根本起不来。</caption>
+        <thead><tr><th>阶段</th><th>做什么</th><th>不过会怎样</th></tr></thead>
+        <tbody>
+          <tr><td>静态扫描</td><td>AST 检查：导入白名单、禁用子模块、禁用调用与双下划线、64 KB 上限</td><td>拒收，不进入执行</td></tr>
+          <tr><td>五连检 · interface</td><td>接口签名是否符合契约</td><td rowspan="5" style="vertical-align:middle">整体判失败，返回<strong>具体哪一项、错在哪</strong>给 AI 自己改</td></tr>
+          <tr><td>五连检 · fit_predict</td><td>能否在合成数据上完成训练与预测</td></tr>
+          <tr><td>五连检 · save_contract</td><td>产物是否只用 JSON / YAML / 原生格式（禁 pickle）</td></tr>
+          <tr><td>五连检 · roundtrip</td><td>存盘再读回，预测是否一致</td></tr>
+          <tr><td>五连检 · determinism</td><td>同种子重跑是否<strong>比特级</strong>相同</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>十二天里 AI 写了 <span class="num">59</span> 个模型模块版本（<span class="num">51</span> 个不同模块），<span class="num">107</span> 次实验跑的是它自己写的代码——占全部实验的 <span class="num">63%</span>。这些不是模板填空，是针对具体设备的物理形式：泵的相似律分台标定、塔风机的湿空气密度修正、冷机的 Q·COP 分解。</p>
+
+    <details>
+      <summary>展开：静态扫描不是沙箱，这点必须说清楚</summary>
+      <div class="det-body">
+        <p>AST 扫描跑在验证子进程执行候选代码<em>之前</em>，是唯一的自动预执行门禁。但它是<strong>粗过滤，不是内核级沙箱</strong>——代码里就是这么写的注释。</p>
+        <p>接受这个风险的前提是：这套系统跑在受控的内网环境、数据是自己的、执行在子进程里。要往外推广、或者让不受信任的模型往里提交代码，这一层必须换成真沙箱。</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ===================== 主驾副驾 ===================== -->
+<section class="sec" id="pilots">
+  <div class="sec-head">
+    <span class="kicker">人机接口</span>
+    <h2>主驾、副驾与外部智能体</h2>
+    <p class="sub">三条通路共用同一套工具与护栏，区别只在谁在驱动。</p>
+  </div>
+  <div class="body">
+    <p class="lede">副驾是这套系统里最容易被低估的部分：<strong>它能直接替你把控研究的方向与进度</strong>，而不只是回答问题。</p>
+
+    <div class="slab">
+      <table>
+        <caption>三条 AI 通路的能力对照。工具 schema 全部由注册表自动生成，模型从不接触手写 schema。</caption>
+        <thead><tr><th>能力</th><th>主驾（终端）</th><th>副驾（网页）</th><th>外部智能体（MCP）</th></tr></thead>
+        <tbody>
+          <tr><td>入口</td><td><code>tf agent</code></td><td>控制台「副驾」页</td><td><code>python -m thermoforge_mcp</code></td></tr>
+          <tr><td>可用工具</td><td class="n">32</td><td class="n">33</td><td class="n">33</td></tr>
+          <tr><td>开研究目标 / 定判据</td><td>✓</td><td><strong>✓</strong></td><td>✓</td></tr>
+          <tr><td>执行实验</td><td>✓</td><td><strong>✓</strong></td><td>✓</td></tr>
+          <tr><td>提交自著模型代码</td><td>✓</td><td><strong>✓</strong></td><td>✓</td></tr>
+          <tr><td>驱动自主研究循环</td><td>✓</td><td><strong>✓</strong></td><td>✓</td></tr>
+          <tr><td>跳页并选好对象</td><td>—</td><td><strong>✓</strong></td><td>—</td></tr>
+          <tr><td>批准预处理</td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>副驾复用主驾完整的对话循环（function calling + 审批拦截 + 会话留痕），只在<strong>实例</strong>上追加一个界面工具 <code>ui_goto</code>——界面能力属于界面，不该渗进 CLI 和 MCP 共用的 Agent 里。它因此比主驾多一件事：<strong>决定「这个问题该看哪一页、该选中哪个实验」，并把结论一起带过去</strong>，显示在目标页顶部。</p>
+
+    <p>提示词开门见山写明了它的定位：</p>
+    <div class="note plain">
+      <h4>副驾系统提示词</h4>
+      <p>「你是 ThermoForge 控制台的副驾。使用者是工程师，但<strong>不想自己在界面上点来点去</strong>——他提问，你负责查清楚、讲明白，并把他带到该看的页面。」</p>
+    </div>
+
+    <details>
+      <summary>展开：副驾能自主完成的动作，以及唯一做不了的那件事</summary>
+      <div class="det-body">
+        <p>权限档位是使用者选定的「<strong>全自动，除了 human-only 的</strong>」。它可以自主：新建研究目标（定 target、白名单、验收判据与判据面）、登记数据视图、提出假设、设计实验、<strong>执行实验</strong>、<strong>提交自著模型代码</strong>、停用走不通的模型、比较模型、发布模型包、驱动完整的自主研究循环。</p>
+        <p><strong>唯一做不了的：预处理审批。</strong>遇到需要审批的动作，它调用 <code>tf_human_approval</code> 发起，界面弹给你确认——它不能替你批。这不是疏漏，是「改数据要收紧、改假设要放开」那条原则的直接结果。</p>
+        <p>工程细节：一轮问答跑在<strong>后台线程</strong>里，因为副驾有权跑实验，而一次实验可能要几十秒到几分钟，放在界面线程里会把整个控制台冻住。审批拦截会阻塞后台线程等你点击，15 分钟超时按拒绝处理。</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ===================== 护栏 ===================== -->
+<section class="sec" id="guard">
+  <div class="sec-head">
+    <span class="kicker">为什么敢信</span>
+    <h2>六道护栏，每道都当场抓到过东西</h2>
+    <p class="sub">这是整份材料最值得带走的部分。抓不到东西的护栏是装饰。</p>
+  </div>
+  <div class="body">
+    <p>「AI 自己跑出来的结论我信不过」——这个疑虑是对的。下面每条护栏后面都跟着它<strong>实际拦下来的一次事故</strong>。</p>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>1 · 候选输入白名单</h3>
+        <p>派生量不能用来预测它自己的原料。目标级和实验级各查一遍，视图特征必须是白名单子集。</p>
+      </div>
+      <div class="caught"><span class="tag">拦下</span>
+        <p>这个站的冷机「负荷」列不是实测的，是 <code>current_percent × 96.72</code> 反算出来的。拿它去预测冷机功耗，能得到漂亮的 MAPE <span class="num">4.35%</span>——纯粹的循环论证。白名单直接把这条路堵死。</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>2 · 可建模性门禁</h3>
+        <p>进建模之前的语义层判定：派生链、同源相关、设备多样性、物理合理性、工况覆盖。FAIL 直接挡在门外。</p>
+      </div>
+      <div class="caught"><span class="tag">拦下</span>
+        <p>泵频与泵功耗相关系数 <span class="num">0.996</span>。看着是好特征，实际是相似律的同一个物理量换了个写法——建出来的模型没有任何预测价值。门禁把它标成同源，逼着换标签重做。</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>3 · 指标全仓唯一实现</h3>
+        <p>RMSE / MAPE / CVRMSE / NMBE 只有一份代码，建模侧一律不许自己算。</p>
+      </div>
+      <div class="caught"><span class="tag">拦下</span>
+        <p>MAPE 会丢弃接近零的样本并<strong>报出有效占比</strong>，低于 0.8 就报警；均值接近零时 CVRMSE 和 NMBE 返回「无」而不是一个看着挺像回事的数。这些是最容易被无意识美化的地方，收进一份实现就再也美化不了。</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>4 · 按时间切分，不按行数</h3>
+        <p>切分边界记成时间戳，训练尾部 purge、验证头部 embargo（默认 45 分钟）。重叠或间隔不足直接报错。</p>
+      </div>
+      <div class="caught"><span class="tag">拦下</span>
+        <p>暖通数据分钟级采样，随机切分等于把同一分钟的前后半段分别丢进训练集和测试集。任何一次随机切分都能把精度「提升」到不可信的水平，而报错让它根本跑不起来。</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>5 · 环境锁与比特级复现</h3>
+        <p>实验在子进程跑，线程数与哈希种子在 numpy 导入前就固定。缺种子报错，环境锁不匹配报错。同机器同锁必须复现出<strong>完全一样</strong>的指标。</p>
+      </div>
+      <div class="caught"><span class="tag">挖出</span>
+        <p>重跑两个旧实验，指标差了五倍。规格文件逐字节相同，唯一的差别是 <code>code_version</code>。顺着这条线查下去，发现中间有一次修复堵死了模型模块的目标列泄漏——也就是说，<strong>那两个实验当初是在偷看答案</strong>。这条护栏是唯一能暴露跨版本指标不可比的东西。</p>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-top">
+        <h3>6 · 发布六道门禁</h3>
+        <p>完整性、签名兼容、验收指标、延迟、冷加载冒烟、回滚记录。六道全过才能进生产，状态机只允许回滚这一条反向边。</p>
+      </div>
+      <div class="caught"><span class="tag">拦下</span>
+        <p>塔风机逐台模型跑到 <span class="num">6.08%</span>，验收线写的是 <span class="num">5%</span>。门禁把它挡在 candidate 状态，发不出去。要发只有一条路：<strong>人明确地把标准改掉，并且留痕说明这个新阈值不是工程推导来的</strong>。没有「差不多就行」这个选项。</p>
+      </div>
+    </div>
+
+    <div class="note plain">
+      <h4>这一节的方法论</h4>
+      <p>写护栏的时候很容易写成一份「我们很规范」的清单。判断一条护栏是真是假只有一个办法：<strong>问它抓到过什么</strong>。上面六条都答得出来。答不出来的那些，我在项目里删掉了。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 自我否定 ===================== -->
+<section class="sec" id="flip">
+  <div class="sec-head">
+    <span class="kicker">最值钱的能力</span>
+    <h2>它会否定自己</h2>
+    <p class="sub">四次把已经拿到手的「战绩」自己推翻。</p>
+  </div>
+  <div class="body">
+    <p>如果这份材料只能留一句话，是这句：<strong>这套系统最值钱的能力不是产出模型，是产出对自己模型的否定。</strong>下面四次都是先有了漂亮结果、后来自己拆掉的。</p>
+
+    <div class="flip">
+      <h4>目标连续三次自我作废</h4>
+      <p>RG-0009 建好之后发现验收判在了错误的面上，作废重建为 RG-0012；RG-0012 又发现白名单里混进了一个累计量派生列，再作废重建为 RG-0015。<span class="then">三个目标编号，一条结论。</span></p>
+    </div>
+
+    <div class="flip">
+      <h4>循环论证的输入被自己揪出来</h4>
+      <p>做水泵流量时，白名单里放了温差。跑完才反应过来：温差乘流量就是冷量，而冷量正是要预测的东西的上游——又是循环论证。整条 RG-0021 / RG-0022 线作废，重开 RG-0025。</p>
+    </div>
+
+    <div class="flip">
+      <h4>头条战绩被证明是泄漏</h4>
+      <p>CVRMSE <span class="num">1.06%</span> 和 <span class="num">0.37%</span> 曾经是全项目最好看的两个数，我拿去汇报过。复现性护栏挖出真相后全部推翻，扫描全部 104 个实验室实验，确认 10 个受污染。<span class="then">好消息是：没有任何一个已发布的模型包用到它们。</span></p>
+    </div>
+
+    <div class="flip">
+      <h4>「群模型比逐台准」是个假象</h4>
+      <p>塔风机群总功耗 <span class="num">2.43%</span>，逐台 <span class="num">6.08%</span>，看上去群模型完胜。拆开一看是<strong>分母不同</strong>——把逐台模型的预测加总到群口径再比，逐台物理模型是 <span class="num">3.10%</span>，群 XGBoost 是 <span class="num">3.55%</span>。<span class="then">逐台反而赢。</span></p>
+    </div>
+
+    <details>
+      <summary>展开：这个拆解还带出一条有行动价值的结论</summary>
+      <div class="det-body">
+        <p>逐台误差两两相关系数 <span class="num">+0.314</span>——不独立。所以 12 台加总只买到 <span class="num">1.2–1.5</span> 倍的误差抵消，而不是理想独立情况下的 <span class="num">3.46</span> 倍。</p>
+        <p>推论很直接：<strong>继续压逐台的随机误差，对群口径收益有限；该压的是共模偏差。</strong>这句话直接指出了下一轮该往哪使劲，比「再调调超参」有价值得多。</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ===================== 效益 ===================== -->
+<section class="sec" id="value">
+  <div class="sec-head">
+    <span class="kicker">效益账</span>
+    <h2>十二天换回了什么</h2>
+    <p class="sub">管理层重点看这节，包括最后的交底。</p>
+  </div>
+  <div class="body">
+
+    <h3 style="font-size:1.05rem;margin:0 0 .5rem">交付物：13 个生产级模型包</h3>
+    <p>覆盖冷机、板换、冷冻泵、冷却塔风机、塔出水温度——<strong>整个冷站的可仿真数字底座</strong>。全部通过六道发布门禁，处于 production 状态。</p>
+
+    <div class="slab">
+      <table>
+        <caption>各模型在其声明判据面上的 CVRMSE。条形长度按 10% 满量程绘制；橙色为超过 5% 的四个。</caption>
+        <thead><tr><th>模型包</th><th>对象</th><th style="text-align:right">CVRMSE</th><th style="text-align:right">NMBE</th></tr></thead>
+        <tbody>
+          <tr><td><code>wx-ct-supply-temp</code></td><td>塔出水温度</td><td class="n">1.27%<span class="meter" style="width:12.7%"></span></td><td class="n">+0.24%</td></tr>
+          <tr><td><code>wx-hx-heat-transfer</code></td><td>板换换热量</td><td class="n">1.82%<span class="meter" style="width:18.2%"></span></td><td class="n">+0.27%</td></tr>
+          <tr><td><code>wx-pump-power-unit</code></td><td>冷冻泵逐台功耗</td><td class="n">1.86%<span class="meter" style="width:18.6%"></span></td><td class="n">+0.15%</td></tr>
+          <tr><td><code>wx-ct-fan-power-total</code></td><td>塔风机群功耗</td><td class="n">2.43%<span class="meter" style="width:24.3%"></span></td><td class="n">−1.07%</td></tr>
+          <tr><td><code>wx-chwp-flow-total</code></td><td>冷冻水总流量</td><td class="n">2.46%<span class="meter" style="width:24.6%"></span></td><td class="n">+0.59%</td></tr>
+          <tr><td><code>wx-ct-approach</code></td><td>冷却塔逼近度</td><td class="n">4.15%<span class="meter" style="width:41.5%"></span></td><td class="n">−1.00%</td></tr>
+          <tr><td><code>wx-chiller-power-ch01</code></td><td>冷机 01 功耗</td><td class="n">4.85%<span class="meter" style="width:48.5%"></span></td><td class="n">+2.47%</td></tr>
+          <tr><td><code>wx-chiller-power-ch02</code></td><td>冷机 02 功耗</td><td class="n">4.99%<span class="meter" style="width:49.9%"></span></td><td class="n">−0.51%</td></tr>
+          <tr><td><code>wx-chiller-power-static</code></td><td>冷机通用功耗</td><td class="n">5.28%<span class="meter warn" style="width:52.8%"></span></td><td class="n">−0.40%</td></tr>
+          <tr><td><code>wx-ct-fan-power-unit</code></td><td>塔风机逐台功耗</td><td class="n">6.08%<span class="meter warn" style="width:60.8%"></span></td><td class="n">−0.22%</td></tr>
+          <tr><td><code>wx-chiller-power-ch03</code></td><td>冷机 03 功耗</td><td class="n">7.19%<span class="meter warn" style="width:71.9%"></span></td><td class="n">+3.40%</td></tr>
+          <tr><td><code>wx-chiller-power-ch04</code></td><td>冷机 04 功耗</td><td class="n">8.37%<span class="meter warn" style="width:83.7%"></span></td><td class="n">−0.14%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.86rem;color:var(--ink-3);margin-top:-.75rem">另有 <code>wx-hx-heat-transfer-static</code> 与上表板换模型同指标，为通用版本，共 13 个。</p>
+
+    <h3 style="font-size:1.05rem;margin:2.5rem 0 .5rem">产能：人退出得越多，产出越高</h3>
+    <div class="chart">
+      <div class="col"><span class="v">15</span><span class="bar" style="height:23%"></span><span class="d">8/13</span></div>
+      <div class="col"><span class="v">13</span><span class="bar" style="height:20%"></span><span class="d">8/16</span></div>
+      <div class="col"><span class="v">43</span><span class="bar" style="height:65%"></span><span class="d">8/17</span></div>
+      <div class="col"><span class="v">27</span><span class="bar" style="height:41%"></span><span class="d">8/18</span></div>
+      <div class="col peak"><span class="v">66</span><span class="bar" style="height:100%"></span><span class="d">8/19</span></div>
+      <div class="col"><span class="v">5</span><span class="bar" style="height:8%"></span><span class="d">8/20</span></div>
+    </div>
+    <p>每日完成实验数。<strong>8/19 那天的 66 次实验是无人值守循环自己跑的，我在睡觉。</strong>这条曲线的形状就是结论：早期人在回路里逐个批，产能压在十几；护栏补齐、循环放手之后，产能翻了四倍。</p>
+
+    <h3 style="font-size:1.05rem;margin:2.5rem 0 .5rem">三类效益</h3>
+    <ul class="tight">
+      <li><strong>建模生产力</strong>——12 天、1 人加 AI、13 个可部署模型包。同样的范围按传统串行方式做，按一台设备两周估，是季度级的工作量。</li>
+      <li><strong>结论可信度</strong>——全部可复现、可审计，带完整数据血缘与研究血缘。这是模型敢往控制策略上接的前提。</li>
+      <li><strong>数据资产体检</strong>——探索过程自己产出了「哪些测点缺失卡住了精度、补上能提到多少」的清单。这份清单是免费的副产品，但它决定下一笔仪表投资该花在哪。</li>
+    </ul>
+
+    <div class="note candid">
+      <h4>必须交底</h4>
+      <p><strong>目前没有「已节电 X%」这个数字。</strong>13 个模型全部完成生产注册，但<strong>没有任何一个做过部署绑定</strong>，也没有实测节能收益。</p>
+      <p>所以这次分享的效益口径是「建模生产力 + 结论可信度 + 数据资产诊断」，不是运营收益。往节能收益上靠会在第一个提问就穿帮。</p>
+      <p>还有一件事该说：169 次实验里有相当一部分废在平台自身的缺陷上——有一轮七次里废了六次，全是因为报错信息没把「错在哪」传回给 AI。<strong>自动探索的真实成本结构里，很大一块是让机器能看懂自己的失败。</strong></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 可迁移 ===================== -->
+<section class="sec" id="take">
+  <div class="sec-head">
+    <span class="kicker">带走</span>
+    <h2>可以直接抄的五条</h2>
+    <p class="sub">与暖通无关，任何让 AI 自动干活的场景都适用。</p>
+  </div>
+  <div class="body">
+
+    <div class="take">
+      <h4>一 · 先把验收标准写进契约，再开始跑</h4>
+      <p>包括判在哪个面上。事后再定标准，等于让结果决定标准。</p>
+      <span class="why">这个项目里改判据改过好几次，但每次都留痕、说明理由、并且明说新阈值是不是工程推导来的。改标准不可耻，偷偷改才可耻。</span>
+    </div>
+
+    <div class="take">
+      <h4>二 · 让 AI 写代码的地方，必须能自动验；不能自动验就别让它写</h4>
+      <p>五连检里最关键的是 determinism 和 roundtrip——它们保证产出物是个真东西，不是一次侥幸。</p>
+      <span class="why">反过来说：预处理会改数据本身，验不了，所以那里强制人工审批。<strong>放开哪里、收紧哪里，看的是「能不能自动证伪」。</strong></span>
+    </div>
+
+    <div class="take">
+      <h4>三 · 每条结论挂证据 ID，否则不算结论</h4>
+      <p>成本很低——就是存个编号；收益极高——半个月后有人质疑任何一个数，都能当场翻出来源。</p>
+      <span class="why">这次能查清泄漏影响范围、并确认已发布的包干净，全靠这个。</span>
+    </div>
+
+    <div class="take">
+      <h4>四 · 护栏的验收标准是「它抓到过什么」</h4>
+      <p>写完一条规则就问自己：它拦下过哪次真实事故？答不出来的，多半是自我感觉良好。</p>
+    </div>
+
+    <div class="take">
+      <h4>五 · 把「让机器看懂自己的失败」当成一等公民</h4>
+      <p>报错信息里少写一句「哪一项检查没过、具体错在哪」，AI 就会在同一个坑里重复摔七轮。这不是日志问题，是<strong>自动化系统的核心吞吐瓶颈</strong>。</p>
+      <span class="why">这条是这次最大的教训，也是最容易被低估的一条。</span>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <p>数据统计自项目仓库，截至 2026-08-20：49 次提交，源码 25,425 行、测试 10,975 行，682 项测试全绿。26 个研究目标、151 条假设、169 次实验、87 条发现、59 个 AI 自著模型模块版本（51 个不同模块）、13 个生产级模型包、541 个智能体会话。</p>
+  <p>文中每个数字都可以在仓库的账本里反查到对应的目标、实验与发现编号。</p>
+</footer>
+
+</div>
+</body>
+</html>
