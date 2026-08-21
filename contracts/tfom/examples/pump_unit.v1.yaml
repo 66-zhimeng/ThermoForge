@@ -1,0 +1,63 @@
+# 逐台水泵物模型（scripts/build_pump_unit_dataset.py 产出）。
+#
+# 与泵群物模型 `pump_model.v1` 的分工：
+# - `pump_unit.v1` 管**单台**：频率 → 功耗（相似定律 P ∝ f³）。实测数据上
+#   8 台泵的 log-log 斜率全部落在 2.96~3.05，是这份数据里最干净的物理关系。
+# - `pump_model.v1` 管**泵群**：各台频率 + 台数 → 总流量 / 总功耗。
+#
+# 单台频率是有的（`chwp_0N.status_frequency` / `cwp_0N.status_frequency`），
+# 且台间确有差异（冷冻侧极差中位 0.51 Hz、p95 3.80；冷却侧 1.07 / 5.99），
+# 早先用群平均聚合会抹掉这部分信息。
+contract: TFOM
+contract_version: "1.0"
+model_id: pump_unit
+version: "1.0"
+properties:
+  power:
+    name_zh: 本台泵功耗
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 1000.0
+  frequency:
+    name_zh: 本台泵运行频率
+    unit: Hz
+    dtype: float
+    role: control
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  bank_run_count:
+    name_zh: 同侧同时运行的泵台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  bank_freq_mean:
+    name_zh: 同侧运行泵的平均频率（本台的工作点受同侧其它泵影响）
+    unit: Hz
+    dtype: float
+    role: state
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  bank_freq_sum:
+    name_zh: 同侧运行泵频率之和（并联总转速的自然聚合）
+    unit: Hz
+    dtype: float
+    role: state
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 240.0
+  chiller_run_count:
+    name_zh: 运行冷机台数（系统阻力曲线的工况代理）
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0

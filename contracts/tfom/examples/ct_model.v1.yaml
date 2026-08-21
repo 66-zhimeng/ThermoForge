@@ -1,0 +1,139 @@
+# 冷却塔群建模视图物模型（scripts/build_cooling_tower_dataset.py 产出）。
+#
+# **为什么是塔群 CTBANK 而不是逐塔 CT01..CT04**：本版导出的冷却塔工作表
+# 20 列 × 35040 行整表为空（`supply_t` / `return_t` / `instant_flow` 非空计数
+# 均为 1，值 0.0，见 docs/data-survey.md「冷却塔工作表全空」TFDC-306）。
+# 逐塔的进出水温与流量根本没有数据，只有 12 台风机的电气量是全的。
+# 因此水侧只能取塔群总管口径（handbook §4「总管是塔视角」）：
+# `cw_A1.t_supply` = 送去塔的水（热）、`cw_A1.t_return` = 从塔回来的水（冷）。
+#
+# 两个可建模标签：
+# - `t_ct_out` 塔群出水温 —— 它就是冷机的 `t_cond_in` 上游，what-if 最有用；
+# - `fan_power_total` 12 台风机总功耗 —— 塔侧唯一的能耗项。
+#
+# `heat_reject` 由 `t_ct_in − t_ct_out` 算出，**含标签**：只能进 `fan_power_total`
+# 目标的候选白名单，进 `t_ct_out` 的白名单即循环论证（DD-16）。
+#
+# `approach` = `t_ct_out − t_wetbulb`，冷却塔的行业标准性能指标，也是三个
+# 标签里唯一「考塔本身干得好不好」的：出水温有 98% 的变化能被进水温解释，
+# 拿它当标签是送分题。以 approach 为目标时，白名单必须同时排除 `t_ct_out`
+# 和 `heat_reject` —— 由 t_ct_in、heat_reject、f_cw_total 可反解出 t_ct_out，
+# 再减湿球即标签。`t_wetbulb` 可以留：逼近度不是湿球的函数，塔的性能曲线
+# 本来就以湿球为自变量。
+contract: TFOM
+contract_version: "1.0"
+model_id: ct_model
+version: "1.0"
+properties:
+  t_ct_out:
+    name_zh: 塔群出水温度（回冷凝器侧，冷）
+    unit: Cel
+    dtype: float
+    role: target
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  fan_power_total:
+    name_zh: 冷却塔风机总功耗（12 台之和）
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 2000.0
+  t_ct_in:
+    name_zh: 塔群进水温度（自冷凝器侧，热）
+    unit: Cel
+    dtype: float
+    role: state
+    quantity_kind: temperature
+    min_value: -5.0
+    max_value: 60.0
+  f_cw_total:
+    name_zh: 冷却水总流量（两路之和，A-02）
+    unit: m3/h
+    dtype: float
+    role: state
+    quantity_kind: volume_flow
+    min_value: 0.0
+    max_value: 20000.0
+  t_wetbulb:
+    name_zh: 室外湿球温度（Stull 2011 近似，由干球+相对湿度算出）
+    unit: Cel
+    dtype: float
+    role: disturbance
+    quantity_kind: temperature
+    min_value: -45.0
+    max_value: 60.0
+  ambient_t:
+    name_zh: 环境干球温度
+    unit: Cel
+    dtype: float
+    role: disturbance
+    quantity_kind: temperature
+    min_value: -40.0
+    max_value: 60.0
+  ambient_h:
+    name_zh: 环境相对湿度
+    unit: "%"
+    dtype: float
+    role: disturbance
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
+  fan_run_count:
+    name_zh: 运行风机台数
+    unit: "1"
+    dtype: integer
+    role: control
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 12.0
+  fan_freq_mean:
+    name_zh: 运行风机平均频率
+    unit: Hz
+    dtype: float
+    role: control
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  fan_freq_max:
+    name_zh: 运行风机最高频率
+    unit: Hz
+    dtype: float
+    role: control
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  cwp_run_count:
+    name_zh: 运行冷却水泵台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  chiller_run_count:
+    name_zh: 运行冷机台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 8.0
+  approach:
+    name_zh: 逼近度（出水温 − 湿球温度）
+    unit: K
+    dtype: float
+    role: target
+    quantity_kind: temperature_difference
+    min_value: -20.0
+    max_value: 40.0
+  heat_reject:
+    name_zh: 塔群排热量（含标签，仅限风机功耗目标使用）
+    unit: kW
+    dtype: float
+    role: state
+    quantity_kind: power
+    min_value: -20000.0
+    max_value: 60000.0

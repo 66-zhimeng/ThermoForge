@@ -1,0 +1,80 @@
+# 逐台冷却塔风机物模型（scripts/build_ct_fan_dataset.py 产出）。
+#
+# **建模单元为什么同时给「台」和「塔」**：实测同一塔内三台风机高度同步
+# （台间频率极差中位 0.16~0.45 Hz、p95 ≤1.02），而塔与塔之间差异明显
+# （12 台总极差中位 1.41、p95 7.59、最大 36.79）。所以：
+# - 单台是物理单元（频率 → 功耗，相似定律）；
+# - **塔是控制单元**（三台绑定同调），塔间差异才是信息所在。
+# 两级都留出字段，便于「逐台标定 → 按塔聚合 → 塔群求和」的组合建模。
+#
+# 塔侧没有任何风量测点（`ct_0i.instant_flow` 整表为空，TFDC-306），
+# 所以这个物模型只能到功耗这一层，做不了「频率 → 风量」。
+contract: TFOM
+contract_version: "1.0"
+model_id: ct_fan_unit
+version: "1.0"
+properties:
+  power:
+    name_zh: 本台风机功耗
+    unit: kW
+    dtype: float
+    role: target
+    quantity_kind: power
+    min_value: 0.0
+    max_value: 200.0
+  frequency:
+    name_zh: 本台风机运行频率
+    unit: Hz
+    dtype: float
+    role: control
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  tower_fan_count:
+    name_zh: 本塔内同时运行的风机台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 3.0
+  tower_freq_mean:
+    name_zh: 本塔内运行风机平均频率（塔内三台同调，故为塔的控制量）
+    unit: Hz
+    dtype: float
+    role: control
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  bank_fan_count:
+    name_zh: 塔群内同时运行的风机总台数
+    unit: "1"
+    dtype: integer
+    role: state
+    quantity_kind: dimensionless
+    min_value: 0.0
+    max_value: 12.0
+  bank_freq_mean:
+    name_zh: 塔群运行风机平均频率
+    unit: Hz
+    dtype: float
+    role: state
+    quantity_kind: frequency
+    min_value: 0.0
+    max_value: 60.0
+  ambient_t:
+    name_zh: 环境干球温度（空气密度影响风机轴功率）
+    unit: Cel
+    dtype: float
+    role: disturbance
+    quantity_kind: temperature
+    min_value: -40.0
+    max_value: 60.0
+  ambient_h:
+    name_zh: 环境相对湿度（同上，影响湿空气密度）
+    unit: "%"
+    dtype: float
+    role: disturbance
+    quantity_kind: percent
+    min_value: 0.0
+    max_value: 100.0
