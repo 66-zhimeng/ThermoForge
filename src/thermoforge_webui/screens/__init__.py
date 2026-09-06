@@ -9,6 +9,7 @@ from .overview import overview_page
 from .quality import quality_page
 from .report import report_page
 from .research import research_page
+from .research_v2 import research_v2_page
 from .results import results_page
 from .settings import settings_page
 
@@ -20,6 +21,7 @@ __all__ = [
     "quality_page",
     "report_page",
     "research_page",
+    "research_v2_page",
     "results_page",
     "settings_page",
 ]

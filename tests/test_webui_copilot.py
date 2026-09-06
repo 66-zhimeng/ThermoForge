@@ -98,6 +98,27 @@ def test_ui_goto_schema_is_exposed_to_the_model() -> None:
     assert UI_GOTO_TOOL in names
     # 数据工具也还在——副驾既能查也能跳
     assert "tf_research_status" in names
+    assert {"tf_v2_prepare", "tf_v2_start", "tf_v2_control", "tf_v2_report"} <= set(names)
+
+
+def test_v2_tools_use_copilot_roots_and_return_dict(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from thermoforge_v2.mcp import agent_tools
+    observed = {}
+    class Client:
+        def __init__(self, **roots):
+            observed.update(roots)
+        def start(self, config, idempotency_key):
+            observed.update(config=config, key=idempotency_key)
+            return {"run_id": "RUN-test", "status": "queued"}
+    monkeypatch.setattr("thermoforge_v2.mcp.V2Client", Client)
+    roots = {f"{n}_root": tmp_path / n for n in ("vault", "research", "models")}
+    _, dispatch = agent_tools()
+    result = dispatch["tf_v2_start"](SimpleNamespace(**roots), config={"goal_id": "RG-0001"},
+                                      idempotency_key="once")
+    assert result["ok"] and result["summary"]["run_id"] == "RUN-test"
+    assert all(observed[k] == v for k, v in roots.items())
+    assert observed["key"] == "once"
 
 
 def test_tool_calls_are_recorded_as_events() -> None:

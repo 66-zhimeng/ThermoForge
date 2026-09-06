@@ -241,8 +241,10 @@ class CopilotSession:
             on_tool_call=self._on_tool_call,
         )
         # 追加界面工具：模型除了查数据，还能决定「该看哪一页」
-        agent.schemas = [*agent.schemas, UI_GOTO_SCHEMA]
-        agent.dispatch = {**agent.dispatch, UI_GOTO_TOOL: self._ui_goto}
+        from thermoforge_v2.mcp import agent_tools
+        v2_schemas, v2_dispatch = agent_tools()
+        agent.schemas = [*agent.schemas, *v2_schemas, UI_GOTO_SCHEMA]
+        agent.dispatch = {**agent.dispatch, **v2_dispatch, UI_GOTO_TOOL: self._ui_goto}
         self._agent = agent
         return agent
 

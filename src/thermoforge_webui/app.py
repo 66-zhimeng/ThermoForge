@@ -25,6 +25,7 @@ from thermoforge_webui.screens import (
     quality_page,
     report_page,
     research_page,
+    research_v2_page,
     results_page,
     settings_page,
 )
@@ -41,6 +42,7 @@ _SPECS = (
     ("data", data_page, "数据", "🗂"),
     ("quality", quality_page, "数据质量", "🩺"),
     ("research", research_page, "AI 研究", "🔬"),
+    ("research_v2", research_v2_page, "V2 研究运行", "🧪"),
     ("results", results_page, "实验结果", "📈"),
     ("models", models_page, "模型", "📦"),
     ("report", report_page, "报告导出", "📄"),
@@ -77,7 +79,7 @@ def _sidebar() -> None:
             source = "环境变量" if config.from_env else "配置文件"
             st.caption(f"模型 `{config.model}` · 密钥来自{source}")
         else:
-            st.warning("还没配 API 密钥，AI 功能不可用", icon="⚠️")
+            st.info("网页 AI 助手尚未配置 API；V2 研究使用本机 Codex 登录。", icon="ℹ️")
         with st.expander("工件目录"):
             for name, path in roots_summary().items():
                 st.caption(f"**{name}**　`{path}`")
