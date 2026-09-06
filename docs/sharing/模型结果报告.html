@@ -1,0 +1,1698 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ThermoForge 模型档案</title>
+<style>
+:root{
+  --paper:#f6f8f7; --ink:#141a18; --ink-soft:#5c6a66;
+  --line:#dde4e1; --sunk:#ecf1ef; --rule:#c6d3cf;
+  --accent:#0f6b5c; --accent-soft:#e2efeb;
+  --warn:#a3561d; --warn-soft:#f6ecdf;
+  --ok:#1d6b4a; --ok-soft:#e3f0e9;
+  --chip:#5c6a66; --chip-soft:#e7eae9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0f1413; --ink:#e3e9e6; --ink-soft:#94a49f;
+    --line:#232c2a; --sunk:#161d1c; --rule:#31403c;
+    --accent:#4fc0a7; --accent-soft:#12332d;
+    --warn:#d99a5c; --warn-soft:#31251a;
+    --ok:#57bd8c; --ok-soft:#122b20;
+    --chip:#94a49f; --chip-soft:#1c2422;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0f1413; --ink:#e3e9e6; --ink-soft:#94a49f;
+  --line:#232c2a; --sunk:#161d1c; --rule:#31403c;
+  --accent:#4fc0a7; --accent-soft:#12332d;
+  --warn:#d99a5c; --warn-soft:#31251a;
+  --ok:#57bd8c; --ok-soft:#122b20;
+  --chip:#94a49f; --chip-soft:#1c2422;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+       "Microsoft YaHei","Hiragino Sans GB",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:clamp(28px,5vw,64px) 22px 96px}
+h1{font-size:clamp(28px,4.4vw,40px);line-height:1.22;margin:0 0 14px;
+  letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:clamp(20px,2.6vw,25px);line-height:1.35;margin:64px 0 6px;
+  padding-top:18px;border-top:2px solid var(--rule);text-wrap:balance;
+  scroll-margin-top:12px}
+h3{font-size:15px;margin:34px 0 4px;color:var(--accent);
+  letter-spacing:.06em;font-weight:700}
+h3::before{content:"";display:inline-block;width:16px;height:1px;
+  background:var(--accent);vertical-align:.35em;margin-right:9px}
+p{margin:12px 0;max-width:74ch}
+a{color:var(--accent);text-underline-offset:3px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;
+  border-radius:3px}
+.tablewrap{overflow-x:auto;margin:14px 0;border:1px solid var(--line);
+  border-radius:8px;background:var(--sunk)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;
+  font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:8px 12px;text-align:right;
+  vertical-align:top;line-height:1.55}
+th{background:var(--sunk);font-weight:650;text-align:center;white-space:nowrap;
+  font-size:12px;letter-spacing:.04em;color:var(--ink-soft);
+  border-bottom:1px solid var(--rule)}
+td{background:var(--paper)}
+td:first-child,th:first-child,td:nth-child(2),td:nth-child(3){text-align:left}
+tbody tr:last-child td{border-bottom:0}
+code{background:var(--sunk);padding:1px 5px;border-radius:4px;font-size:.88em;
+  font-family:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  border:1px solid var(--line)}
+pre{background:var(--sunk);border:1px solid var(--line);
+  border-left:3px solid var(--accent);padding:14px 18px;border-radius:8px;
+  overflow-x:auto;font-size:13px;line-height:1.7;margin:14px 0;
+  font-family:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace}
+pre code{background:none;padding:0;border:0;font-size:inherit}
+blockquote{margin:14px 0;padding:11px 16px;border-left:3px solid var(--warn);
+  background:var(--warn-soft);border-radius:0 8px 8px 0;color:var(--ink)}
+blockquote p{margin:0;max-width:none;font-size:14.5px}
+ol,ul{padding-left:22px;max-width:74ch}
+li{margin:8px 0}
+hr{border:0;border-top:1px solid var(--line);margin:48px 0 20px}
+strong{font-weight:680}
+.stamp{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  font-size:12.5px;color:var(--ink-soft);letter-spacing:.02em;
+  padding:2px 0 18px;border-bottom:1px solid var(--rule);margin-bottom:8px}
+.pill{display:inline-block;padding:1px 9px;border-radius:999px;
+  font-size:11.5px;font-weight:650;letter-spacing:.03em;white-space:nowrap;
+  background:var(--chip-soft);color:var(--chip)}
+.pill-ok{background:var(--ok-soft);color:var(--ok)}
+.pill-warn{background:var(--warn-soft);color:var(--warn)}
+.pill-live{background:var(--accent-soft);color:var(--accent)}
+td a code{border-color:currentColor}
+</style>
+</head><body>
+<div class="wrap">
+<h1>ThermoForge 模型结果报告</h1>
+<p class="stamp">生成时间：2026-08-21 04:02 UTC-04　·　覆盖 13 个模型、18 个已注册版本</p>
+<p>本报告由 <code>scripts/export_model_report.py</code> 从模型注册表 <code>models/</code> 与研究账本 <code>research/</code> 直接导出，公式与参数取自各模型包的 <code>artifact/</code>，指标取自包内 <code>metrics.json</code>（唯一实现 <code>research/metrics.py</code>，<strong>比率制</strong>，报告中转成百分数）。任何一个数字都可以回到对应的实验目录复核。</p>
+<h2 id="sec-一">一、模型总览</h2>
+<div class="tablewrap"><table><thead><tr><th>模型</th><th>生产版本</th><th>状态</th><th>预测目标</th><th>输入数</th><th>形态</th><th>R²（滚动）</th><th>CVRMSE（滚动）</th><th>NMBE（滚动）</th><th>MAPE（滚动）</th></tr></thead><tbody>
+<tr><td><a href="#wx-chiller-power-ch01"><code>wx-chiller-power-ch01</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>12</td><td>残差混合：Gordon-Ng 熵产模型</td><td>0.8059</td><td>4.85%</td><td>2.47%</td><td>3.80%</td></tr>
+<tr><td><a href="#wx-chiller-power-ch02"><code>wx-chiller-power-ch02</code></a></td><td>1.2.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>15</td><td>纯梯度提升静态模型</td><td>0.7229</td><td>4.99%</td><td>-0.51%</td><td>3.97%</td></tr>
+<tr><td><a href="#wx-chiller-power-ch03"><code>wx-chiller-power-ch03</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>12</td><td>残差混合：Gordon-Ng 熵产模型</td><td>-0.09844</td><td>7.19%</td><td>3.40%</td><td>5.56%</td></tr>
+<tr><td><a href="#wx-chiller-power-ch04"><code>wx-chiller-power-ch04</code></a></td><td>1.1.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>15</td><td>残差混合：Gordon-Ng 熵产模型</td><td>0.6413</td><td>8.37%</td><td>-0.14%</td><td>5.79%</td></tr>
+<tr><td><a href="#wx-chiller-power-static"><code>wx-chiller-power-static</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>16</td><td>纯梯度提升静态模型</td><td>0.7001</td><td>5.28%</td><td>-0.40%</td><td>4.18%</td></tr>
+<tr><td><a href="#wx-chwp-flow-total"><code>wx-chwp-flow-total</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>flow_total</td><td>9</td><td>纯梯度提升静态模型</td><td>-0.9594</td><td>2.46%</td><td>0.59%</td><td>1.76%</td></tr>
+<tr><td><a href="#wx-ct-approach"><code>wx-ct-approach</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>approach</td><td>5</td><td>二阶多项式</td><td>0.9586</td><td>4.15%</td><td>-1.00%</td><td>3.46%</td></tr>
+<tr><td><a href="#wx-ct-fan-power-total"><code>wx-ct-fan-power-total</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>fan_power_total</td><td>3</td><td>纯梯度提升静态模型</td><td>0.055</td><td>2.43%</td><td>-1.07%</td><td>1.98%</td></tr>
+<tr><td><a href="#wx-ct-fan-power-unit"><code>wx-ct-fan-power-unit</code></a></td><td>1.1.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>7</td><td>频率幂律 + 湿空气密度修正</td><td>0.5774</td><td>6.08%</td><td>-0.22%</td><td>4.82%</td></tr>
+<tr><td><a href="#wx-ct-supply-temp"><code>wx-ct-supply-temp</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>t_ct_out</td><td>11</td><td>线性基线</td><td>0.9776</td><td>1.27%</td><td>0.24%</td><td>0.97%</td></tr>
+<tr><td><a href="#wx-hx-heat-transfer"><code>wx-hx-heat-transfer</code></a></td><td>1.1.0</td><td><span class="pill pill-live">生产</span></td><td>heat_transfer</td><td>9</td><td>纯梯度提升静态模型</td><td>0.759</td><td>1.82%</td><td>0.27%</td><td>1.39%</td></tr>
+<tr><td><a href="#wx-hx-heat-transfer-static"><code>wx-hx-heat-transfer-static</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>heat_transfer</td><td>9</td><td>纯梯度提升静态模型</td><td>0.759</td><td>1.82%</td><td>0.27%</td><td>1.39%</td></tr>
+<tr><td><a href="#wx-pump-power-unit"><code>wx-pump-power-unit</code></a></td><td>1.0.0</td><td><span class="pill pill-live">生产</span></td><td>power</td><td>1</td><td>逐台标定的三参数相似定律幂律</td><td>0.9898</td><td>1.86%</td><td>0.15%</td><td>0.99%</td></tr>
+</tbody></table></div>
+<blockquote><p>表中指标一律取<strong>滚动交叉验证</strong>面（各目标声明的判据面），它是唯一用于发布决策的口径；验证集/测试集指标在各模型分节里给出。</p></blockquote>
+<h2 id="sec-二">二、口径说明（先读这一节，否则数字容易被误读）</h2>
+<h3>指标定义</h3>
+<p>四个指标由 <code>research/metrics.py</code> 单一实现，模型代码不得自行计算：</p>
+<pre><code>RMSE   = sqrt( mean( (ŷ − y)² ) )
+CVRMSE = RMSE / mean(y)                       变异系数化的 RMSE，相对误差幅度
+NMBE   = mean(ŷ − y) / mean(y)                归一化平均偏差，**正=系统高估**
+MAPE   = mean( |ŷ − y| / |y| )                丢弃 |y| &lt; y_floor 的样本后计算
+R²     = 1 − Σ(y − ŷ)² / Σ(y − mean(y))²      解释方差比例，可为负</code></pre>
+<ul><li>CVRMSE / NMBE / MAPE 在文件里存的是<strong>比率</strong>，本报告统一乘 100 显示为百分数。</li></ul>
+<ul><li><code>mean(y) ≈ 0</code> 时 CVRMSE / NMBE 记为 <code>None</code> 而不是给一个看起来合理的数。</li></ul>
+<ul><li>MAPE 会丢掉 <code>|y| &lt; y_floor</code> 的样本并记录有效比例，低于 0.8 会报 <code>TFX-905</code>。</li></ul>
+<h3>三张判据面的区别</h3>
+<div class="tablewrap"><table><thead><tr><th>面</th><th>怎么来的</th><th>用途</th></tr></thead><tbody>
+<tr><td>滚动交叉验证 rolling_cv</td><td>从训练区起，按固定跨度（7 或 30 天）逐步扩展训练窗、在下一窗上评估，取折间<strong>均值</strong></td><td><strong>唯一的发布判据面</strong></td></tr>
+<tr><td>验证集 validate</td><td>时间切分的中段（默认 15%）</td><td>调参与诊断</td></tr>
+<tr><td>测试集 A</td><td>时间切分的末段（默认 15%），时间上离训练最远</td><td>最保守的泛化观察</td></tr>
+</tbody></table></div>
+<p>切分按<strong>时间</strong>而非行数：边界对齐到采样周期整数倍，训练尾部 purge、验证头部 embargo（默认 2700 s = 45 min），重叠或间隙不足直接报 <code>TFX-903</code>。</p>
+<h3>R² 为负是什么意思，为什么还能发布</h3>
+<p>R² 为负 = 该面上模型比「直接用这一折的均值」还差。它在<strong>窄工况</strong>上很容易出现：折内目标方差很小时分母趋零，一点点偏差就把 R² 拉到负数，而 CVRMSE 可以同时很好。</p>
+<p>所以本项目的发布判据以 CVRMSE / NMBE 为主，R² 只在目标显式声明 <code>r2_min</code> 时才是硬门槛。报告里两个都给，看到 R² 负值请同时看 CVRMSE 和折间标准差。</p>
+<h3>CVRMSE 跨模型不可直接比较</h3>
+<p>CVRMSE 的分母是各自的 <code>mean(y)</code>。群模型的均值是十几台之和，单台模型只有它的十几分之一——<strong>同样的绝对误差，单台的 CVRMSE 会大十几倍</strong>。研究账本 F-0087 用塔风机做过判决性分解：<code>wx-ct-fan-power-total</code>（群，2.43%）与 <code>wx-ct-fan-power-unit</code>（逐台，6.08%）看似差 2.5 倍，把逐台预测按时刻求和后在同一面上对比，逐台模型反而更好（测试面 3.10% vs 3.55%，验证面 4.46% vs 6.56%）。</p>
+<h3>白名单硬门禁（为什么输入列看起来「少了点」）</h3>
+<p>候选输入白名单会在目标层与实验层各拦一次：派生量不得用来预测它自己的原料。现场数据里 <code>load = current_percent × 9672 / 100</code>，用它预测功率是循环论证，能刷出 4.35% 的假 MAPE。报告里每个输入都标了 <code>数据来源</code>：<code>measured</code>（实测点位）/ <code>estimated</code>（由测点换算，如 lift、flow_ratio、湿球温度）。</p>
+<h3>复现方式</h3>
+<p>每个模型包自带 <code>environment.lock</code>（含全部依赖的版本与哈希）、<code>checksums.json</code>、以及 <code>golden.parquet</code> 预测集。实验在子进程里跑，线程数环境变量在 numpy/sklearn 导入<strong>之前</strong>设定；同机器 + 同环境锁必须逐位复现指标。包内不含任何 pickle。</p>
+<h2 id="sec-三">三、逐模型明细</h2>
+<h2 id="wx-chiller-power-ch01">3.1　wx-chiller-power-ch01　—　CH01 静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>chiller_model.v1</td></tr>
+<tr><td>建模对象</td><td>CH01</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>CH01 静态模型（判据面 rolling_cv）</td></tr>
+<tr><td>研究目标</td><td>RG-0012 · 冷机功耗静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0027：CH01：Gordon-Ng 打底 + XGBoost 残差（残差学习器可见两侧流量），滚动交叉验证折间均值 CVRMSE ≤ 0.12</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0048 / VIEW-0038</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHILLER_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>8e3ded0d</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>cooling_load</td><td>制冷量</td><td>kW</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>plr</td><td>部分负荷率</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>lift</td><td>冷凝-蒸发温升 lift</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>hx_run_count</td><td>板换运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_frequency</td><td>对应冷却泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：残差混合：Gordon-Ng 熵产模型（能量平衡 + 熵平衡 + 换热热阻，三参数） + XGBoost 残差修正</p>
+<pre><code>T_e = T_ei − Q_e · R_e                （蒸发温度，绝对温标 K）
+K   = Q_e / T_e + ΔS_int              （总熵流率 kW/K）
+Q_c = T_ci · K / (1 − R_c · K)        （冷凝排热 kW）
+P   = Q_c − Q_e                       （压缩机功率 kW）
+
+z_i = (x_i − mean_i) / std_i           （残差特征标准化，均值/标准差随包落盘）
+P̂   = P + Σ_(t=1..400) g_t(z)      （g_t 为回归树，P 是上面的物理主干输出）</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>T_e = T_ei − 0.00253269 · Q_e
+K   = Q_e / T_e + 0.465926
+Q_c = T_ci · K / (1 − 1.269e-12 · K)
+P   = Q_c − Q_e
+P̂ = P + Σ_(t=1..400) g_t(z)</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>R_e</td><td>蒸发器换热热阻</td><td>0.00253269</td><td>K/kW</td></tr>
+<tr><td>R_c</td><td>冷凝器换热热阻</td><td>1.269e-12</td><td>K/kW</td></tr>
+<tr><td>ΔS_int</td><td>内部熵产（不可逆损失）</td><td>0.465926</td><td>kW/K</td></tr>
+<tr><td>n_estimators</td><td>残差树棵数</td><td>400</td><td>1</td></tr>
+<tr><td>max_depth</td><td>残差树最大深度</td><td>3</td><td>1</td></tr>
+<tr><td>learning_rate</td><td>学习率</td><td>0.05</td><td>1</td></tr>
+<tr><td>subsample</td><td>行采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>colsample_bytree</td><td>列采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>单调性天然满足：∂P/∂Q_e&gt;0、∂P/∂T_ci&gt;0、∂P/∂T_ei&lt;0，无需额外施加约束。</p></blockquote>
+<blockquote><p>辨识样本 7022 个；负荷下限 q_floor=1 kW（低于此值的样本不参与辨识）。</p></blockquote>
+<blockquote><p><strong>R_c 被辨识到 ≈0</strong>：该台的换热热阻项在本工况区间内不可辨识（温差摆幅太小），物理主干退化为熵产项主导的近似恒定 COP 关系，误差主要由残差学习器承担——对照下方 physics_only 一行。</p></blockquote>
+<blockquote><p>残差学习器可见 12 个标准化特征（顺序即包内 <code>preprocessing.yaml</code> 的 <code>feature_order</code>）；物理主干只用 Q_e / T_ei / T_ci 三列。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>lift</td><td>冷凝-蒸发温升 lift</td><td>37.6%</td></tr>
+<tr><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>14.9%</td></tr>
+<tr><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>12.7%</td></tr>
+<tr><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>10.5%</td></tr>
+<tr><td>cooling_load</td><td>制冷量</td><td>4.7%</td></tr>
+<tr><td>cwp_frequency</td><td>对应冷却泵频率</td><td>4.5%</td></tr>
+<tr><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>3.8%</td></tr>
+<tr><td>plr</td><td>部分负荷率</td><td>3.6%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>2.6%</td></tr>
+<tr><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>2.5%</td></tr>
+<tr><td>ambient_t</td><td>室外干球温度</td><td>1.4%</td></tr>
+<tr><td>hx_run_count</td><td>板换运行台数</td><td>1.2%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3646（8 折，跳过 0）</td><td>0.8059</td><td>4.85%</td><td>2.47%</td><td>3.80%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>2236</td><td>0.8672</td><td>8.17%</td><td>4.16%</td><td>6.15%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2185</td><td>0.4113</td><td>15.88%</td><td>8.84%</td><td>11.48%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.8059</td><td>0.1146</td><td>0.5367</td><td>0.9343</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>4.85%</td><td>1.91%</td><td>3.24%</td><td>9.58%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>2.47%</td><td>2.59%</td><td>-1.96%</td><td>8.00%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>3.80%</td><td>1.62%</td><td>2.10%</td><td>7.84%</td><td>8</td></tr>
+</tbody></table></div>
+<p><strong>只用物理主干（不加残差修正）时的表现</strong>，以及残差项占预测值的比重：</p>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th><th>残差占比</th></tr></thead><tbody>
+<tr><td>验证集（时间切分中段）</td><td>2236</td><td>0.802</td><td>9.98%</td><td>6.05%</td><td>7.96%</td><td>6.93%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2185</td><td>0.3371</td><td>16.85%</td><td>10.91%</td><td>11.99%</td><td>8.56%</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 3420、验证 0、测试 54（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0012 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>12.00%</td><td>4.85%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>3.50%</td><td>2.47%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=19, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 21:00</td><td>10444</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 3600 s / embargo 2700 s</td><td>7</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>e2af6681572c1784…</code>；物理检查违规率 0.00%（0 次 / 2185 样本）。</p>
+<h2 id="wx-chiller-power-ch02">3.2　wx-chiller-power-ch02　—　CH02 静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.2.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>chiller_model.v1</td></tr>
+<tr><td>建模对象</td><td>CH02</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>CH02 静态模型：纯 GBDT gbdt_static@v1 + 15 特征，rolling_cv R2=0.723 / CVRMSE=4.99% / NMBE=-0.51%</td></tr>
+<tr><td>研究目标</td><td>RG-0012 · 冷机功耗静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0058：CH02：纯 GBDT（gbdt_static@v1，15 特征）在打开物理校验后指标不变，且预测满足硬物理约束，可进入发布。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0085 / VIEW-0048</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHILLER_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>cooling_load</td><td>制冷量</td><td>kW</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>plr</td><td>部分负荷率</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>lift</td><td>冷凝-蒸发温升 lift</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>hx_run_count</td><td>板换运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_frequency</td><td>对应冷却泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_chw_return</td><td>冷冻水回水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_h</td><td>室外相对湿度</td><td>%</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (cooling_load, plr, t_evap_out, t_cond_in, lift, run_count, hx_run_count, ambient_t, f_cw_branch, f_chw_branch, cwp_frequency, chwp_frequency, t_cw_tower_out, t_chw_return, ambient_h)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = cooling_load
+        x_2 = plr
+        x_3 = t_evap_out
+        x_4 = t_cond_in
+        x_5 = lift
+        x_6 = run_count
+        x_7 = hx_run_count
+        x_8 = ambient_t
+        x_9 = f_cw_branch
+        x_10 = f_chw_branch
+        x_11 = cwp_frequency
+        x_12 = chwp_frequency
+        x_13 = t_cw_tower_out
+        x_14 = t_chw_return
+        x_15 = ambient_h</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>49.4%</td></tr>
+<tr><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>33.4%</td></tr>
+<tr><td>plr</td><td>部分负荷率</td><td>4.3%</td></tr>
+<tr><td>cooling_load</td><td>制冷量</td><td>4.2%</td></tr>
+<tr><td>lift</td><td>冷凝-蒸发温升 lift</td><td>4.0%</td></tr>
+<tr><td>t_chw_return</td><td>冷冻水回水温</td><td>1.0%</td></tr>
+<tr><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>0.8%</td></tr>
+<tr><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>0.6%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>0.5%</td></tr>
+<tr><td>cwp_frequency</td><td>对应冷却泵频率</td><td>0.4%</td></tr>
+<tr><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>0.4%</td></tr>
+<tr><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>0.3%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3739（8 折，跳过 0）</td><td>0.7229</td><td>4.99%</td><td>-0.51%</td><td>3.97%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>364</td><td>0.6552</td><td>13.69%</td><td>7.50%</td><td>10.54%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>6</td><td>-15.97</td><td>35.22%</td><td>31.83%</td><td>31.92%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.7229</td><td>0.1234</td><td>0.5247</td><td>0.8919</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>4.99%</td><td>1.01%</td><td>3.43%</td><td>6.64%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>-0.51%</td><td>2.09%</td><td>-3.99%</td><td>3.65%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>3.97%</td><td>0.82%</td><td>2.81%</td><td>5.07%</td><td>8</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2766、验证 1872、测试 2233（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0012 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>12.00%</td><td>4.99%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>3.50%</td><td>0.51%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=23, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>回滚目标: 1.0.0</td></tr>
+</tbody></table></div>
+<p>回滚目标版本：<code>1.0.0</code>。</p>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 22:00</td><td>10448</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>c2c9bf032d19c66c…</code>；物理检查违规率 0.00%（0 次 / 6 样本）。</p>
+<h3>版本历史</h3>
+<div class="tablewrap"><table><thead><tr><th>版本</th><th>状态</th><th>实验</th><th>形态</th><th>R²(滚动)</th><th>CVRMSE(滚动)</th><th>NMBE(滚动)</th><th>说明</th></tr></thead><tbody>
+<tr><td>1.0.0</td><td><span class="pill ">已弃用</span></td><td>EXP-0049</td><td>残差混合：Gordon-Ng 熵产模型</td><td>0.5878</td><td>5.79%</td><td>-1.43%</td><td>CH02 静态模型（判据面 rolling_cv）</td></tr>
+<tr><td>1.1.0</td><td><span class="pill ">候选</span></td><td>EXP-0072</td><td>纯梯度提升静态模型</td><td>0.7229</td><td>4.99%</td><td>-0.51%</td><td>CH02 静态模型：纯 GBDT（lab gbdt_static@v1）+15</td></tr>
+<tr><td>1.2.0</td><td><span class="pill pill-live">生产</span> <span class="pill pill-live">当前</span></td><td>EXP-0085</td><td>纯梯度提升静态模型</td><td>0.7229</td><td>4.99%</td><td>-0.51%</td><td>CH02 静态模型：纯 GBDT gbdt_static@v1 + 15 特征，</td></tr>
+</tbody></table></div>
+<h2 id="wx-chiller-power-ch03">3.3　wx-chiller-power-ch03　—　CH03 静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>chiller_model.v1</td></tr>
+<tr><td>建模对象</td><td>CH03</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>CH03 静态模型（判据面 rolling_cv）</td></tr>
+<tr><td>研究目标</td><td>RG-0012 · 冷机功耗静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0029：CH03：Gordon-Ng 打底 + XGBoost 残差（残差学习器可见两侧流量），滚动交叉验证折间均值 CVRMSE ≤ 0.12</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0050 / VIEW-0040</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHILLER_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>8e3ded0d</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>cooling_load</td><td>制冷量</td><td>kW</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>plr</td><td>部分负荷率</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>lift</td><td>冷凝-蒸发温升 lift</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>hx_run_count</td><td>板换运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_frequency</td><td>对应冷却泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：残差混合：Gordon-Ng 熵产模型（能量平衡 + 熵平衡 + 换热热阻，三参数） + XGBoost 残差修正</p>
+<pre><code>T_e = T_ei − Q_e · R_e                （蒸发温度，绝对温标 K）
+K   = Q_e / T_e + ΔS_int              （总熵流率 kW/K）
+Q_c = T_ci · K / (1 − R_c · K)        （冷凝排热 kW）
+P   = Q_c − Q_e                       （压缩机功率 kW）
+
+z_i = (x_i − mean_i) / std_i           （残差特征标准化，均值/标准差随包落盘）
+P̂   = P + Σ_(t=1..400) g_t(z)      （g_t 为回归树，P 是上面的物理主干输出）</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>T_e = T_ei − 2.914e-14 · Q_e
+K   = Q_e / T_e + 0.951949
+Q_c = T_ci · K / (1 − 0.00108726 · K)
+P   = Q_c − Q_e
+P̂ = P + Σ_(t=1..400) g_t(z)</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>R_e</td><td>蒸发器换热热阻</td><td>2.914e-14</td><td>K/kW</td></tr>
+<tr><td>R_c</td><td>冷凝器换热热阻</td><td>0.00108726</td><td>K/kW</td></tr>
+<tr><td>ΔS_int</td><td>内部熵产（不可逆损失）</td><td>0.951949</td><td>kW/K</td></tr>
+<tr><td>n_estimators</td><td>残差树棵数</td><td>400</td><td>1</td></tr>
+<tr><td>max_depth</td><td>残差树最大深度</td><td>3</td><td>1</td></tr>
+<tr><td>learning_rate</td><td>学习率</td><td>0.05</td><td>1</td></tr>
+<tr><td>subsample</td><td>行采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>colsample_bytree</td><td>列采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>单调性天然满足：∂P/∂Q_e&gt;0、∂P/∂T_ci&gt;0、∂P/∂T_ei&lt;0，无需额外施加约束。</p></blockquote>
+<blockquote><p>辨识样本 6826 个；负荷下限 q_floor=1 kW（低于此值的样本不参与辨识）。</p></blockquote>
+<blockquote><p><strong>R_e 被辨识到 ≈0</strong>：该台的换热热阻项在本工况区间内不可辨识（温差摆幅太小），物理主干退化为熵产项主导的近似恒定 COP 关系，误差主要由残差学习器承担——对照下方 physics_only 一行。</p></blockquote>
+<blockquote><p>残差学习器可见 12 个标准化特征（顺序即包内 <code>preprocessing.yaml</code> 的 <code>feature_order</code>）；物理主干只用 Q_e / T_ei / T_ci 三列。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>lift</td><td>冷凝-蒸发温升 lift</td><td>43.5%</td></tr>
+<tr><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>28.3%</td></tr>
+<tr><td>cooling_load</td><td>制冷量</td><td>4.9%</td></tr>
+<tr><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>4.3%</td></tr>
+<tr><td>plr</td><td>部分负荷率</td><td>3.6%</td></tr>
+<tr><td>hx_run_count</td><td>板换运行台数</td><td>3.2%</td></tr>
+<tr><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>3.2%</td></tr>
+<tr><td>cwp_frequency</td><td>对应冷却泵频率</td><td>2.5%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>1.9%</td></tr>
+<tr><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>1.6%</td></tr>
+<tr><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>1.5%</td></tr>
+<tr><td>ambient_t</td><td>室外干球温度</td><td>1.5%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3732（8 折，跳过 0）</td><td>-0.09844</td><td>7.19%</td><td>3.40%</td><td>5.56%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>2236</td><td>0.8077</td><td>11.55%</td><td>1.68%</td><td>9.70%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>1949</td><td>0.2866</td><td>18.67%</td><td>7.27%</td><td>12.43%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>-0.09844</td><td>1.954</td><td>-5.212</td><td>0.8883</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>7.19%</td><td>1.26%</td><td>4.59%</td><td>8.49%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>3.40%</td><td>2.32%</td><td>0.54%</td><td>7.35%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>5.56%</td><td>1.27%</td><td>3.80%</td><td>7.67%</td><td>8</td></tr>
+</tbody></table></div>
+<p><strong>只用物理主干（不加残差修正）时的表现</strong>，以及残差项占预测值的比重：</p>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th><th>残差占比</th></tr></thead><tbody>
+<tr><td>验证集（时间切分中段）</td><td>2236</td><td>0.6305</td><td>16.01%</td><td>-4.18%</td><td>15.45%</td><td>13.56%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>1949</td><td>-0.08228</td><td>23.00%</td><td>-16.56%</td><td>21.93%</td><td>27.03%</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 3515、验证 0、测试 290（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0012 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>12.00%</td><td>7.19%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>3.50%</td><td>3.40%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=21, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 21:00</td><td>10444</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 3600 s / embargo 2700 s</td><td>7</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>86a3367684cdd2fe…</code>；物理检查违规率 0.00%（0 次 / 1949 样本）。</p>
+<h2 id="wx-chiller-power-ch04">3.4　wx-chiller-power-ch04　—　CH04 静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.1.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>chiller_model.v1</td></tr>
+<tr><td>建模对象</td><td>CH04</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>CH04 静态模型：hybrid Gordon-Ng + XGBoost 残差 + 15 特征，rolling_cv R2=0.641 / CVRMSE=8.37% / NMBE=-0.14%</td></tr>
+<tr><td>研究目标</td><td>RG-0012 · 冷机功耗静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0049：CH04：runtime_accum 不得作为自变量（累计运行时长是时间代理，what-if 用途下不可操纵且必然外推出训练区间）。从 EXP-0056 的16 特征里摘掉它、其余不变，复核当时的 NMBE 改善是否依赖它。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0070 / VIEW-0050</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHILLER_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>0b7c1dc5</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>cooling_load</td><td>制冷量</td><td>kW</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>plr</td><td>部分负荷率</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>lift</td><td>冷凝-蒸发温升 lift</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>hx_run_count</td><td>板换运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_frequency</td><td>对应冷却泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_chw_return</td><td>冷冻水回水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_h</td><td>室外相对湿度</td><td>%</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：残差混合：Gordon-Ng 熵产模型（能量平衡 + 熵平衡 + 换热热阻，三参数） + XGBoost 残差修正</p>
+<pre><code>T_e = T_ei − Q_e · R_e                （蒸发温度，绝对温标 K）
+K   = Q_e / T_e + ΔS_int              （总熵流率 kW/K）
+Q_c = T_ci · K / (1 − R_c · K)        （冷凝排热 kW）
+P   = Q_c − Q_e                       （压缩机功率 kW）
+
+z_i = (x_i − mean_i) / std_i           （残差特征标准化，均值/标准差随包落盘）
+P̂   = P + Σ_(t=1..400) g_t(z)      （g_t 为回归树，P 是上面的物理主干输出）</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>T_e = T_ei − 2.526e-17 · Q_e
+K   = Q_e / T_e + 1.45822
+Q_c = T_ci · K / (1 − 9.052e-16 · K)
+P   = Q_c − Q_e
+P̂ = P + Σ_(t=1..400) g_t(z)</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>R_e</td><td>蒸发器换热热阻</td><td>2.526e-17</td><td>K/kW</td></tr>
+<tr><td>R_c</td><td>冷凝器换热热阻</td><td>9.052e-16</td><td>K/kW</td></tr>
+<tr><td>ΔS_int</td><td>内部熵产（不可逆损失）</td><td>1.45822</td><td>kW/K</td></tr>
+<tr><td>n_estimators</td><td>残差树棵数</td><td>400</td><td>1</td></tr>
+<tr><td>max_depth</td><td>残差树最大深度</td><td>3</td><td>1</td></tr>
+<tr><td>learning_rate</td><td>学习率</td><td>0.05</td><td>1</td></tr>
+<tr><td>subsample</td><td>行采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>colsample_bytree</td><td>列采样比例</td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>单调性天然满足：∂P/∂Q_e&gt;0、∂P/∂T_ci&gt;0、∂P/∂T_ei&lt;0，无需额外施加约束。</p></blockquote>
+<blockquote><p>辨识样本 8286 个；负荷下限 q_floor=1 kW（低于此值的样本不参与辨识）。</p></blockquote>
+<blockquote><p><strong>R_e、R_c 被辨识到 ≈0</strong>：该台的换热热阻项在本工况区间内不可辨识（温差摆幅太小），物理主干退化为熵产项主导的近似恒定 COP 关系，误差主要由残差学习器承担——对照下方 physics_only 一行。</p></blockquote>
+<blockquote><p>残差学习器可见 15 个标准化特征（顺序即包内 <code>preprocessing.yaml</code> 的 <code>feature_order</code>）；物理主干只用 Q_e / T_ei / T_ci 三列。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>42.3%</td></tr>
+<tr><td>lift</td><td>冷凝-蒸发温升 lift</td><td>18.2%</td></tr>
+<tr><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>8.6%</td></tr>
+<tr><td>cooling_load</td><td>制冷量</td><td>5.1%</td></tr>
+<tr><td>cwp_frequency</td><td>对应冷却泵频率</td><td>4.9%</td></tr>
+<tr><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>3.3%</td></tr>
+<tr><td>plr</td><td>部分负荷率</td><td>3.3%</td></tr>
+<tr><td>t_chw_return</td><td>冷冻水回水温</td><td>3.1%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>2.8%</td></tr>
+<tr><td>ambient_h</td><td>室外相对湿度</td><td>2.4%</td></tr>
+<tr><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>2.0%</td></tr>
+<tr><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>1.9%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>4941（8 折，跳过 0）</td><td>0.6413</td><td>8.37%</td><td>-0.14%</td><td>5.79%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>1873</td><td>0.8486</td><td>9.38%</td><td>-1.33%</td><td>7.64%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2182</td><td>0.1539</td><td>17.74%</td><td>-3.30%</td><td>14.38%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.6413</td><td>0.06209</td><td>0.5412</td><td>0.7193</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>8.37%</td><td>2.18%</td><td>6.00%</td><td>12.92%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>-0.14%</td><td>3.02%</td><td>-6.13%</td><td>4.99%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>5.79%</td><td>1.62%</td><td>3.88%</td><td>9.46%</td><td>8</td></tr>
+</tbody></table></div>
+<p><strong>只用物理主干（不加残差修正）时的表现</strong>，以及残差项占预测值的比重：</p>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th><th>残差占比</th></tr></thead><tbody>
+<tr><td>验证集（时间切分中段）</td><td>1873</td><td>0.3961</td><td>18.74%</td><td>-7.02%</td><td>18.17%</td><td>15.08%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2182</td><td>-5.113</td><td>47.69%</td><td>-44.62%</td><td>49.09%</td><td>41.48%</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2151、验证 363、测试 57（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0012 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>12.00%</td><td>8.37%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>3.50%</td><td>0.14%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=25, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>回滚目标: 1.0.0</td></tr>
+</tbody></table></div>
+<p>回滚目标版本：<code>1.0.0</code>。</p>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 22:00</td><td>10448</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>bc8d15ac535cb4d7…</code>；物理检查违规率 0.00%（0 次 / 2182 样本）。</p>
+<h3>版本历史</h3>
+<div class="tablewrap"><table><thead><tr><th>版本</th><th>状态</th><th>实验</th><th>形态</th><th>R²(滚动)</th><th>CVRMSE(滚动)</th><th>NMBE(滚动)</th><th>说明</th></tr></thead><tbody>
+<tr><td>1.0.0</td><td><span class="pill ">已弃用</span></td><td>EXP-0051</td><td>残差混合：Gordon-Ng 熵产模型</td><td>0.5796</td><td>9.03%</td><td>0.22%</td><td>CH04 静态模型（判据面 rolling_cv）</td></tr>
+<tr><td>1.1.0</td><td><span class="pill pill-live">生产</span> <span class="pill pill-live">当前</span></td><td>EXP-0070</td><td>残差混合：Gordon-Ng 熵产模型</td><td>0.6413</td><td>8.37%</td><td>-0.14%</td><td>CH04 静态模型：hybrid Gordon-Ng + XGBoost 残差</td></tr>
+</tbody></table></div>
+<h2 id="wx-chiller-power-static">3.5　wx-chiller-power-static　—　冷机功耗静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>chiller_model.v1</td></tr>
+<tr><td>建模对象</td><td>CH02</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>冷机功耗静态模型（what-if 用途）；EXP-0058 的干净重跑，原实验受实验室目标列泄漏影响，指标不可用</td></tr>
+<tr><td>研究目标</td><td>RG-0012 · 冷机功耗静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0037：CH02：去掉物理主干、直接用梯度提升在白名单特征上回归（实验室模块 gbdt_static@v1），应优于 hybrid —— 蒸发侧温差摆幅仅 0.4 K 使热阻不可辨识（手册 §7.11），主干只贡献近似常数偏移，残差学习器还得先学回来。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0176 / VIEW-0044</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHILLER_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>cooling_load</td><td>制冷量</td><td>kW</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>plr</td><td>部分负荷率</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>t_evap_out</td><td>蒸发器出水温（冷冻水供水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>lift</td><td>冷凝-蒸发温升 lift</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>hx_run_count</td><td>板换运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>m3/h</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_frequency</td><td>对应冷却泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_chw_return</td><td>冷冻水回水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_h</td><td>室外相对湿度</td><td>%</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>runtime_accum</td><td>累计运行时长</td><td>s</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (cooling_load, plr, t_evap_out, t_cond_in, lift, run_count, hx_run_count, ambient_t, f_cw_branch, f_chw_branch, cwp_frequency, chwp_frequency, t_cw_tower_out, t_chw_return, ambient_h, runtime_accum)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = cooling_load
+        x_2 = plr
+        x_3 = t_evap_out
+        x_4 = t_cond_in
+        x_5 = lift
+        x_6 = run_count
+        x_7 = hx_run_count
+        x_8 = ambient_t
+        x_9 = f_cw_branch
+        x_10 = f_chw_branch
+        x_11 = cwp_frequency
+        x_12 = chwp_frequency
+        x_13 = t_cw_tower_out
+        x_14 = t_chw_return
+        x_15 = ambient_h
+        x_16 = runtime_accum</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>t_cond_in</td><td>冷凝器进水温（冷却水回水）</td><td>51.4%</td></tr>
+<tr><td>t_cw_tower_out</td><td>冷却塔出水温</td><td>34.5%</td></tr>
+<tr><td>cooling_load</td><td>制冷量</td><td>4.6%</td></tr>
+<tr><td>lift</td><td>冷凝-蒸发温升 lift</td><td>3.8%</td></tr>
+<tr><td>t_chw_return</td><td>冷冻水回水温</td><td>1.0%</td></tr>
+<tr><td>plr</td><td>部分负荷率</td><td>0.8%</td></tr>
+<tr><td>chwp_frequency</td><td>对应冷冻泵频率</td><td>0.7%</td></tr>
+<tr><td>runtime_accum</td><td>累计运行时长</td><td>0.6%</td></tr>
+<tr><td>f_cw_branch</td><td>本机冷却水支路流量</td><td>0.5%</td></tr>
+<tr><td>cwp_frequency</td><td>对应冷却泵频率</td><td>0.4%</td></tr>
+<tr><td>f_chw_branch</td><td>本机冷冻水支路流量</td><td>0.3%</td></tr>
+<tr><td>hx_run_count</td><td>板换运行台数</td><td>0.3%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3739（8 折，跳过 0）</td><td>0.7001</td><td>5.28%</td><td>-0.40%</td><td>4.18%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>364</td><td>0.748</td><td>11.70%</td><td>-0.34%</td><td>10.48%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>6</td><td>-8.95</td><td>26.97%</td><td>22.29%</td><td>22.40%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.7001</td><td>0.1042</td><td>0.5869</td><td>0.8662</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>5.28%</td><td>0.97%</td><td>3.90%</td><td>6.69%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>-0.40%</td><td>2.63%</td><td>-4.59%</td><td>3.87%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>4.18%</td><td>0.86%</td><td>3.12%</td><td>5.50%</td><td>8</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2766、验证 1872、测试 2233（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0012 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>12.00%</td><td>5.28%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>3.50%</td><td>0.40%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=24, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 22:00</td><td>10448</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>226cb5c42188a3f5…</code>；物理检查违规率 0.00%（0 次 / 6 样本）。</p>
+<h2 id="wx-chwp-flow-total">3.6　wx-chwp-flow-total　—　冷冻水泵群总流量</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>pump_model.v1</td></tr>
+<tr><td>建模对象</td><td>CHWPBANK</td></tr>
+<tr><td>预测目标</td><td>flow_total（m3/h）</td></tr>
+<tr><td>一句话说明</td><td>冷冻水泵群总流量</td></tr>
+<tr><td>研究目标</td><td>RG-0020 · 冷冻水泵群总流量模型（判据面=滚动交叉验证，R²≥0.90）</td></tr>
+<tr><td>假设</td><td>H-0104：用已验证的静态 GBDT 实验室模型 gbdt_static@v1 对 VIEW-0059 全部九维候选输入建模，验证其能否在 30 天滚动判据面上把 CVRMSE 从 EXP-0130 的 2.81% 压到约 2.4% 以内，从而满足 R²≥0.90 且 |NMBE|≤0.02。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0131 / VIEW-0059</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CHWP_MODEL@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>power_total</td><td>水泵群总功耗</td><td>kW</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>freq_mean</td><td>水泵平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>freq_max</td><td>水泵最高频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_supply</td><td>供水温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_return</td><td>回水温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>delta_t</td><td>供回水温差</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>chiller_run_count</td><td>冷机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>flow_total</td><td>水泵群总流量</td><td>m3/h</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (power_total, run_count, freq_mean, freq_max, t_supply, t_return, delta_t, chiller_run_count, ambient_t)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = power_total
+        x_2 = run_count
+        x_3 = freq_mean
+        x_4 = freq_max
+        x_5 = t_supply
+        x_6 = t_return
+        x_7 = delta_t
+        x_8 = chiller_run_count
+        x_9 = ambient_t</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260808</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>power_total</td><td>水泵群总功耗</td><td>61.8%</td></tr>
+<tr><td>freq_mean</td><td>水泵平均频率</td><td>21.7%</td></tr>
+<tr><td>freq_max</td><td>水泵最高频率</td><td>5.2%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>5.1%</td></tr>
+<tr><td>chiller_run_count</td><td>冷机运行台数</td><td>3.8%</td></tr>
+<tr><td>t_supply</td><td>供水温度</td><td>0.8%</td></tr>
+<tr><td>delta_t</td><td>供回水温差</td><td>0.8%</td></tr>
+<tr><td>ambient_t</td><td>室外干球温度</td><td>0.6%</td></tr>
+<tr><td>t_return</td><td>回水温度</td><td>0.2%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>22896（8 折，跳过 0）</td><td>-0.9594</td><td>2.46%</td><td>0.59%</td><td>1.76%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>4908</td><td>0.9274</td><td>2.38%</td><td>0.12%</td><td>1.81%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>4913</td><td>0.8871</td><td>1.94%</td><td>0.82%</td><td>1.41%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>-0.9594</td><td>1.932</td><td>-4.68</td><td>0.9708</td><td>8</td></tr>
+<tr><td>CVRMSE</td><td>2.46%</td><td>0.84%</td><td>1.39%</td><td>4.13%</td><td>8</td></tr>
+<tr><td>NMBE</td><td>0.59%</td><td>1.35%</td><td>-1.86%</td><td>2.75%</td><td>8</td></tr>
+<tr><td>MAPE</td><td>1.76%</td><td>0.69%</td><td>0.87%</td><td>3.17%</td><td>8</td></tr>
+<tr><td>RMSE</td><td>75.3</td><td>27.08</td><td>37.82</td><td>128.3</td><td>8</td></tr>
+<tr><td>MAE</td><td>54.06</td><td>22.36</td><td>27.11</td><td>100</td><td>8</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2、验证 1、测试 0（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0020 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>3.50%</td><td>2.46%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>0.59%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=16, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-09-15 06:45</td><td>22922</td></tr>
+<tr><td>验证 validate</td><td>2025-09-15 07:30 → 2025-11-05 10:45</td><td>4909</td></tr>
+<tr><td>测试 A</td><td>2025-11-05 10:45 → 2025-12-26 15:30</td><td>4913</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>1ca2fa98de1adf45…</code>；物理检查违规率 0.00%（0 次 / 4913 样本）。</p>
+<h2 id="wx-ct-approach">3.7　wx-ct-approach　—　冷却塔逼近度模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>ct_model.v1</td></tr>
+<tr><td>建模对象</td><td>CTBANK</td></tr>
+<tr><td>预测目标</td><td>approach（K）</td></tr>
+<tr><td>一句话说明</td><td>冷却塔逼近度模型（制冷季）：Merkel/NTU 主干 + 偏差校正（lab approach_bias_correction_v1@v1），rolling_cv 4 折 R2=0.959 / CVRMSE=4.15% / NMBE=-1.00%</td></tr>
+<tr><td>研究目标</td><td>RG-0019 · 冷却塔逼近度模型·制冷季（判据面=滚动交叉验证，R²≥0.90）</td></tr>
+<tr><td>假设</td><td>H-0099：在 VIEW-0058 的 Merkel/NTU 主干不可解释的残差上，加入以湿球温度与冷却水流量为主的多项式偏置校正项，验证能否将 |NMBE| 从 0.047 压到 ≤0.02 且 R² 不低于 0.90。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0126 / VIEW-0058</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CT_SEASON@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>t_ct_in</td><td>冷却塔群进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_total</td><td>冷却水总流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_wetbulb</td><td>室外湿球温度</td><td>Cel</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_freq_mean</td><td>风机平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_run_count</td><td>风机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>approach</td><td>逼近度（出水温 − 湿球温）</td><td>K</td><td>float</td><td>estimated</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：二阶多项式（含全部两两交互）岭回归 —— 实验室模块 approach_bias_correction_v1@v1</p>
+<pre><code>d(x) = [1, x_1…x_5, x_i·x_j (1 ≤ i ≤ j ≤ 5)]      → 1 + 5 + 15 = 21 项
+z_k  = (d_k − μ_k) / (σ_k + 1e−9)                  （k = 1…20，常数项不缩放）
+approach = θ_0 + Σ_(k=1..20) θ_k · z_k
+
+拟合：(ZᵀZ + λI)·θ = Zᵀy，λ = 1e−3     （闭式岭回归，无迭代、无随机性）</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>x = (t_ct_in, f_cw_total, t_wetbulb, fan_freq_mean, fan_run_count)
+θ_0 = 5.37239 K</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>θ_0</td><td>常数项（不参与标准化）</td><td>5.37239</td><td>K</td></tr>
+<tr><td>θ_1</td><td>t_ct_in 项系数（标准化后）</td><td>3.16983</td><td>K</td></tr>
+<tr><td>μ,σ_1</td><td>t_ct_in 训练集均值 / 标准差</td><td>30.316 / 2.90665</td><td>—</td></tr>
+<tr><td>θ_2</td><td>f_cw_total 项系数（标准化后）</td><td>1.21917</td><td>K</td></tr>
+<tr><td>μ,σ_2</td><td>f_cw_total 训练集均值 / 标准差</td><td>2780.26 / 371.37</td><td>—</td></tr>
+<tr><td>θ_3</td><td>t_wetbulb 项系数（标准化后）</td><td>-2.98557</td><td>K</td></tr>
+<tr><td>μ,σ_3</td><td>t_wetbulb 训练集均值 / 标准差</td><td>18.8968 / 3.85248</td><td>—</td></tr>
+<tr><td>θ_4</td><td>fan_freq_mean 项系数（标准化后）</td><td>-0.852082</td><td>K</td></tr>
+<tr><td>μ,σ_4</td><td>fan_freq_mean 训练集均值 / 标准差</td><td>47.3067 / 1.48243</td><td>—</td></tr>
+<tr><td>θ_5</td><td>fan_run_count 项系数（标准化后）</td><td>-0.509314</td><td>K</td></tr>
+<tr><td>μ,σ_5</td><td>fan_run_count 训练集均值 / 标准差</td><td>9.05466 / 0.412771</td><td>—</td></tr>
+<tr><td>θ_6</td><td>t_ct_in² 项系数（标准化后）</td><td>0.0165947</td><td>K</td></tr>
+<tr><td>μ,σ_6</td><td>t_ct_in² 训练集均值 / 标准差</td><td>927.506 / 171.05</td><td>—</td></tr>
+<tr><td>θ_7</td><td>t_ct_in · f_cw_total 项系数（标准化后）</td><td>2.33849</td><td>K</td></tr>
+<tr><td>μ,σ_7</td><td>t_ct_in · f_cw_total 训练集均值 / 标准差</td><td>84597.5 / 15092.8</td><td>—</td></tr>
+<tr><td>θ_8</td><td>t_ct_in · t_wetbulb 项系数（标准化后）</td><td>-0.933729</td><td>K</td></tr>
+<tr><td>μ,σ_8</td><td>t_ct_in · t_wetbulb 训练集均值 / 标准差</td><td>583.058 / 163.755</td><td>—</td></tr>
+<tr><td>θ_9</td><td>t_ct_in · fan_freq_mean 项系数（标准化后）</td><td>-0.274162</td><td>K</td></tr>
+<tr><td>μ,σ_9</td><td>t_ct_in · fan_freq_mean 训练集均值 / 标准差</td><td>1434.81 / 149.952</td><td>—</td></tr>
+<tr><td>θ_10</td><td>t_ct_in · fan_run_count 项系数（标准化后）</td><td>-1.35526</td><td>K</td></tr>
+<tr><td>μ,σ_10</td><td>t_ct_in · fan_run_count 训练集均值 / 标准差</td><td>274.426 / 28.3496</td><td>—</td></tr>
+<tr><td>θ_11</td><td>f_cw_total² 项系数（标准化后）</td><td>-0.504338</td><td>K</td></tr>
+<tr><td>μ,σ_11</td><td>f_cw_total² 训练集均值 / 标准差</td><td>7.86777e+06 / 2.03594e+06</td><td>—</td></tr>
+<tr><td>θ_12</td><td>f_cw_total · t_wetbulb 项系数（标准化后）</td><td>-1.90975</td><td>K</td></tr>
+<tr><td>μ,σ_12</td><td>f_cw_total · t_wetbulb 训练集均值 / 标准差</td><td>53308.6 / 14674.7</td><td>—</td></tr>
+<tr><td>θ_13</td><td>f_cw_total · fan_freq_mean 项系数（标准化后）</td><td>-0.337294</td><td>K</td></tr>
+<tr><td>μ,σ_13</td><td>f_cw_total · fan_freq_mean 训练集均值 / 标准差</td><td>131710 / 18848.3</td><td>—</td></tr>
+<tr><td>θ_14</td><td>f_cw_total · fan_run_count 项系数（标准化后）</td><td>-0.44652</td><td>K</td></tr>
+<tr><td>μ,σ_14</td><td>f_cw_total · fan_run_count 训练集均值 / 标准差</td><td>25171.4 / 3540.16</td><td>—</td></tr>
+<tr><td>θ_15</td><td>t_wetbulb² 项系数（标准化后）</td><td>0.60814</td><td>K</td></tr>
+<tr><td>μ,σ_15</td><td>t_wetbulb² 训练集均值 / 标准差</td><td>371.93 / 139.009</td><td>—</td></tr>
+<tr><td>θ_16</td><td>t_wetbulb · fan_freq_mean 项系数（标准化后）</td><td>-0.75332</td><td>K</td></tr>
+<tr><td>μ,σ_16</td><td>t_wetbulb · fan_freq_mean 训练集均值 / 标准差</td><td>895.827 / 189.459</td><td>—</td></tr>
+<tr><td>θ_17</td><td>t_wetbulb · fan_run_count 项系数（标准化后）</td><td>1.36582</td><td>K</td></tr>
+<tr><td>μ,σ_17</td><td>t_wetbulb · fan_run_count 训练集均值 / 标准差</td><td>171.05 / 35.511</td><td>—</td></tr>
+<tr><td>θ_18</td><td>fan_freq_mean² 项系数（标准化后）</td><td>0.275295</td><td>K</td></tr>
+<tr><td>μ,σ_18</td><td>fan_freq_mean² 训练集均值 / 标准差</td><td>2240.12 / 126.392</td><td>—</td></tr>
+<tr><td>θ_19</td><td>fan_freq_mean · fan_run_count 项系数（标准化后）</td><td>1.29301</td><td>K</td></tr>
+<tr><td>μ,σ_19</td><td>fan_freq_mean · fan_run_count 训练集均值 / 标准差</td><td>428.356 / 23.908</td><td>—</td></tr>
+<tr><td>θ_20</td><td>fan_run_count² 项系数（标准化后）</td><td>-0.120379</td><td>K</td></tr>
+<tr><td>μ,σ_20</td><td>fan_run_count² 训练集均值 / 标准差</td><td>82.1573 / 8.62979</td><td>—</td></tr>
+</tbody></table></div>
+<blockquote><p><strong>命名与实现不一致</strong>：模型包 <code>description</code> 写的是「Merkel/NTU 主干 + 偏差校正」（沿用假设 H-0099 的措辞），但落盘的 <code>lab_source.py</code> 里没有 Merkel 主干——实际形态就是上面这个 21 项二阶多项式岭回归。以本节公式为准。</p></blockquote>
+<blockquote><p>逼近度 approach = t_ct_out − t_wetbulb 是派生量；预测它再加上湿球温度即得冷却塔出水温。</p></blockquote>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>10434（4 折，跳过 0）</td><td>0.9586</td><td>4.15%</td><td>-1.00%</td><td>3.46%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>2236</td><td>0.9751</td><td>4.00%</td><td>-2.49%</td><td>3.29%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2238</td><td>0.9317</td><td>5.86%</td><td>-4.97%</td><td>5.59%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.9586</td><td>0.01108</td><td>0.9395</td><td>0.9661</td><td>4</td></tr>
+<tr><td>CVRMSE</td><td>4.15%</td><td>0.26%</td><td>3.73%</td><td>4.43%</td><td>4</td></tr>
+<tr><td>NMBE</td><td>-1.00%</td><td>2.16%</td><td>-3.16%</td><td>1.91%</td><td>4</td></tr>
+<tr><td>MAPE</td><td>3.46%</td><td>0.45%</td><td>2.80%</td><td>3.98%</td><td>4</td></tr>
+<tr><td>RMSE</td><td>0.2446</td><td>0.0502</td><td>0.1893</td><td>0.2977</td><td>4</td></tr>
+<tr><td>MAE</td><td>0.1956</td><td>0.04797</td><td>0.1469</td><td>0.2446</td><td>4</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2、验证 0、测试 1（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0019 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>1.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>R² ≥</td><td>0.9</td><td>0.9586</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=11, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2025-04-11 02:30 → 2025-08-27 22:00</td><td>10448</td></tr>
+<tr><td>验证 validate</td><td>2025-08-27 22:45 → 2025-09-20 06:00</td><td>2236</td></tr>
+<tr><td>测试 A</td><td>2025-09-20 06:00 → 2025-10-16 21:30</td><td>2239</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>0ae42afa6f689e60…</code>；物理检查违规率 0.00%（0 次 / 2238 样本）。</p>
+<h2 id="wx-ct-fan-power-total">3.8　wx-ct-fan-power-total　—　冷却塔风机群总功耗</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>ct_model.v1</td></tr>
+<tr><td>建模对象</td><td>CTBANK</td></tr>
+<tr><td>预测目标</td><td>fan_power_total（kW）</td></tr>
+<tr><td>一句话说明</td><td>冷却塔风机群总功耗</td></tr>
+<tr><td>研究目标</td><td>RG-0017 · 冷却塔风机总功耗模型（判据面=滚动交叉验证，R²≥0.90）</td></tr>
+<tr><td>假设</td><td>H-0065：总风机功耗由运行台数与单台频率三次方非线性交互决定，纯静态 GBDT（lab gbdt_static@v1）可表达该非线性与台数分段，验证其能否把 rolling_cv R² 从线性 ridge 的 0.295 提升到 0.90 门槛。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0092 / VIEW-0054</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CT_MODEL@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>fan_freq_mean</td><td>风机平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_freq_max</td><td>风机最高频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_run_count</td><td>风机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>fan_power_total</td><td>风机群总功耗</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (fan_freq_mean, fan_freq_max, fan_run_count)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = fan_freq_mean
+        x_2 = fan_freq_max
+        x_3 = fan_run_count</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260808</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>fan_freq_mean</td><td>风机平均频率</td><td>67.5%</td></tr>
+<tr><td>fan_freq_max</td><td>风机最高频率</td><td>26.7%</td></tr>
+<tr><td>fan_run_count</td><td>风机运行台数</td><td>5.8%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>8027（12 折，跳过 0）</td><td>0.055</td><td>2.43%</td><td>-1.07%</td><td>1.98%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>4960</td><td>0.9326</td><td>6.56%</td><td>4.59%</td><td>4.32%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>4963</td><td>0.9908</td><td>3.55%</td><td>-0.68%</td><td>2.43%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.055</td><td>1.507</td><td>-3.917</td><td>0.9894</td><td>12</td></tr>
+<tr><td>CVRMSE</td><td>2.43%</td><td>0.85%</td><td>1.16%</td><td>4.53%</td><td>12</td></tr>
+<tr><td>NMBE</td><td>-1.07%</td><td>1.22%</td><td>-3.47%</td><td>1.04%</td><td>12</td></tr>
+<tr><td>MAPE</td><td>1.98%</td><td>0.69%</td><td>0.88%</td><td>3.73%</td><td>12</td></tr>
+<tr><td>RMSE</td><td>7.146</td><td>2.486</td><td>3.548</td><td>13.38</td><td>12</td></tr>
+<tr><td>MAE</td><td>5.678</td><td>2.007</td><td>2.704</td><td>10.79</td><td>12</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 0、验证 0、测试 0（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0017 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>5.00%</td><td>2.43%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>1.07%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=6, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-09-17 18:00</td><td>23159</td></tr>
+<tr><td>验证 validate</td><td>2025-09-17 18:45 → 2025-11-08 10:45</td><td>4960</td></tr>
+<tr><td>测试 A</td><td>2025-11-08 10:45 → 2025-12-30 21:15</td><td>4963</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>1ad5d7a6990474e6…</code>；物理检查违规率 0.00%（0 次 / 4963 样本）。</p>
+<h2 id="wx-ct-fan-power-unit">3.9　wx-ct-fan-power-unit　—　逐台冷却塔风机功耗</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.1.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>ct_fan_unit.v1</td></tr>
+<tr><td>建模对象</td><td>CTF0101, CTF0102, CTF0103, CTF0201, CTF0202, CTF0203, CTF0301, CTF0302, CTF0303, CTF0401, CTF0402, CTF0403</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>逐台冷却塔风机功耗（频率 + 湿空气密度修正 → 功耗），12 台</td></tr>
+<tr><td>研究目标</td><td>RG-0028 · 逐台冷却塔风机功耗模型（频率→功耗）</td></tr>
+<tr><td>假设</td><td>H-0143：验证湿空气密度修正（ρ(T,RH)/ρ_ref 乘在频率幂律项上）能否降低滚动 CVRMSE 并压低夏季 NMBE 高估。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0170 / VIEW-0071</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CT_FAN_UNIT@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>frequency</td><td>本台变频器频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>tower_fan_count</td><td>同塔运行风机数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>tower_freq_mean</td><td>同塔风机平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>bank_fan_count</td><td>全场运行风机数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>bank_freq_mean</td><td>全场风机平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_h</td><td>室外相对湿度</td><td>%</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：频率幂律 + 湿空气密度修正 —— 实验室模块 ct_fan_density_corrected_v1@v1</p>
+<pre><code>e_s(T)  = 610.94 · exp(17.625·T / (T + 243.04))       （饱和水汽压 Pa，Magnus 式）
+p_v     = RH/100 · e_s(T)                             （水汽分压 Pa）
+ρ(T,RH) = (p − p_v)/(287.058·(T+273.15))
+          + p_v/(461.495·(T+273.15))                  （湿空气密度 kg/m³，p = 101325 Pa 定值）
+P̂       = a · (f/50)^b · ρ(T,RH)/ρ_ref + c            （单台风机功率 kW）</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>P̂ = 39.3644 · (f/50)^2.7 · ρ(T,RH)/1.22492 + (-0.106334)</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>a</td><td>50 Hz 基准功率系数</td><td>39.3644</td><td>kW</td></tr>
+<tr><td>b</td><td>频率指数（相似定律理论值 3）</td><td>2.7</td><td>1</td></tr>
+<tr><td>c</td><td>常数偏置</td><td>-0.106334</td><td>kW</td></tr>
+<tr><td>ρ_ref</td><td>训练集湿空气密度均值</td><td>1.22492</td><td>kg/m³</td></tr>
+<tr><td>b 搜索网格</td><td>[b_min, b_max] × 步数</td><td>[1.5, 4] × 201</td><td>—</td></tr>
+</tbody></table></div>
+<blockquote><p>拟合方式：b 在网格上枚举，每个 b 下对 (a, c) 做最小二乘，取 RMSE 最小者；全过程无随机数，<code>seed</code> 不影响结果。</p></blockquote>
+<blockquote><p>辨识出的 b = 2.7 低于相似定律理论值 3 —— 变频器与电机效率随频率下降，实测幂次通常落在 2.5~2.8。</p></blockquote>
+<blockquote><p><strong>12 台风机共用一组 (a, b, c)</strong>：模型不区分 object_id，逐台差异全部落进残差（见逐台指标表）。</p></blockquote>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>208730（9 折，跳过 0）</td><td>0.5774</td><td>6.08%</td><td>-0.22%</td><td>4.82%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>44768</td><td>0.9578</td><td>5.41%</td><td>3.51%</td><td>3.89%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>44317</td><td>0.9867</td><td>4.51%</td><td>-0.83%</td><td>3.42%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.5774</td><td>0.6272</td><td>-0.9197</td><td>0.9883</td><td>9</td></tr>
+<tr><td>CVRMSE</td><td>6.08%</td><td>1.96%</td><td>2.89%</td><td>9.24%</td><td>9</td></tr>
+<tr><td>NMBE</td><td>-0.22%</td><td>2.73%</td><td>-6.26%</td><td>3.34%</td><td>9</td></tr>
+<tr><td>MAPE</td><td>4.82%</td><td>1.81%</td><td>2.20%</td><td>7.96%</td><td>9</td></tr>
+<tr><td>RMSE</td><td>1.681</td><td>0.9146</td><td>0.2907</td><td>2.913</td><td>9</td></tr>
+<tr><td>MAE</td><td>1.34</td><td>0.7626</td><td>0.2166</td><td>2.407</td><td>9</td></tr>
+</tbody></table></div>
+<p><strong>验证集（时间切分中段） 上的逐台拆分</strong></p>
+<div class="tablewrap"><table><thead><tr><th>对象</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>CTF0101</td><td>4729</td><td>0.9625</td><td>5.26%</td><td>3.91%</td><td>3.67%</td></tr>
+<tr><td>CTF0102</td><td>4727</td><td>0.975</td><td>4.22%</td><td>2.28%</td><td>2.90%</td></tr>
+<tr><td>CTF0103</td><td>4726</td><td>0.9515</td><td>5.91%</td><td>4.80%</td><td>4.36%</td></tr>
+<tr><td>CTF0201</td><td>1868</td><td>0.9775</td><td>3.88%</td><td>-2.64%</td><td>3.32%</td></tr>
+<tr><td>CTF0202</td><td>1868</td><td>0.937</td><td>5.90%</td><td>5.08%</td><td>4.73%</td></tr>
+<tr><td>CTF0203</td><td>1868</td><td>0.9583</td><td>4.78%</td><td>-1.45%</td><td>3.06%</td></tr>
+<tr><td>CTF0301</td><td>4859</td><td>0.9693</td><td>4.61%</td><td>2.25%</td><td>3.14%</td></tr>
+<tr><td>CTF0302</td><td>4858</td><td>0.957</td><td>5.52%</td><td>4.50%</td><td>4.16%</td></tr>
+<tr><td>CTF0303</td><td>4858</td><td>0.9583</td><td>5.44%</td><td>3.84%</td><td>3.93%</td></tr>
+<tr><td>CTF0401</td><td>3469</td><td>0.9089</td><td>7.48%</td><td>6.51%</td><td>6.03%</td></tr>
+<tr><td>CTF0402</td><td>3469</td><td>0.9663</td><td>4.52%</td><td>3.32%</td><td>3.28%</td></tr>
+<tr><td>CTF0403</td><td>3469</td><td>0.9452</td><td>5.63%</td><td>4.17%</td><td>4.28%</td></tr>
+</tbody></table></div>
+<p><strong>测试集 A（时间切分末段） 上的逐台拆分</strong></p>
+<div class="tablewrap"><table><thead><tr><th>对象</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>CTF0101</td><td>3615</td><td>0.9792</td><td>4.30%</td><td>-1.59%</td><td>3.06%</td></tr>
+<tr><td>CTF0102</td><td>3623</td><td>0.969</td><td>5.25%</td><td>-3.51%</td><td>4.64%</td></tr>
+<tr><td>CTF0103</td><td>3626</td><td>0.9842</td><td>3.72%</td><td>-1.34%</td><td>2.90%</td></tr>
+<tr><td>CTF0201</td><td>3344</td><td>0.976</td><td>6.27%</td><td>-5.73%</td><td>6.80%</td></tr>
+<tr><td>CTF0202</td><td>3343</td><td>0.9893</td><td>4.06%</td><td>1.41%</td><td>2.72%</td></tr>
+<tr><td>CTF0203</td><td>3326</td><td>0.991</td><td>3.75%</td><td>-2.19%</td><td>3.71%</td></tr>
+<tr><td>CTF0301</td><td>3621</td><td>0.9929</td><td>3.25%</td><td>0.18%</td><td>1.99%</td></tr>
+<tr><td>CTF0302</td><td>3518</td><td>0.9867</td><td>4.52%</td><td>1.59%</td><td>2.67%</td></tr>
+<tr><td>CTF0303</td><td>3520</td><td>0.9923</td><td>3.35%</td><td>1.02%</td><td>1.99%</td></tr>
+<tr><td>CTF0401</td><td>4269</td><td>0.9847</td><td>5.16%</td><td>0.77%</td><td>3.18%</td></tr>
+<tr><td>CTF0402</td><td>4259</td><td>0.9866</td><td>4.78%</td><td>-2.20%</td><td>4.58%</td></tr>
+<tr><td>CTF0403</td><td>4253</td><td>0.9885</td><td>4.24%</td><td>0.62%</td><td>2.95%</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 68999、验证 14752、测试 15251（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0028 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>6.50%</td><td>6.08%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>0.22%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=14, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-09-17 18:00</td><td>23162</td></tr>
+<tr><td>验证 validate</td><td>2025-09-17 18:45 → 2025-11-08 10:45</td><td>4960</td></tr>
+<tr><td>测试 A</td><td>2025-11-08 10:45 → 2025-12-30 21:45</td><td>4964</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>4d1dd661d2058271…</code>；物理检查违规率 0.00%（0 次 / 44317 样本）。</p>
+<h3>版本历史</h3>
+<div class="tablewrap"><table><thead><tr><th>版本</th><th>状态</th><th>实验</th><th>形态</th><th>R²(滚动)</th><th>CVRMSE(滚动)</th><th>NMBE(滚动)</th><th>说明</th></tr></thead><tbody>
+<tr><td>1.0.0</td><td><span class="pill ">候选</span></td><td>EXP-0170</td><td>频率幂律 + 湿空气密度修正</td><td>0.5774</td><td>6.08%</td><td>-0.22%</td><td>逐台冷却塔风机功耗（频率+湿空气密度修正→功耗），12 台</td></tr>
+<tr><td>1.1.0</td><td><span class="pill pill-live">生产</span> <span class="pill pill-live">当前</span></td><td>EXP-0170</td><td>频率幂律 + 湿空气密度修正</td><td>0.5774</td><td>6.08%</td><td>-0.22%</td><td>逐台冷却塔风机功耗（频率 + 湿空气密度修正 → 功耗），12 台</td></tr>
+</tbody></table></div>
+<h2 id="wx-ct-supply-temp">3.10　wx-ct-supply-temp　—　冷却塔群出水温静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>ct_model.v1</td></tr>
+<tr><td>建模对象</td><td>CTBANK</td></tr>
+<tr><td>预测目标</td><td>t_ct_out（Cel）</td></tr>
+<tr><td>一句话说明</td><td>冷却塔群出水温静态模型：ridge + 11 特征，rolling_cv 12 折 R2=0.978 / CVRMSE=1.27% / NMBE=+0.24%</td></tr>
+<tr><td>研究目标</td><td>RG-0016 · 冷却塔群出水温模型（判据面=滚动交叉验证，R²≥0.90）</td></tr>
+<tr><td>假设</td><td>H-0063：在 VIEW-0051 全候选输入上跑 ridge 基线，验证 t_ct_out 是否能达到 rolling_cv R²≥0.90 且 |NMBE|≤0.02；若复现已知的 R²≈0.978 即收工。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0090 / VIEW-0051</td></tr>
+<tr><td>数据集修订</td><td><code>WX_CT_MODEL@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>t_ct_in</td><td>冷却塔群进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw_total</td><td>冷却水总流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_wetbulb</td><td>室外湿球温度</td><td>Cel</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_h</td><td>室外相对湿度</td><td>%</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_run_count</td><td>风机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_freq_mean</td><td>风机平均频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_freq_max</td><td>风机最高频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>cwp_run_count</td><td>冷却泵运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chiller_run_count</td><td>冷机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>fan_power_total</td><td>风机群总功耗</td><td>kW</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>t_ct_out</td><td>冷却塔群出水温</td><td>Cel</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：线性基线（岭回归 Ridge）</p>
+<pre><code>z_i = (x_i − μ_i) / σ_i        （训练集均值/标准差，随包落盘）
+ŷ   = b + Σ_i w_i · z_i</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>ŷ = 20.1541
+      + 4.20699 · z_t_ct_in
+      + 0.94627 · z_f_cw_total
+      + 0.367464 · z_t_wetbulb
+      − 0.351815 · z_fan_freq_mean
+      − 0.241477 · z_ambient_t
+      + 0.151889 · z_fan_power_total
+      − 0.0514277 · z_chiller_run_count
+      − 0.0453839 · z_fan_run_count
+      + 0.0256307 · z_ambient_h
+      − 0.0217439 · z_cwp_run_count
+      + 0.0185915 · z_fan_freq_max</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>b</td><td>截距</td><td>20.1541</td><td>目标单位</td></tr>
+<tr><td>α</td><td>岭回归正则强度</td><td>1</td><td>1</td></tr>
+<tr><td>w[t_ct_in]</td><td>冷却塔群进水温 系数（作用在标准化量上）</td><td>4.20699</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[t_ct_in]</td><td>训练集均值 / 标准差</td><td>26.4275 / 4.60191</td><td>原始单位</td></tr>
+<tr><td>w[f_cw_total]</td><td>冷却水总流量 系数（作用在标准化量上）</td><td>0.94627</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[f_cw_total]</td><td>训练集均值 / 标准差</td><td>2518.59 / 418.555</td><td>原始单位</td></tr>
+<tr><td>w[t_wetbulb]</td><td>室外湿球温度 系数（作用在标准化量上）</td><td>0.367464</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[t_wetbulb]</td><td>训练集均值 / 标准差</td><td>9.30829 / 11.3466</td><td>原始单位</td></tr>
+<tr><td>w[fan_freq_mean]</td><td>风机平均频率 系数（作用在标准化量上）</td><td>-0.351815</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[fan_freq_mean]</td><td>训练集均值 / 标准差</td><td>41.9445 / 7.24011</td><td>原始单位</td></tr>
+<tr><td>w[ambient_t]</td><td>室外干球温度 系数（作用在标准化量上）</td><td>-0.241477</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[ambient_t]</td><td>训练集均值 / 标准差</td><td>14.2139 / 12.0732</td><td>原始单位</td></tr>
+<tr><td>w[fan_power_total]</td><td>风机群总功耗 系数（作用在标准化量上）</td><td>0.151889</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[fan_power_total]</td><td>训练集均值 / 标准差</td><td>232.07 / 88.1026</td><td>原始单位</td></tr>
+<tr><td>w[chiller_run_count]</td><td>冷机运行台数 系数（作用在标准化量上）</td><td>-0.0514277</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[chiller_run_count]</td><td>训练集均值 / 标准差</td><td>1.55201 / 1.46936</td><td>原始单位</td></tr>
+<tr><td>w[fan_run_count]</td><td>风机运行台数 系数（作用在标准化量上）</td><td>-0.0453839</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[fan_run_count]</td><td>训练集均值 / 标准差</td><td>9.02366 / 0.480614</td><td>原始单位</td></tr>
+<tr><td>w[ambient_h]</td><td>室外相对湿度 系数（作用在标准化量上）</td><td>0.0256307</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[ambient_h]</td><td>训练集均值 / 标准差</td><td>51.9568 / 24.2947</td><td>原始单位</td></tr>
+<tr><td>w[cwp_run_count]</td><td>冷却泵运行台数 系数（作用在标准化量上）</td><td>-0.0217439</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[cwp_run_count]</td><td>训练集均值 / 标准差</td><td>3.00125 / 0.0399527</td><td>原始单位</td></tr>
+<tr><td>w[fan_freq_max]</td><td>风机最高频率 系数（作用在标准化量上）</td><td>0.0185915</td><td>目标单位 / 标准差</td></tr>
+<tr><td>μ,σ[fan_freq_max]</td><td>训练集均值 / 标准差</td><td>43.1013 / 6.55162</td><td>原始单位</td></tr>
+</tbody></table></div>
+<blockquote><p>系数作用在<strong>标准化</strong>特征上：|w| 可直接横向比大小，含义是「该输入每变化一个训练集标准差，输出变化多少」。</p></blockquote>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>8027（12 折，跳过 0）</td><td>0.9776</td><td>1.27%</td><td>0.24%</td><td>0.97%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>4959</td><td>0.9579</td><td>2.85%</td><td>-2.27%</td><td>2.31%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>4963</td><td>0.3629</td><td>2.80%</td><td>-2.27%</td><td>2.38%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.9776</td><td>0.02025</td><td>0.9175</td><td>0.9931</td><td>12</td></tr>
+<tr><td>CVRMSE</td><td>1.27%</td><td>0.73%</td><td>0.53%</td><td>2.76%</td><td>12</td></tr>
+<tr><td>NMBE</td><td>0.24%</td><td>0.23%</td><td>-0.13%</td><td>0.76%</td><td>12</td></tr>
+<tr><td>MAPE</td><td>0.97%</td><td>0.54%</td><td>0.43%</td><td>2.07%</td><td>12</td></tr>
+<tr><td>RMSE</td><td>0.2722</td><td>0.1428</td><td>0.1403</td><td>0.596</td><td>12</td></tr>
+<tr><td>MAE</td><td>0.204</td><td>0.09884</td><td>0.1121</td><td>0.4247</td><td>12</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 2、验证 1、测试 0（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0016 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>0.24%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>R² ≥</td><td>0.9</td><td>0.9776</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（12 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=20, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-09-17 18:00</td><td>23159</td></tr>
+<tr><td>验证 validate</td><td>2025-09-17 18:45 → 2025-11-08 10:45</td><td>4960</td></tr>
+<tr><td>测试 A</td><td>2025-11-08 10:45 → 2025-12-30 21:15</td><td>4963</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>4878d97b0156db37…</code>；物理检查违规率 0.00%（0 次 / 4963 样本）。</p>
+<h2 id="wx-hx-heat-transfer">3.11　wx-hx-heat-transfer　—　HXBANK 静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.1.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>hx_model.v1</td></tr>
+<tr><td>建模对象</td><td>HXBANK</td></tr>
+<tr><td>预测目标</td><td>heat_transfer（kW）</td></tr>
+<tr><td>一句话说明</td><td>HXBANK 静态模型：纯 GBDT gbdt_static@v1 + 9 入口特征，rolling_cv R2=0.759 / CVRMSE=1.82% / NMBE=+0.27%</td></tr>
+<tr><td>研究目标</td><td>RG-0013 · 板换换热量静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0059：HXBANK：纯 GBDT（gbdt_static@v1，9 入口特征）在打开物理校验后指标不变，且预测满足硬物理约束，可进入发布。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0086 / VIEW-0042</td></tr>
+<tr><td>数据集修订</td><td><code>WX_HX_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>t_chw_in</td><td>板换热侧（冷冻水）进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cw_in</td><td>板换冷侧（冷却水）进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>drive_dt</td><td>冷热侧进水温差（驱动温差）</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw</td><td>冷冻水侧流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw</td><td>冷却水侧流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>flow_ratio</td><td>两侧流量比</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chiller_run_count</td><td>冷机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>heat_transfer</td><td>换热量</td><td>kW</td><td>float</td><td>estimated</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (t_chw_in, t_cw_in, drive_dt, f_chw, f_cw, flow_ratio, run_count, chiller_run_count, ambient_t)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = t_chw_in
+        x_2 = t_cw_in
+        x_3 = drive_dt
+        x_4 = f_chw
+        x_5 = f_cw
+        x_6 = flow_ratio
+        x_7 = run_count
+        x_8 = chiller_run_count
+        x_9 = ambient_t</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>chiller_run_count</td><td>冷机运行台数</td><td>84.7%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>9.8%</td></tr>
+<tr><td>drive_dt</td><td>冷热侧进水温差（驱动温差）</td><td>1.7%</td></tr>
+<tr><td>flow_ratio</td><td>两侧流量比</td><td>1.5%</td></tr>
+<tr><td>f_cw</td><td>冷却水侧流量</td><td>0.9%</td></tr>
+<tr><td>t_cw_in</td><td>板换冷侧（冷却水）进水温</td><td>0.6%</td></tr>
+<tr><td>f_chw</td><td>冷冻水侧流量</td><td>0.4%</td></tr>
+<tr><td>ambient_t</td><td>室外干球温度</td><td>0.3%</td></tr>
+<tr><td>t_chw_in</td><td>板换热侧（冷冻水）进水温</td><td>0.1%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3415（6 折，跳过 0）</td><td>0.759</td><td>1.82%</td><td>0.27%</td><td>1.39%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>2880</td><td>0.428</td><td>2.78%</td><td>1.32%</td><td>2.17%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2883</td><td>0.5887</td><td>2.10%</td><td>1.31%</td><td>1.66%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.759</td><td>0.05015</td><td>0.7</td><td>0.8296</td><td>6</td></tr>
+<tr><td>CVRMSE</td><td>1.82%</td><td>0.20%</td><td>1.56%</td><td>2.06%</td><td>6</td></tr>
+<tr><td>NMBE</td><td>0.27%</td><td>0.41%</td><td>-0.29%</td><td>0.99%</td><td>6</td></tr>
+<tr><td>MAPE</td><td>1.39%</td><td>0.14%</td><td>1.21%</td><td>1.59%</td><td>6</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 1、验证 0、测试 0（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0013 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>3.20%</td><td>1.82%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>1.00%</td><td>0.27%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=15, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>回滚目标: 1.0.0</td></tr>
+</tbody></table></div>
+<p>回滚目标版本：<code>1.0.0</code>。</p>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-10-27 13:30</td><td>13451</td></tr>
+<tr><td>验证 validate</td><td>2025-10-27 14:15 → 2025-11-26 14:15</td><td>2880</td></tr>
+<tr><td>测试 A</td><td>2025-11-26 14:15 → 2025-12-26 15:30</td><td>2883</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>40b03827b6b91459…</code>；物理检查违规率 0.00%（0 次 / 2883 样本）。</p>
+<h3>版本历史</h3>
+<div class="tablewrap"><table><thead><tr><th>版本</th><th>状态</th><th>实验</th><th>形态</th><th>R²(滚动)</th><th>CVRMSE(滚动)</th><th>NMBE(滚动)</th><th>说明</th></tr></thead><tbody>
+<tr><td>1.0.0</td><td><span class="pill ">已弃用</span></td><td>EXP-0052</td><td>ε-NTU 逆流换热器模型</td><td>0.3821</td><td>2.61%</td><td>-0.69%</td><td>HXBANK 静态模型（判据面 rolling_cv）</td></tr>
+<tr><td>1.1.0</td><td><span class="pill pill-live">生产</span> <span class="pill pill-live">当前</span></td><td>EXP-0086</td><td>纯梯度提升静态模型</td><td>0.759</td><td>1.82%</td><td>0.27%</td><td>HXBANK 静态模型：纯 GBDT gbdt_static@v1 + 9 入口</td></tr>
+</tbody></table></div>
+<h2 id="wx-hx-heat-transfer-static">3.12　wx-hx-heat-transfer-static　—　板换换热量静态模型</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>hx_model.v1</td></tr>
+<tr><td>建模对象</td><td>HXBANK</td></tr>
+<tr><td>预测目标</td><td>heat_transfer（kW）</td></tr>
+<tr><td>一句话说明</td><td>板换换热量静态模型（只用入口值）；EXP-0061 的干净重跑，原实验受实验室目标列泄漏影响，指标不可用</td></tr>
+<tr><td>研究目标</td><td>RG-0013 · 板换换热量静态模型（判据面=滚动交叉验证）</td></tr>
+<tr><td>假设</td><td>H-0040：HXBANK：去掉物理主干、直接用梯度提升在白名单特征上回归（实验室模块 gbdt_static@v1），应优于 hybrid —— 蒸发侧温差摆幅仅 0.4 K 使热阻不可辨识（手册 §7.11），主干只贡献近似常数偏移，残差学习器还得先学回来。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0177 / VIEW-0042</td></tr>
+<tr><td>数据集修订</td><td><code>WX_HX_MODEL@rev_0003</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260817 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>t_chw_in</td><td>板换热侧（冷冻水）进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>t_cw_in</td><td>板换冷侧（冷却水）进水温</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>drive_dt</td><td>冷热侧进水温差（驱动温差）</td><td>K</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>f_chw</td><td>冷冻水侧流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>f_cw</td><td>冷却水侧流量</td><td>m3/h</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>flow_ratio</td><td>两侧流量比</td><td>1</td><td>float</td><td>estimated</td><td>是</td></tr>
+<tr><td>输入</td><td>run_count</td><td>运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>chiller_run_count</td><td>冷机运行台数</td><td>1</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td>输入</td><td>ambient_t</td><td>室外干球温度</td><td>Cel</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>heat_transfer</td><td>换热量</td><td>kW</td><td>float</td><td>estimated</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：纯梯度提升静态模型（实验室模块 gbdt_static@v1，无物理主干）</p>
+<pre><code>ŷ = Σ_(t=1..600) g_t(x)        （XGBoost 回归树加和，目标函数 squarederror）
+x = (t_chw_in, t_cw_in, drive_dt, f_chw, f_cw, flow_ratio, run_count, chiller_run_count, ambient_t)</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>输入向量按训练时列序取列：
+        x_1 = t_chw_in
+        x_2 = t_cw_in
+        x_3 = drive_dt
+        x_4 = f_chw
+        x_5 = f_cw
+        x_6 = flow_ratio
+        x_7 = run_count
+        x_8 = chiller_run_count
+        x_9 = ambient_t</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>colsample_bytree</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>learning_rate</td><td></td><td>0.05</td><td>1</td></tr>
+<tr><td>max_depth</td><td></td><td>6</td><td>1</td></tr>
+<tr><td>min_child_weight</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>n_estimators</td><td></td><td>600</td><td>1</td></tr>
+<tr><td>reg_alpha</td><td></td><td>0</td><td>1</td></tr>
+<tr><td>reg_lambda</td><td></td><td>1</td><td>1</td></tr>
+<tr><td>subsample</td><td></td><td>0.9</td><td>1</td></tr>
+<tr><td>seed</td><td>随机种子</td><td>20260817</td><td>1</td></tr>
+<tr><td>tree_method</td><td>建树算法</td><td>hist</td><td>—</td></tr>
+<tr><td>n_jobs</td><td>线程数（位级复现要求单线程）</td><td>1</td><td>1</td></tr>
+</tbody></table></div>
+<blockquote><p>树集成没有闭式解析式：模型本体是 <code>artifact/booster.json</code> 里的 600 棵树，可解释性由下方<strong>特征增益占比</strong>给出。</p></blockquote>
+<blockquote><p>确定性：单线程 + 固定 random_state + tree_method=hist，同种子重训逐位一致。</p></blockquote>
+<p><strong>特征增益占比（XGBoost gain，归一化到 100%）</strong></p>
+<div class="tablewrap"><table><thead><tr><th>特征</th><th>含义</th><th>增益占比</th></tr></thead><tbody>
+<tr><td>chiller_run_count</td><td>冷机运行台数</td><td>84.7%</td></tr>
+<tr><td>run_count</td><td>运行台数</td><td>9.8%</td></tr>
+<tr><td>drive_dt</td><td>冷热侧进水温差（驱动温差）</td><td>1.7%</td></tr>
+<tr><td>flow_ratio</td><td>两侧流量比</td><td>1.5%</td></tr>
+<tr><td>f_cw</td><td>冷却水侧流量</td><td>0.9%</td></tr>
+<tr><td>t_cw_in</td><td>板换冷侧（冷却水）进水温</td><td>0.6%</td></tr>
+<tr><td>f_chw</td><td>冷冻水侧流量</td><td>0.4%</td></tr>
+<tr><td>ambient_t</td><td>室外干球温度</td><td>0.3%</td></tr>
+<tr><td>t_chw_in</td><td>板换热侧（冷冻水）进水温</td><td>0.1%</td></tr>
+</tbody></table></div>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>3415（6 折，跳过 0）</td><td>0.759</td><td>1.82%</td><td>0.27%</td><td>1.39%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>2880</td><td>0.428</td><td>2.78%</td><td>1.32%</td><td>2.17%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>2883</td><td>0.5887</td><td>2.10%</td><td>1.31%</td><td>1.66%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.759</td><td>0.05015</td><td>0.7</td><td>0.8296</td><td>6</td></tr>
+<tr><td>CVRMSE</td><td>1.82%</td><td>0.20%</td><td>1.56%</td><td>2.06%</td><td>6</td></tr>
+<tr><td>NMBE</td><td>0.27%</td><td>0.41%</td><td>-0.29%</td><td>0.99%</td><td>6</td></tr>
+<tr><td>MAPE</td><td>1.39%</td><td>0.14%</td><td>1.21%</td><td>1.59%</td><td>6</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 1、验证 0、测试 0（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0013 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>3.20%</td><td>1.82%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>1.00%</td><td>0.27%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>物理违规率 ≤</td><td>1.00%</td><td>0.00%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（15 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，5 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=15, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-10-27 13:30</td><td>13451</td></tr>
+<tr><td>验证 validate</td><td>2025-10-27 14:15 → 2025-11-26 14:15</td><td>2880</td></tr>
+<tr><td>测试 A</td><td>2025-11-26 14:15 → 2025-12-26 15:30</td><td>2883</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>40b03827b6b91459…</code>；物理检查违规率 0.00%（0 次 / 2883 样本）。</p>
+<h2 id="wx-pump-power-unit">3.13　wx-pump-power-unit　—　逐台水泵功耗</h2>
+<h3>定位</h3>
+<div class="tablewrap"><table><thead><tr><th>项</th><th>值</th></tr></thead><tbody>
+<tr><td>版本</td><td>1.0.0</td></tr>
+<tr><td>状态</td><td><span class="pill pill-live">生产</span></td></tr>
+<tr><td>对象模型</td><td>pump_unit.v1</td></tr>
+<tr><td>建模对象</td><td>CHWP01, CHWP02, CHWP03, CHWP04, CWP01, CWP02, CWP03, CWP04</td></tr>
+<tr><td>预测目标</td><td>power（kW）</td></tr>
+<tr><td>一句话说明</td><td>逐台水泵功耗（频率→功耗，按 object_id 逐台标定相似定律 P=a(f/50)^b+c），8 台</td></tr>
+<tr><td>研究目标</td><td>RG-0023 · 逐台水泵功耗模型（频率→功耗，相似定律 P∝f³）</td></tr>
+<tr><td>假设</td><td>H-0151：验证按 object_id 逐台标定的三参数幂律模型 P=a(f/50)^b+c，在 rolling_cv 判据面上能否把逐台水泵功耗的 CVRMSE 压到 ≤3% 且 |NMBE|≤2%。</td></tr>
+<tr><td>实验 / 视图</td><td>EXP-0180 / VIEW-0066</td></tr>
+<tr><td>数据集修订</td><td><code>WX_PUMP_UNIT@rev_0001</code></td></tr>
+<tr><td>随机种子 / 代码版本</td><td>20260808 / <code>c2134bc2</code></td></tr>
+<tr><td>环境锁</td><td><code>6def9db6a88c3bc4…</code></td></tr>
+</tbody></table></div>
+<h3>输入 → 输出</h3>
+<div class="tablewrap"><table><thead><tr><th>方向</th><th>property_code</th><th>含义</th><th>单位</th><th>类型</th><th>数据来源</th><th>必填</th></tr></thead><tbody>
+<tr><td>输入</td><td>frequency</td><td>本台变频器频率</td><td>Hz</td><td>float</td><td>measured</td><td>是</td></tr>
+<tr><td><strong>输出</strong></td><td>power</td><td>功率</td><td>kW</td><td>float</td><td>measured</td><td>—</td></tr>
+</tbody></table></div>
+<p>越界处理：全部输入 <code>out_of_range = reject</code>（超出训练包络直接拒绝，不外推）。</p>
+<h3>公式</h3>
+<p><strong>模型形态</strong>：逐台标定的三参数相似定律幂律 —— 实验室模块 pump_power_per_object_affinity_v1@v1</p>
+<pre><code>P̂(obj, f) = 0                                 若 f ≤ 1e−9（停机判定）
+P̂(obj, f) = c_obj + a_obj · (f/50)^b_obj       否则
+
+每台独立标定：b_obj 在 [2.0, 3.5] 上 61 点网格枚举，
+每个 b 下对 (a, c) 做最小二乘，取 RMSE 最小者；
+样本数 &lt; 5 的对象回退到全体样本标定的 global 参数。</code></pre>
+<p><strong>代入本模型辨识出的参数</strong>：</p>
+<pre><code>CHWP01：P̂ = -7.83773 + 230.324 · (f/50)^2.75
+CHWP02：P̂ = -10.7592 + 231.997 · (f/50)^2.675
+CHWP03：P̂ = -13.9953 + 235.06 · (f/50)^2.575
+CHWP04：P̂ = -14.5507 + 230.827 · (f/50)^2.6
+CWP01：P̂ = 1.18103 + 187.311 · (f/50)^3.1
+CWP02：P̂ = 0.424573 + 190.181 · (f/50)^3.075
+CWP03：P̂ = 0.173853 + 192.283 · (f/50)^3
+CWP04：P̂ = 1.7449 + 187.609 · (f/50)^3.125</code></pre>
+<p><strong>参数取值</strong></p>
+<div class="tablewrap"><table><thead><tr><th>参数</th><th>含义</th><th>取值</th><th>单位</th></tr></thead><tbody>
+<tr><td>CHWP01</td><td>a（kW） / b（1） / c（kW）</td><td>230.324 / 2.75 / -7.83773</td><td>—</td></tr>
+<tr><td>CHWP02</td><td>a（kW） / b（1） / c（kW）</td><td>231.997 / 2.675 / -10.7592</td><td>—</td></tr>
+<tr><td>CHWP03</td><td>a（kW） / b（1） / c（kW）</td><td>235.06 / 2.575 / -13.9953</td><td>—</td></tr>
+<tr><td>CHWP04</td><td>a（kW） / b（1） / c（kW）</td><td>230.827 / 2.6 / -14.5507</td><td>—</td></tr>
+<tr><td>CWP01</td><td>a（kW） / b（1） / c（kW）</td><td>187.311 / 3.1 / 1.18103</td><td>—</td></tr>
+<tr><td>CWP02</td><td>a（kW） / b（1） / c（kW）</td><td>190.181 / 3.075 / 0.424573</td><td>—</td></tr>
+<tr><td>CWP03</td><td>a（kW） / b（1） / c（kW）</td><td>192.283 / 3 / 0.173853</td><td>—</td></tr>
+<tr><td>CWP04</td><td>a（kW） / b（1） / c（kW）</td><td>187.609 / 3.125 / 1.7449</td><td>—</td></tr>
+<tr><td>global（兜底）</td><td>样本不足对象的回退参数 a / b / c</td><td>237.029 / 2 / -43.8082</td><td>—</td></tr>
+</tbody></table></div>
+<blockquote><p>冷冻泵 CHWP 标定出的 b ≈ 2.58~2.75，冷却泵 CWP b ≈ 3.00~3.13 —— 冷却泵更贴近相似定律的立方律，冷冻泵偏低。</p></blockquote>
+<blockquote><p>拟合无随机数；<code>f ≤ 1e−9 → P̂ = 0</code> 这条硬规则保证停机时刻不产生虚假功耗。</p></blockquote>
+<blockquote><p><strong>可外推</strong>：结构是频率幂律，给定任意开机组合与频率即可加总出总功耗。</p></blockquote>
+<h3>结果</h3>
+<div class="tablewrap"><table><thead><tr><th>判据面</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>滚动交叉验证（判据面）</td><td>137735（9 折，跳过 0）</td><td>0.9898</td><td>1.86%</td><td>0.15%</td><td>0.99%</td></tr>
+<tr><td>验证集（时间切分中段）</td><td>29772</td><td>0.9987</td><td>1.46%</td><td>-0.38%</td><td>1.07%</td></tr>
+<tr><td>测试集 A（时间切分末段）</td><td>28632</td><td>0.9684</td><td>4.74%</td><td>0.95%</td><td>1.43%</td></tr>
+</tbody></table></div>
+<p>滚动交叉验证的折间统计（RMSE / MAE 为绝对量纲，单位同预测目标）：</p>
+<div class="tablewrap"><table><thead><tr><th>指标</th><th>折间均值</th><th>折间标准差</th><th>最小</th><th>最大</th><th>有效折数</th></tr></thead><tbody>
+<tr><td>R2</td><td>0.9898</td><td>0.01656</td><td>0.9434</td><td>0.9984</td><td>9</td></tr>
+<tr><td>CVRMSE</td><td>1.86%</td><td>1.42%</td><td>0.73%</td><td>5.60%</td><td>9</td></tr>
+<tr><td>NMBE</td><td>0.15%</td><td>0.52%</td><td>-0.64%</td><td>1.27%</td><td>9</td></tr>
+<tr><td>MAPE</td><td>0.99%</td><td>0.34%</td><td>0.55%</td><td>1.78%</td><td>9</td></tr>
+<tr><td>RMSE</td><td>1.492</td><td>0.8211</td><td>0.378</td><td>3.575</td><td>9</td></tr>
+<tr><td>MAE</td><td>0.8257</td><td>0.2487</td><td>0.2882</td><td>1.113</td><td>9</td></tr>
+</tbody></table></div>
+<p><strong>验证集（时间切分中段） 上的逐台拆分</strong></p>
+<div class="tablewrap"><table><thead><tr><th>对象</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>CHWP01</td><td>4822</td><td>0.9986</td><td>1.20%</td><td>-0.25%</td><td>0.88%</td></tr>
+<tr><td>CHWP02</td><td>1605</td><td>0.9949</td><td>1.47%</td><td>0.37%</td><td>0.98%</td></tr>
+<tr><td>CHWP03</td><td>4959</td><td>0.9992</td><td>0.94%</td><td>0.02%</td><td>0.71%</td></tr>
+<tr><td>CHWP04</td><td>3500</td><td>0.9968</td><td>1.28%</td><td>-0.34%</td><td>0.96%</td></tr>
+<tr><td>CWP01</td><td>4822</td><td>0.9946</td><td>1.91%</td><td>-0.93%</td><td>1.52%</td></tr>
+<tr><td>CWP02</td><td>1606</td><td>0.9939</td><td>1.68%</td><td>0.24%</td><td>0.67%</td></tr>
+<tr><td>CWP03</td><td>4958</td><td>0.9972</td><td>1.56%</td><td>-0.59%</td><td>1.04%</td></tr>
+<tr><td>CWP04</td><td>3500</td><td>0.9929</td><td>2.42%</td><td>-1.17%</td><td>1.60%</td></tr>
+</tbody></table></div>
+<p><strong>测试集 A（时间切分末段） 上的逐台拆分</strong></p>
+<div class="tablewrap"><table><thead><tr><th>对象</th><th>样本数</th><th>R²</th><th>CVRMSE</th><th>NMBE</th><th>MAPE</th></tr></thead><tbody>
+<tr><td>CHWP01</td><td>3330</td><td>0.9855</td><td>1.14%</td><td>0.31%</td><td>0.68%</td></tr>
+<tr><td>CHWP02</td><td>3343</td><td>0.9776</td><td>1.73%</td><td>0.59%</td><td>0.85%</td></tr>
+<tr><td>CHWP03</td><td>3258</td><td>0.9945</td><td>0.92%</td><td>0.44%</td><td>0.70%</td></tr>
+<tr><td>CHWP04</td><td>3934</td><td>0.9884</td><td>1.42%</td><td>0.18%</td><td>0.74%</td></tr>
+<tr><td>CWP01</td><td>3659</td><td>0.9963</td><td>1.21%</td><td>-0.28%</td><td>0.64%</td></tr>
+<tr><td>CWP02</td><td>3340</td><td>0.2099</td><td>15.86%</td><td>6.94%</td><td>6.27%</td></tr>
+<tr><td>CWP03</td><td>3491</td><td>0.9583</td><td>3.82%</td><td>0.60%</td><td>1.02%</td></tr>
+<tr><td>CWP04</td><td>4277</td><td>0.9717</td><td>3.52%</td><td>0.47%</td><td>0.91%</td></tr>
+</tbody></table></div>
+<p>缺失值丢弃行数：训练 46273、验证 9916、测试 11088（该行任一输入或目标为空即整行丢弃）。</p>
+<h3>验收与门禁</h3>
+<p>目标 RG-0023 声明的判据面：<code>rolling_cv</code>。</p>
+<div class="tablewrap"><table><thead><tr><th>判据</th><th>阈值</th><th>实测</th><th>结论</th></tr></thead><tbody>
+<tr><td>CVRMSE ≤</td><td>3.00%</td><td>1.86%</td><td><span class="pill pill-ok">通过</span></td></tr>
+<tr><td>|NMBE| ≤</td><td>2.00%</td><td>0.15%</td><td><span class="pill pill-ok">通过</span></td></tr>
+</tbody></table></div>
+<p>发布门禁（<code>runtime/registry.py</code>，模型包 §8）：</p>
+<div class="tablewrap"><table><thead><tr><th>门禁</th><th>结论</th><th>说明</th></tr></thead><tbody>
+<tr><td>integrity</td><td><span class="pill pill-ok">通过</span></td><td>文件齐全且校验和一致（14 个文件）</td></tr>
+<tr><td>signature_tfom</td><td><span class="pill pill-ok">通过</span></td><td>未提供 TFOM 注册表，跳过兼容检查</td></tr>
+<tr><td>acceptance</td><td><span class="pill pill-ok">通过</span></td><td>硬性验收条件全部满足（判据面 rolling_cv，7 项指标）</td></tr>
+<tr><td>latency</td><td><span class="pill pill-ok">通过</span></td><td>未声明延迟上限，跳过</td></tr>
+<tr><td>smoke</td><td><span class="pill pill-ok">通过</span></td><td>冷加载 + golden 比对通过（n=3, max_rel_error=0）</td></tr>
+<tr><td>rollback_recorded</td><td><span class="pill pill-ok">通过</span></td><td>首个生产版本，无回滚目标（已记录）</td></tr>
+</tbody></table></div>
+<h3>数据与时间切分</h3>
+<div class="tablewrap"><table><thead><tr><th>切分段</th><th>时间区间（UTC）</th><th>行数</th></tr></thead><tbody>
+<tr><td>训练 train</td><td>2024-12-31 16:00 → 2025-09-17 18:45</td><td>23165</td></tr>
+<tr><td>验证 validate</td><td>2025-09-17 19:30 → 2025-11-08 11:45</td><td>4961</td></tr>
+<tr><td>测试 A</td><td>2025-11-08 11:45 → 2025-12-30 23:45</td><td>4965</td></tr>
+<tr><td>purge + embargo 丢弃</td><td>purge 0 s / embargo 2700 s</td><td>3</td></tr>
+</tbody></table></div>
+<p>视图哈希 <code>3b7f0515f664d370…</code>；物理检查违规率 0.00%（0 次 / 28632 样本）。</p>
+<h2 id="sec-四">四、需要注意的地方</h2>
+<ol><li><strong><code>wx-ct-approach</code> 的包描述与实现不符。</strong> 描述写「Merkel/NTU 主干 + 偏差校正」，落盘的 <code>lab_source.py</code> 里没有 Merkel 主干，实际是 21 项二阶多项式岭回归。描述沿用了假设 H-0099 的措辞，没随实现更新。以本报告的公式一节为准。</li></ol>
+<ol><li><strong>两个 <code>-static</code> 模型是泄漏事故的干净重跑。</strong> <code>wx-chiller-power-static</code>（EXP-0176，重跑 EXP-0058）与 <code>wx-hx-heat-transfer-static</code>（EXP-0177，重跑 EXP-0061）对应的原始实验受实验室目标列泄漏影响，原指标不可用；这里的指标来自重跑。</li></ol>
+<ol><li><strong><code>wx-hx-heat-transfer</code> 1.1.0 与 <code>wx-hx-heat-transfer-static</code> 1.0.0 指标完全相同。</strong> 两者同视图 VIEW-0042、同模块、同超参、同种子，是同一个模型的两次注册（前者带物理校验重跑，后者是泄漏事故的干净重跑），不是两个独立结果。</li></ol>
+<ol><li><strong><code>wx-chwp-flow-total</code> 用 <code>power_total</code> 预测 <code>flow_total</code>。</strong> 增益占比里 power_total 一项占 61.8%——这是「用泵功耗反推流量」，物理上成立（同一台泵上功耗与流量单调相关），但它要求功耗测点在线可用，做流量<strong>软测量</strong>没问题，做 what-if（改频率看流量）时要小心：功耗本身也是频率的函数。</li></ol>
+<ol><li><strong><code>wx-chiller-power-ch0x</code> 的 Gordon-Ng 主干普遍退化。</strong> CH01/CH03/CH04 辨识出的换热热阻里至少有一个被压到 1e−12 及更小（CH04 是 R_e、R_c 双双归零），物理主干几乎只剩熵产项。原因是蒸发侧温差摆幅只有 0.4 K 量级，热阻不可辨识。CH02 因此改走纯 GBDT 路线（假设 H-0037），指标从 R²=0.588 提到 0.723。</li></ol>
+<ol><li><strong>逐台风机模型 12 台共用一组参数。</strong> <code>wx-ct-fan-power-unit</code> 不区分 object_id，逐台差异全部进残差；逐台指标表里 CTF0401 的验证面 R²=0.909 是最差的一台。误差两两相关系数均值 +0.314（F-0087），说明存在共模偏差——继续压随机误差对群口径收益有限。</li></ol>
+<ol><li><strong>四台冷机的缺失行丢弃都不小，CH02 尤其极端。</strong> 训练段共约 10450 行，CH01 丢 3420、CH03 丢 3515、CH02 丢 2766、CH04 丢 2151（机组停机时该行整行为空）。更要紧的是 CH02 的测试段：2239 行里丢掉 2233 行，<strong>测试面 A 只剩 6 个样本</strong>，那一列的 R²=−15.97 之类的数字没有统计意义。看 A 面指标一定要先看样本数。</li></ol>
+<ol><li><strong><code>RG-0012</code> 的 NMBE 上限被人工放宽过。</strong> 2026-08-21 由 2.0% 改到 3.5%，为的是放行 CH01（2.47%）与 CH03（3.40%）。这是需求方的显式决定，记在目标的 transitions 里，不是模型指标变好了。</li></ol>
+<hr>
+<p>报告由 <code>scripts/export_model_report.py</code> 生成；数据源为本机 <code>models/</code> 与 <code>research/</code> 目录的当前内容。重新生成：</p>
+<pre><code>.venv/Scripts/python scripts/export_model_report.py</code></pre>
+</div>
+</body></html>
