@@ -1,6 +1,6 @@
 [project]
 name = "thermoforge"
-version = "0.1.0"
+version = "2.0.0"
 description = "Autonomous physics-data hybrid modeling research system for data-centric HVAC"
 requires-python = ">=3.12"
 dependencies = [
@@ -41,6 +41,8 @@ dependencies = [
 [project.scripts]
 tf = "thermoforge_cli.main:main"
 thermoforge-mcp = "thermoforge_mcp.server:main"
+thermoforge-v2 = "thermoforge_v2.__main__:main"
+thermoforge-v2-mcp = "thermoforge_v2.mcp:main"
 
 [dependency-groups]
 dev = [
