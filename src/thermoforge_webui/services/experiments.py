@@ -73,6 +73,7 @@ class ExperimentDetail:
     report: dict[str, Any]
     spec: dict[str, Any]
     split: dict[str, Any]
+    split_profile: dict[str, Any]
     physics: dict[str, Any]
     environment: dict[str, Any]
     directory: Path
@@ -174,6 +175,7 @@ def load_detail(experiment_id: str) -> ExperimentDetail | None:
         report=report,
         spec=_read_json(directory / "spec.json"),
         split=_read_json(directory / "split.json"),
+        split_profile=_read_json(directory / "split_profile.json"),
         physics=_read_json(directory / "physics_report.json"),
         environment=_read_json(directory / "environment.json"),
         directory=directory,

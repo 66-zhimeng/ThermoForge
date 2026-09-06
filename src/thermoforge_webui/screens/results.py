@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from .. import cache
@@ -90,6 +91,7 @@ def _single(summaries: list[exp_service.ExperimentSummary]) -> None:
     _metrics_block(detail, surface_report, object_id)
     _charts(detail, predictions, str(surface), object_id)
     _split_block(detail)
+    _split_profile_block(detail)
     _physics_block(detail)
     _reproducibility(detail)
     _raw_points(detail, predictions, str(surface))
@@ -219,6 +221,49 @@ def _split_block(detail: exp_service.ExperimentDetail) -> None:
     st.caption(timeline.caption + "　·　切分按时间而非行数，边界向下取整到"
                "采样周期整数倍；训练尾部 purge、验证头部 embargo，"
                "是为了防止相邻样本把未来信息漏进训练集。")
+
+
+def _split_profile_block(detail: exp_service.ExperimentDetail) -> None:
+    """训练/验证/测试各段的自变量+目标分布对比——回答"验证/测试集是不是
+    落在训练集没见过的工况范围之外"，不是只看切分的时间边界。
+    """
+    profile = detail.split_profile
+    subsets = profile.get("subsets") or {}
+    if not subsets:
+        return
+    reference = str(profile.get("reference") or "train")
+    order = [name for name in ("train", "validate", "test") if name in subsets]
+    frac_col = f"越界占比（相对{reference}段）"
+    rows = []
+    for name in order:
+        variables = (subsets[name] or {}).get("variables") or {}
+        for var, entry in variables.items():
+            if "min" not in entry:
+                continue
+            q = entry.get("quantiles") or {}
+            rows.append({
+                "变量": var, "子集": name, "样本数": entry.get("count"),
+                "min": entry.get("min"), "p25": q.get("p25"),
+                "p50": q.get("p50"), "p75": q.get("p75"), "max": entry.get("max"),
+                frac_col: entry.get(f"out_of_{reference}_range_fraction"),
+            })
+    if not rows:
+        return
+    st.markdown("#### 各段自变量/目标分布")
+    frame = pd.DataFrame(rows)
+    st.dataframe(
+        frame, width="stretch", hide_index=True,
+        column_config={
+            "min": st.column_config.NumberColumn(format="%.3f"),
+            "p25": st.column_config.NumberColumn(format="%.3f"),
+            "p50": st.column_config.NumberColumn(format="%.3f"),
+            "p75": st.column_config.NumberColumn(format="%.3f"),
+            "max": st.column_config.NumberColumn(format="%.3f"),
+            frac_col: st.column_config.NumberColumn(format="%.3f"),
+        })
+    st.caption(f"「{frac_col}」= 该段落在 {reference} 段 [min, max] 之外的样本"
+               "比例——只是描述性统计，数字大不直接等于模型会失准，但值得"
+               "在判断结果可信度时多留意一眼。")
 
 
 def _physics_block(detail: exp_service.ExperimentDetail) -> None:

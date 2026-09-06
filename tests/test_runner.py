@@ -18,7 +18,13 @@ from thermoforge_research.errors import ResearchError
 from thermoforge_research.ledger import ResearchLedger
 from thermoforge_research.runner import run_experiment, verify_reproducibility
 
-from phase2_helpers import build_chiller_vault, make_experiment, view_definition
+from phase2_helpers import (
+    FEATURES,
+    TARGET,
+    build_chiller_vault,
+    make_experiment,
+    view_definition,
+)
 
 ACTOR = "test-runner"
 
@@ -54,6 +60,7 @@ def test_run_experiment_produces_artifacts(env, tmp_path):
 
     exp_dir = tmp_path / "research" / "experiments" / exp_id
     for name in ("report.json", "metrics.json", "split.json",
+                 "split_profile.json",
                  "seed_manifest.json", "environment.json",
                  "predictions.parquet", "physics_report.json",
                  "stdout.log", "stderr.log", "model/model.json"):
@@ -65,6 +72,26 @@ def test_run_experiment_produces_artifacts(env, tmp_path):
                 "embargo_seconds", "view_hash"):
         assert key in split, key
     assert split["dataset"].endswith("@rev_0001")
+
+    # 训练/验证/测试各段的自变量+目标分布画像（回答"验证/测试集是否
+    # 落在训练集见过的工况范围之外"，不只是切分的时间边界）
+    split_profile = json.loads(
+        (exp_dir / "split_profile.json").read_text(encoding="utf-8"))
+    assert split_profile["reference"] == "train"
+    subsets = split_profile["subsets"]
+    assert set(subsets) == {"train", "validate", "test"}
+    for name in ("train", "validate", "test"):
+        assert subsets[name]["n_samples"] > 0
+        variables = subsets[name]["variables"]
+        assert set(variables) == {*FEATURES, TARGET}
+        for entry in variables.values():
+            assert entry["min"] <= entry["quantiles"]["p50"] <= entry["max"]
+    for name in ("validate", "test"):
+        # 越界占比只对非参照段计算，train 自身没有这个字段
+        any_key = next(iter(subsets[name]["variables"].values()))
+        assert "out_of_train_range_fraction" in any_key
+    assert "out_of_train_range_fraction" not in next(
+        iter(subsets["train"]["variables"].values()))
 
     # 种子清单逐一记录（§7.2）
     seeds = json.loads((exp_dir / "seed_manifest.json").read_text(

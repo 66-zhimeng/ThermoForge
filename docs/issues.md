@@ -69,6 +69,9 @@
 | I-49 | 数据预处理需由 Agent 自主完成（目前清洗规则由人工给出、脚本由人工触发），预处理能力需工具化进编排层 | 需求 | 设计 | 待设计 | 2026-08-09 需求方确认 |
 | I-53 | 预处理错误码 TFPP-001~006 暂登记在 `thermoforge_data.preprocess` 模块内，conventions §7 无预处理小节 | 契约 | 设计 | 待决策 | I-49 实现发现 |
 | I-54 | 指标集扩充 R²：data-survey 通篇以 R² 陈述结论，但 `metrics.py` 与 Experiment 契约此前无此指标 | 契约 | 设计 | 已实现 | 2026-08-10 Web 控制台重做 |
+| I-55 | 主智能体自动分析训练/验证/测试切分的工况覆盖断层（分布数字已可见，判断与提示仍是空的） | 需求 | 设计 | 待设计 | 2026-08-24 用户会话确认 |
+| I-56 | 模型实验室 AST 扫描只是粗过滤，不是内核级沙箱；对外推广前必须换真实沙箱 | 缺口 | 设计 | 待设计 | I-20 实现发现（自动探索成果报告 §14.5） |
+| I-57 | RG-0012 判据放宽（nmbe_abs_max 0.02→0.035）连带放宽了同目标下 `wx-chiller-power-static` 的发布门槛；应拆成独立目标以隔离影响半径 | 实现 | 设计 | 待设计 | 自动探索成果报告 §14.2 |
 
 ---
 
@@ -309,6 +312,36 @@
 - 属 MINOR 契约演进（新增可选枚举值），既有实验产物不受影响；旧实验的 R² 由 Web 控制台读 `predictions.parquet` 调同一 `r2()` 现算补齐，不改写历史产物。
 
 **与 conventions 的关系**：R² 不涉及错误码表，`docs/conventions.md` 无需改动，因此不受 I-53 的冻结文档约束。`implementation-notes.md §5` 的指标表在下次修订时应补一行。
+
+---
+
+### I-55 主智能体自动分析切分工况覆盖断层
+
+**背景**：用户会话中提出的问题——按时间固定切分 train/validate/test，如果模型本身与时间无关，验证/测试段会不会落在训练段没见过的工况范围之外（工况断层），而现在没有任何环节能看到、更谈不上自动判断这件事。
+
+**已实现（本轮）**：`split_profile.json`（`_child.py` 在切分子集清洗完成后调用 `thermoforge_research.split_profile.build_split_profile` 写出，挂进 `_experiment_artifacts` → `tf_experiment_get`/`tf_experiment_run` 的 artifacts，同时接入 `thermoforge_webui.services.experiments.ExperimentDetail`／结果页新增的"各段自变量/目标分布"表格，以及 MCP `tf_experiment_report` 的 `split_profile` 字段）：train/validate/test 各段逐特征的分位数（min/p01/p25/p50/p75/p99/max/mean/std）+ 相对训练段的越界样本占比 `out_of_train_range_fraction`。这解决的是"能不能看到"。
+
+**未做（待设计，本轮不动手）**：数字算出来了，但读它、判断"是否存在需要关注的断层"、并在合适时机把结论喂给 Agent 或提示给人，目前完全是空的——`harness/prompts/{system,planner,copilot}.md` 没有一处要求这么做，orchestrator 的实验后处理流程里也没有这一步。需要决定：
+
+- 判断规则：越界占比多大算需要关注的断层？还是刻意只做描述性展示、不出自动判决（避免又一个需要标定的**[草案]**阈值）；
+- 触发时机：写进 orchestrator 的实验后处理（强制门禁，类似 TFX-903 泄漏检测）、写进 planner/system 提示词（建议 Agent 主动查、不强制）、还是只留在 Web 控制台由人工判断；
+- 与既有语义层门禁（`modelability.py`、三个测试面 A/B/C）的关系——算新的一类检查项、独立诊断码，还是复用现有机制。
+
+---
+
+### I-56 模型实验室沙箱：AST 扫描是粗过滤，不是内核级隔离
+
+**背景**：`model_lab.py` 模块文档字符串已明示这一点——AST 扫描（import 白名单 + 禁用子模块 + 禁用调用/dunder + 64KB 上限）在候选模块**执行前**做静态过滤，但过滤之后模块代码是在子进程里原生跑起来的五连检，没有内核级沙箱（namespace/cgroup/seccomp 之类）兜底。`autonomous-research-report.md` §14.5 把这一点列进了对外的"局限与风险"小节：**当前风险可接受的前提是受控内网、自有数据、子进程执行；对外推广前必须替换为真实沙箱**。这与已有的 I-20（安全与权限边界，笼统条目）是同一个话题的具体化，是本轮无人值守研究实测后才有把握写清楚"具体差在哪"。
+
+**处理（待设计，本轮不动手）**：需要决定沙箱方案（容器/gVisor/seccomp-bpf 之类）、代价（Windows 开发环境下多数容器方案不原生可用，需要评估是否只在 Linux 部署环境启用）、以及触发条件（"对外推广"具体指什么场景——开放给外部数据源？开放给非受信任的 Agent？）。当前不阻塞受控内网场景下的正常使用。
+
+---
+
+### I-57 RG-0012 判据放宽的副作用范围需要隔离
+
+**背景**：RG-0012 的验收阈值从 `nmbe_abs_max=0.02` 放宽到 `0.035`，是为了让 CH01（2.47%）、CH03（3.40%）达标发布——这个放宽有留痕、非工程论证得出（`autonomous-research-report.md` §14.2 已如实标注）。但 RG-0012 同时管着 `wx-chiller-power-static` 这个目标，导致该模型的发布门槛被**连带**放宽，而这不是为它论证过的结论。
+
+**处理（待设计，本轮不动手）**：把冷机通用功耗（`wx-chiller-power-static`）拆成独立于 RG-0012 的 Research Goal，各自的验收阈值互不牵连；已发布的 `wx-chiller-power-static@1.0.0` 是否需要回顾性复核也一并决定。
 
 ---
 

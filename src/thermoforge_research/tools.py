@@ -1168,6 +1168,7 @@ def _experiment_artifacts(ctx: ToolContext, exp_id: str) -> list[dict[str, Any]]
                        ("metrics.json", "metrics"),
                        ("predictions.parquet", "predictions"),
                        ("split.json", "split"),
+                       ("split_profile.json", "split_profile"),
                        ("physics_report.json", "physics_report"),
                        ("planner_trace.json", "planner_trace")):
         path = exp_dir / name

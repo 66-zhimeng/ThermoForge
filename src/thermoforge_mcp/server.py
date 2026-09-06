@@ -96,7 +96,9 @@ def tf_experiment_report(experiment_id: str) -> str:
     """读取一次实验的完整报告（各评估面指标、物理检查、切分、可复现信息）。
 
     比 `tf_experiment_get` 多给出按面拆开的指标明细与补齐的 R²，适合
-    「解释这次实验为什么好/为什么差」这类问题。
+    「解释这次实验为什么好/为什么差」这类问题。`split_profile` 是
+    训练/验证/测试各段的自变量+目标分布（分位数 + 相对训练集的越界样本
+    占比），用来判断验证/测试集是否落在训练集见过的工况范围之外。
     """
     from thermoforge_webui.services.experiments import load_detail
 
@@ -113,6 +115,7 @@ def tf_experiment_report(experiment_id: str) -> str:
         "surfaces": detail.surfaces,
         "physics": detail.physics,
         "split": detail.split,
+        "split_profile": detail.split_profile,
         "r2_backfilled": detail.r2_backfilled,
         "report": detail.report,
     }, ensure_ascii=False, default=str)

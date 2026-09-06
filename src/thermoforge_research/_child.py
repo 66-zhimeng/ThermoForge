@@ -39,6 +39,7 @@ from thermoforge_research.physics_checks import (
     combine_reports,
 )
 from thermoforge_research.runner import current_environment_lock
+from thermoforge_research.split_profile import build_split_profile
 from thermoforge_research.splits import (
     check_no_leakage,
     rolling_origin_splits,
@@ -355,6 +356,11 @@ def run(spec_path: Path) -> dict[str, Any]:
         dropped[name] = before - len(subsets[name])
     if not len(subsets["train"]):
         raise ResearchError("TFX-905", "训练集清洗后无样本")
+
+    # ---- 切分子集分布画像（训练/验证/测试各段的自变量+目标分布对比,
+    # 供人工/Agent 判断是否存在工况覆盖断层；只算数字不下结论）
+    _write_json(exp_dir / "split_profile.json",
+                build_split_profile(subsets, needed))
 
     # ---- 训练
     lab_module = _load_lab_module(spec, exp_dir)
