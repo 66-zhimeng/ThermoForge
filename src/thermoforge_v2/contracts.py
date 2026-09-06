@@ -28,11 +28,11 @@ class RunConfig(BaseModel):
     max_experiments: int = Field(default=20, ge=1, le=10000)
     max_experiments_per_track: int = Field(default=4, ge=1, le=1000)
     max_turns: int = Field(default=8, ge=1, le=200)
-    token_budget: int = Field(default=200000, ge=1000)
+    token_budget: int = Field(default=1000000, ge=1000)
     strategy: Literal["independent", "top_k", "adaptive"] = "independent"
     top_k: int = Field(default=2, ge=1, le=16)
     stagnation_rounds: int = Field(default=2, ge=1, le=20)
-    experiment_workers: int = Field(default=1, ge=1, le=16)
+    experiment_workers: int = Field(default=1, ge=1, le=1)
     experiment_timeout_seconds: float = Field(default=300, ge=10, le=7200)
     turn_timeout_seconds: float = Field(default=900, ge=10, le=7200)
     max_failures: int = Field(default=3, ge=1, le=10)
@@ -50,6 +50,8 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def finite_numbers(self):
+        if self.candidates and self.max_turns < 2:
+            raise ValueError("多候选研究至少需要两轮主智能体预算（准备与结题）")
         for name in ("experiment_timeout_seconds", "turn_timeout_seconds",
                      "purge_seconds", "embargo_seconds", "y_floor"):
             if not math.isfinite(getattr(self, name)):

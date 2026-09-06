@@ -106,6 +106,32 @@ class RunStore:
         with self._db() as db:
             return self._get(db, "runs", "id", run_id)
 
+    def find_request(self, config: dict, idempotency_key: str) -> dict | None:
+        """重试直接返回原运行，不重新解释可能已经改变的环境或研究目标。"""
+        if not idempotency_key or len(idempotency_key) > 200:
+            raise V2Error("TFV2-INPUT", "必须提供长度 1–200 的幂等键")
+        config = RunConfig.model_validate(config).model_dump(mode="json")
+        request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
+        with self._db() as db:
+            row = db.execute("SELECT request_hash,data FROM runs WHERE idempotency_key=?",
+                             (idempotency_key,)).fetchone()
+            if row is None:
+                return None
+            if row[0] != request_hash:
+                raise V2Error("TFV2-CONFLICT", "同一幂等键已用于不同的研究配置")
+            return json.loads(row[1])
+
+    def begin_run(self, run_id: str) -> dict:
+        """调度领取和用户暂停共用事务，已暂停的队列任务不得重新启动。"""
+        with self._db() as db:
+            doc = self._get(db, "runs", "id", run_id)
+            if doc["status"] != "queued":
+                return doc | {"started": False}
+            doc.update(status="running", error=None)
+            self._write_run(db, doc)
+            self._event(db, run_id, "run.started", {})
+            return doc | {"started": True}
+
     def list_runs(self) -> list[dict]:
         with self._db() as db:
             docs = [json.loads(row[0]) for row in db.execute("SELECT data FROM runs")]
@@ -292,6 +318,28 @@ class RunStore:
             self._event(db, doc["run_id"], "job.settled", {"id": job_id, "status": status}, doc["track_id"])
             return doc
 
+    def start_job(self, job_id: str) -> dict:
+        """拿到实验槽后原子检查控制状态，消除暂停与开始训练之间的竞态。"""
+        with self._db() as db:
+            doc = self._get(db, "records", "id", job_id)
+            if doc["status"] != "reserved":
+                return doc | {"started": False}
+            run = self._get(db, "runs", "id", doc["run_id"])
+            if run["status"] != "running":
+                doc.update(status="cancelled", finished_at=now(), result={
+                    "failure_category": "control", "error": "研究已暂停或停止，未开始训练",
+                    "training_started": False, "reservation_consumed": True})
+                run["experiments_settled"] += 1
+                self._write_run(db, run)
+                started = False
+            else:
+                doc.update(status="running", started_at=now())
+                started = True
+            db.execute("UPDATE records SET data=? WHERE id=?", (encode(doc), job_id))
+            self._event(db, doc["run_id"], "job.started" if started else "job.cancelled",
+                        {"id": job_id}, doc["track_id"])
+            return doc | {"started": started}
+
     @staticmethod
     def _event(db, run_id, kind, payload, track_id=None):
         return db.execute("INSERT INTO events(run_id,track_id,kind,payload,at) VALUES(?,?,?,?,?)",
@@ -321,9 +369,20 @@ class RunStore:
         with self._db() as db:
             db.execute("DELETE FROM leases WHERE scope=? AND owner=?", (scope, owner))
 
+    def clear_leases(self):
+        """仅由已经取得服务 OS 独占锁的恢复入口调用。"""
+        with self._db() as db:
+            db.execute("DELETE FROM leases")
+
     def snapshot(self, run_id):
-        result = {"run": self.get_run(run_id), "tracks": self.list_tracks(run_id)}
-        for kind in ("sources", "ideas", "jobs", "findings", "decisions", "messages", "reports"):
-            result[kind] = self.records(run_id, kind)
-        result["events"] = self.events(run_id, limit=1000)["events"]
+        with self._db() as db:
+            result = {"run": self._get(db, "runs", "id", run_id), "tracks": [json.loads(row[0])
+                for row in db.execute("SELECT data FROM tracks WHERE run_id=? ORDER BY id", (run_id,))]}
+            for kind in ("sources", "ideas", "jobs", "findings", "decisions", "messages", "reports"):
+                result[kind] = [json.loads(row[0]) for row in db.execute(
+                    "SELECT data FROM records WHERE run_id=? AND kind=? ORDER BY rowid", (run_id, kind))]
+            rows = db.execute("SELECT seq,track_id,kind,payload,at FROM events WHERE run_id=? ORDER BY seq DESC LIMIT 1000",
+                              (run_id,)).fetchall()
+            result["events"] = [{"seq": row[0], "run_id": run_id, "track_id": row[1], "kind": row[2],
+                                 "payload": json.loads(row[3]), "at": row[4]} for row in reversed(rows)]
         return result

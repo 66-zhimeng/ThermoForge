@@ -104,3 +104,31 @@ def test_invalid_config_rejected():
         RunConfig(goal_id="RG-0001", dataset_ref="x", candidates=-1)
     with pytest.raises(ValueError):
         RunConfig(goal_id="RG-0001", dataset_ref="x", y_floor=float("inf"))
+    with pytest.raises(ValueError):
+        RunConfig(goal_id="RG-0001", dataset_ref="x", experiment_workers=2)
+
+
+def test_queued_pause_wins_over_delayed_scheduler(tmp_path):
+    store = RunStore(tmp_path / "state")
+    run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001"},
+                           {"fingerprint": "frozen"}, "one")
+    rid = run["run_id"]
+    store.control(rid, "pause")
+    assert not store.begin_run(rid)["started"]
+    assert store.get_run(rid)["status"] == "paused"
+    store.control(rid, "resume")
+    assert store.begin_run(rid)["started"]
+    assert not store.begin_run(rid)["started"]
+
+
+def test_reserved_job_does_not_start_after_pause(tmp_path):
+    store, rid = setup_run(tmp_path)
+    job = store.reserve_job(rid, "t0", "idea", {}, "one")
+    store.control(rid, "pause")
+    result = store.start_job(job["id"])
+    assert not result["started"]
+    assert result["result"]["training_started"] is False
+    assert result["result"]["reservation_consumed"] is True
+    assert store.get_run(rid)["experiments_settled"] == 1
+    assert not store.start_job(job["id"])["started"]
+    assert store.get_run(rid)["experiments_settled"] == 1
