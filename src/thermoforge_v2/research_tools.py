@@ -370,7 +370,7 @@ class ResearchTools:
                 "url": _STRING, "title": _STRING}, ["url", "title"]),
             ("research_source_excerpt", "按偏移继续阅读自己已登记资料，记录本次实际读取范围。", {
                 "source_id": _STRING, "offset": {"type": "integer", "minimum": 0}}, ["source_id"]),
-            ("research_source_register", "登记外部取得的资料摘录或历史证据；明确标为提交者提供，不能伪称工具验证。", {
+            ("research_source_register", "登记外部取得的资料摘录或历史证据；history必须用history_ids引用本轨迹真实job。用户任务、冻结协议和自主猜想不必登记成来源，可直接创建conjecture想法。资料明确标为提交者提供，不能伪称工具验证。", {
                 "title": _STRING, "kind": {"enum": ["paper", "article", "history"]},
                 "url": _STRING, "doi": _STRING, "content": _STRING,
                 "read_scope": {"enum": ["metadata", "abstract", "excerpt", "history"]},

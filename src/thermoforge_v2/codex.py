@@ -288,8 +288,8 @@ class CodexSession:
             self.state = "idle"
             self.info = {"pid": self.pid, "thread_id": self.thread_id, "state": self.state,
                          "model": result.get("model"), "model_provider": result.get("modelProvider"),
-                         "reasoning_effort": result.get("reasoningEffort") if result.get("reasoningEffort") is not None
-                         else cfg.get("model_reasoning_effort"),
+                         "reasoning_effort": self.config.effort or result.get("reasoningEffort")
+                         or cfg.get("model_reasoning_effort"),
                          "server": agent, "permission_profile": profile,
                          "auth_type": (account.get("account") or {}).get("type"),
                          "dynamic_tools": sorted(self._tool_names),
