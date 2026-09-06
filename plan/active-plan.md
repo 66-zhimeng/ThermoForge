@@ -4,7 +4,10 @@
 六个实例各自独立进程、会话和研究循环，消息经软件传输，各自产出方案和报告。
 用户已确认可以后台隐藏启动，无需独立窗口；通过软件或副驾驶查看状态和报告。
 Codex 接入为首期核心；其他模型后端保留后续兼容目标。当前 V2 实施入口为
-[V2 实施计划](D:/ceshi_python/GitHub/ThermoForge/plan/v2-implementation-plan.md)，阶段任务尚未实施。
+[V2 实施计划](D:/ceshi_python/GitHub/ThermoForge/plan/v2-implementation-plan.md)。
+已在 `codex/thermoforge-v2` 实现持久后台服务、独立 Codex、研究工具、来源谱系、
+报告、GUI/CLI/MCP 和插件；验收记录见 [V2 验证说明](../docs/v2-validation.md)。
+原分支已有修改按功能提交并推送，基线为 `be16ff1`，运行代码基线为 `1953326`。
 补充交互要求：用户可通过外部操作副驾驶经插件/MCP 启动和管理整套软件；
 GUI/CLI/MCP 共用应用服务，内部研究循环自主运行，对话控制为正式交付项。
 [原始方案讨论稿](D:/ceshi_python/GitHub/ThermoForge/plan/v2-research-discussion.md) 原样留存。

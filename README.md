@@ -7,6 +7,18 @@ ThermoForge 接收物模型、历史数据和研究目标，持续提出假设�
 
 ThermoForge takes an object model, historical data, and a research goal, then continuously forms hypotheses, runs experiments, accumulates evidence, and delivers verifiable, deployable model packages.
 
+## V2：独立软件管理六个 Codex
+
+V2 在后台管理一个主 Codex 与五个候选 Codex，每个实例有独立进程、持久会话和研究轨迹。
+候选通过软件查资料、登记想法来源、提交模型、运行实验、分析反馈并保存报告；主智能体比较路线并总结。
+GUI、`tf v2` 与 MCP 共用独立服务，关闭客户端后研究继续。可选插件提供外部操作副驾驶。
+
+- [V2 使用指南](docs/v2-getting-started.md)：安装、准备、启动、暂停恢复、报告和插件连接。
+- [V2 实现与验证](docs/v2-validation.md)：实际验收、实验隔离及兼容范围。
+- [V2 实施计划](plan/v2-implementation-plan.md)与[原始方案讨论稿](plan/v2-research-discussion.md)：保留研究依据和演进方向。
+
+V1 入口继续保留。V2 当前 Codex 协议基线为 `0.153.4`；其他模型后端和多智能体效果基准见验证说明。
+
 ---
 
 ## 是什么 / 不是什么
