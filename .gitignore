@@ -8,8 +8,11 @@ research/
 models/
 *.egg-info/
 .pytest_basetemp/
+.pytest_basetemp_v2*/
+.pytest_v2*/
 harness/agent.toml
 .mcp.json
+!plugins/thermoforge/.mcp.json
 
 # 处理后数据导出（scripts/export_processed_dataset.py）
 data_out/

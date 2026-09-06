@@ -1,0 +1,19 @@
+{
+  "name": "thermoforge",
+  "version": "2.0.0",
+  "description": "通过自然语言准备、启动、观察和控制 ThermoForge V2 后台研究，并读取可追溯报告。",
+  "author": {
+    "name": "ThermoForge"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ThermoForge 研究副驾驶",
+    "shortDescription": "管理主 Codex 与五个候选的后台研究和证据报告。",
+    "longDescription": "作为独立 ThermoForge 软件的外部操作副驾驶，使用统一 MCP 接口准备、启动、查询、暂停、恢复和取消研究，读取每条候选路线的来源、实验、发现和综合报告。内部研究生命周期由 ThermoForge 后台服务负责。",
+    "developerName": "ThermoForge",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": ["检查 ThermoForge 的数据和 Codex 准备状态。", "用主 Codex 和五个候选开展指定目标的研究。", "解释各条路线为什么保留或淘汰，给出来源与实验依据。"]
+  },
+  "mcpServers": "./.mcp.json"
+}

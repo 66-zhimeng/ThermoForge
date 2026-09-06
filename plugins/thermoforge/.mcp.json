@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "thermoforge-v2": {
+      "command": "python",
+      "args": ["scripts/launch_mcp.py"],
+      "cwd": "."
+    }
+  }
+}
