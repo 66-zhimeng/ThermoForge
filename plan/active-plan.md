@@ -1,5 +1,16 @@
 # Active Plan
 
+2026-09-06：用户最新明确 V2 是独立软件，首期由 ThermoForge 管理主 Codex＋五个候选 Codex；
+六个实例各自独立进程、会话和研究循环，消息经软件传输，各自产出方案和报告。
+用户已确认可以后台隐藏启动，无需独立窗口；通过软件或副驾驶查看状态和报告。
+Codex 接入为首期核心；其他模型后端保留后续兼容目标。当前 V2 实施入口为
+[V2 实施计划](D:/ceshi_python/GitHub/ThermoForge/plan/v2-implementation-plan.md)，阶段任务尚未实施。
+补充交互要求：用户可通过外部操作副驾驶经插件/MCP 启动和管理整套软件；
+GUI/CLI/MCP 共用应用服务，内部研究循环自主运行，对话控制为正式交付项。
+[原始方案讨论稿](D:/ceshi_python/GitHub/ThermoForge/plan/v2-research-discussion.md) 原样留存。
+上一轮插件优先的解释已被替代，保留为 [历史稿](D:/ceshi_python/GitHub/ThermoForge/plan/archive/v2-plugin-first-superseded.md)。
+下文保留 V1 的实施任务、约束与历史记录。
+
 ## Objective
 
 让模型实验室（`category=lab`）成为**自治**通路：Agent 自己写模型代码、自己在
