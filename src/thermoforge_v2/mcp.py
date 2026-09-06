@@ -3,10 +3,180 @@
 from __future__ import annotations
 
 import json
+import math
+import os
+from collections import Counter
 from pathlib import Path
 import uuid
 
 from .client import V2Client
+
+
+MAX_RESPONSE_BYTES = 32000
+_EVIDENCE_FIELDS = ("source_ids", "idea_ids", "job_ids", "finding_ids", "evidence_ids",
+                    "parent_idea_ids", "parent_job_ids")
+
+
+def _encode(value):
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _clip(value, size=320):
+    """按 UTF-8 字节保留原文片段；不让截断成为无标记的改写。"""
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    value = str(value)
+    raw = value.encode("utf-8")
+    marker = "…[截断]"
+    if len(raw) <= size:
+        return value
+    return raw[:max(0, size - len(marker.encode("utf-8")))].decode("utf-8", errors="ignore") + marker
+
+
+def _bounded(value, *, size=320, depth=3):
+    if isinstance(value, dict):
+        if depth <= 0:
+            return "[嵌套内容省略，见完整工件]"
+        result = {_clip(key, 100): _bounded(item, size=size, depth=depth-1)
+                  for key, item in list(value.items())[:8]}
+        if len(value) > 8:
+            result["_omitted_fields"] = len(value) - 8
+        while len(_encode(result).encode("utf-8")) > max(512, size * 4) and len(result) > 1:
+            removable = [key for key in result if key != "_omitted_fields"]
+            result.pop(removable[-1])
+            result["_omitted_fields"] = result.get("_omitted_fields", 0) + 1
+        return result
+    if isinstance(value, (list, tuple)):
+        if depth <= 0:
+            return "[列表内容省略，见完整工件]"
+        result = [_bounded(item, size=size, depth=depth-1) for item in value[:8]]
+        if len(value) > 8:
+            result.append(f"[其余 {len(value)-8} 项省略]")
+        return result
+    return _clip(value, size)
+
+
+def _pick(record, fields, *, size=320):
+    return {key: _bounded(record.get(key), size=size) for key in fields}
+
+
+def _records(value):
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _latest_per_track(records):
+    # store.snapshot 的记录按写入顺序提供；每条轨迹最后登记的记录优先。
+    latest = {}
+    for item in records:
+        latest[item.get("track_id")] = item
+    return list(latest.values())
+
+
+def _compact_envelope(name, result, path):
+    """仅抽取已存事实，轮流填充各类记录，防止长原文挤掉来源或比较依据。"""
+    data = result if isinstance(result, dict) else {}
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    collections = {key: _records(data.get(key)) for key in
+                   ("tracks", "reports", "sources", "ideas", "jobs", "events")}
+    counts = {}
+    supplied_counts = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    for key in ("tracks", "ideas", "jobs", "sources"):
+        counts[key] = supplied_counts.get(key) if key in supplied_counts else (
+            len(data[key]) if isinstance(data.get(key), list) else None)
+    comparison = data.get("comparability") or {}
+    comparison = comparison if isinstance(comparison, dict) else {}
+    excluded = comparison.get("excluded")
+    groups = _records(comparison.get("groups"))
+    config = run.get("config") if isinstance(run.get("config"), dict) else {}
+    summary = {
+        **_pick(run, ("run_id", "status", "version", "updated_at", "error")),
+        "title": _clip(data.get("title")), "summary": _bounded(counts),
+        "budget": _pick(config, ("token_budget", "max_experiments", "max_experiments_per_track", "max_turns")),
+        "progress": _pick(run, ("tokens_used", "experiments_reserved", "experiments_settled")),
+        "usage_totals": _bounded((data.get("usage") or {}).get("totals")) if isinstance(data.get("usage"), dict) else None,
+        "comparison": {"note": _clip(comparison.get("note"), 640),
+                       "excluded_count": len(excluded) if isinstance(excluded, list) else None,
+                       "group_count": len(groups) if isinstance(comparison.get("groups"), list) else None,
+                       "groups": []},
+        "message": "以下为原始记录的有界摘录，未生成新结论。列表按 sampling 抽样；字段截断有标记。"
+                   "未返回的内容不等于不存在；null 表示缺失或不可得，不按零计算。完整结果见工件。",
+    }
+    if "cursor" in data:
+        summary["cursor"] = _bounded(data["cursor"])
+    latest_reports = _latest_per_track(collections["reports"])
+    # 先覆盖不同轨迹，再列最近想法；来源优先匹配这些想法的引用。
+    ideas = _latest_per_track(collections["ideas"])
+    ideas += [item for item in reversed(collections["ideas"]) if item not in ideas]
+    referenced = {sid for idea in ideas[:32] for sid in (idea.get("source_ids") or []) if isinstance(sid, str)}
+    sources = sorted(collections["sources"], key=lambda item: item.get("id") not in referenced)
+    errors = []
+    for record in reversed(collections["jobs"]):
+        result_record = record.get("result") if isinstance(record.get("result"), dict) else {}
+        error = result_record.get("error") or record.get("error")
+        if error is not None:
+            errors.append({**_pick(record, ("id", "track_id", "status", "created_at")),
+                           "error": _bounded(error), "failure_category": _bounded(result_record.get("failure_category"))})
+    pools = {
+        "latest_reports": [_pick(r, ("id", "track_id", "kind", "title", "summary", "limitations", *_EVIDENCE_FIELDS), size=480)
+                           for r in latest_reports],
+        "tracks": [{**_pick(r, ("track_id", "role", "status", "phase", "turns", "pid", "session_id", "error")),
+                    "usage": _bounded(r.get("usage"), size=80)} for r in collections["tracks"]],
+        "sources": [_pick(r, ("id", "track_id", "title", "url", "doi", "read_scope", "verification")) for r in sources[:32]],
+        "ideas": [_pick(r, ("id", "track_id", "statement", "reason", "origin", *_EVIDENCE_FIELDS)) for r in ideas[:32]],
+        "comparison_groups": [{"protocol_fingerprint": _clip(g.get("protocol_fingerprint")),
+                               "compared_count": len(g["rows"]) if isinstance(g.get("rows"), list) else None,
+                               "best_per_metric": _bounded(g.get("best_per_metric"), size=100, depth=4)} for g in groups[:8]],
+        "recent_errors": errors[:8],
+        "recent_events": [_pick(e, ("seq", "track_id", "kind", "at", "payload"), size=160) for e in collections["events"][-8:]],
+    }
+    # prepare/list 也可能超限；保留真实候选与缺项，仍不能虚构发现结果。
+    if isinstance(result, list):
+        pools["runs"] = [_pick(r, ("run_id", "status", "version", "updated_at", "error")) for r in _records(result)[:32]]
+    for key in ("goals", "datasets"):
+        if key in data:
+            pools[key] = [_pick(r, ("id", "goal_id", "ref", "dataset_ref", "name", "title")) for r in _records(data[key])[:16]]
+    if "available" in data:
+        summary.update(_pick(data, ("available", "ready", "missing", "errors", "defaults")))
+    if "final_evaluation" in data:
+        final = data.get("final_evaluation")
+        summary["final_evaluation"] = _pick(final, ("status", "job_id", "experiment_id", "selection_reason", "selection_metric",
+                                                    "feedback_to_agents", "surfaces")) if isinstance(final, dict) else None
+    summary["progress"]["jobs_by_status"] = dict(Counter(str(j.get("status") or "unknown")
+        for j in collections["jobs"])) if isinstance(data.get("jobs"), list) else None
+    totals = {**{key: len(value) if isinstance(data.get(key), list) else None for key, value in collections.items()},
+              "latest_reports": len(latest_reports) if isinstance(data.get("reports"), list) else None,
+              "comparison_groups": len(groups) if isinstance(comparison.get("groups"), list) else None,
+              "recent_errors": len(errors) if isinstance(data.get("jobs"), list) else None,
+              "recent_events": len(collections["events"]) if isinstance(data.get("events"), list) else None}
+    summary["sampling"] = {key: {"available": totals.get(key, len(data[key]) if isinstance(data.get(key), list) else
+                                len(result) if key == "runs" else None), "returned": 0}
+                           for key in pools}
+    report_artifacts = [_pick(a, ("format", "path"), size=2048) for a in _records(data.get("artifacts"))[:3]]
+    envelope = {"ok": True, "tool": _clip(name, 120), "summary": summary, "truncated": True,
+                "artifacts": [{"path": str(path), "kind": "full_result"}, *report_artifacts]}
+    summary["sampling_note"] = "每轨迹最新报告与想法优先；来源优先匹配想法引用；错误/事件取最近记录。受总字节上限约束。"
+    for key in pools:
+        if key != "comparison_groups":
+            summary[key] = []
+    # 基础字段也有长度界限；极长操作系统路径等异常输入仍不能突破响应协议。
+    if len(_encode(envelope).encode("utf-8")) > MAX_RESPONSE_BYTES:
+        for depth in (5, 4, 3, 2, 1):
+            fallback = _bounded(envelope, size=256, depth=depth)
+            if len(_encode(fallback).encode("utf-8")) <= MAX_RESPONSE_BYTES:
+                return fallback
+    for index in range(max((len(pool) for pool in pools.values()), default=0)):
+        for key, pool in pools.items():
+            if index >= len(pool):
+                continue
+            target = summary["comparison"]["groups"] if key == "comparison_groups" else summary[key]
+            target.append(pool[index])
+            summary["sampling"][key]["returned"] += 1
+            if len(_encode(envelope).encode("utf-8")) > MAX_RESPONSE_BYTES:
+                target.pop()
+                summary["sampling"][key]["returned"] -= 1
+    return envelope
 
 
 def _invoke(name, function, client=None):
@@ -14,25 +184,19 @@ def _invoke(name, function, client=None):
         client = client or V2Client()
         result = function(client)
         envelope = {"ok": True, "tool": name, "summary": result}
-        body = json.dumps(envelope, ensure_ascii=False, default=str)
-        if len(body.encode("utf-8")) > 32000:
+        body = _encode(envelope)
+        if len(body.encode("utf-8")) > MAX_RESPONSE_BYTES:
             directory = client.root / "tool_artifacts"
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / f"{uuid.uuid4().hex}.json"
-            path.write_text(body, encoding="utf-8", newline="\n")
-            summary = {"message": "完整结果已保存为本地工件", "path": str(path)}
-            if isinstance(result, dict):
-                run = result.get("run") or result
-                summary.update({k: run[k] for k in ("run_id", "status", "version") if k in run})
-                if "tracks" in result:
-                    summary["tracks"] = [{k: t.get(k) for k in ("track_id", "status", "phase", "turns", "error")}
-                                          for t in result["tracks"]]
-            body = json.dumps({"ok": True, "tool": name, "summary": summary, "truncated": True,
-                               "artifacts": [{"path": str(path), "kind": "full_result"}]}, ensure_ascii=False)
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(body, encoding="utf-8", newline="\n")
+            os.replace(temporary, path)
+            body = _encode(_compact_envelope(name, result, path))
         return body
     except Exception as exc:
-        return json.dumps({"ok": False, "tool": name, "code": getattr(exc, "code", "TFV2-ERROR"),
-                           "error": str(exc)}, ensure_ascii=False)
+        return _encode({"ok": False, "tool": _clip(name, 120), "code": _clip(getattr(exc, "code", "TFV2-ERROR"), 120),
+                        "error": _clip(str(exc), 16000)})
 
 
 def tf_v2_prepare(config: dict | None = None) -> str:
