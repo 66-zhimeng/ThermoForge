@@ -158,6 +158,9 @@ def build_server():
     for extra in EXTRA_TOOLS:
         server.add_tool(extra, name=extra.__name__,
                         description=_describe(extra))
+    from thermoforge_v2.mcp import CONTROL_TOOLS
+    for tool in CONTROL_TOOLS:
+        server.add_tool(tool, name=tool.__name__, description=_describe(tool))
     return server
 
 

@@ -103,6 +103,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pretty", action="store_true",
                         help="缩进 JSON（默认单行紧凑）")
     sub = parser.add_subparsers(dest="group", required=True)
+    v2 = sub.add_parser("v2", help="独立后台 Codex 研究控制", add_help=False)
+    v2.add_argument("-h", "--help", action="store_true", dest="v2_help")
+    v2.add_argument("v2_args", nargs=argparse.REMAINDER)
 
     def tool_cmd(group_sub, name: str, help_text: str):
         p = group_sub.add_parser(name, help=help_text)
@@ -347,6 +350,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.group == "agent":
             return _run_agent(args, ctx)
+        if args.group == "v2":
+            from thermoforge_v2.__main__ import main as v2_main
+            return v2_main(["--help"] if args.v2_help else args.v2_args, roots={"research_root": str(ctx.research_root),
+                "vault_root": str(ctx.vault_root), "models_root": str(ctx.models_root)})
         handler = getattr(args, "handler", None)
         if handler is None:
             raise CliError(f"命令未实现: {args.group} {args.command}")
