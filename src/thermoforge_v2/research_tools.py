@@ -7,6 +7,7 @@ Codex 只获得本模块声明的工具。旧实验内核及其完整留出制�
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import io
@@ -44,6 +45,9 @@ from thermoforge_research.whitelist import (
     check_candidate_inputs, check_view_within_whitelist,
 )
 from thermoforge_v2.experiment_identity import experiment_fingerprint
+from thermoforge_v2.evidence_projection import compact_record, numeric_metrics, project_record, safe_feedback
+from thermoforge_v2.feedback import research_diagnostics
+from thermoforge_v2.evidence_access import authorized_record
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_SOURCE_CHARS = 120_000
@@ -332,43 +336,8 @@ class ResearchTools:
         return self.store.records(self.run_id, kind, track_id=self.track_id)
 
     def _record(self, kind: str, record_id: str, *, allow_shared: bool = False) -> dict[str, Any]:
-        for item in self._records(kind):
-            if item["id"] == record_id:
-                return item
-        if allow_shared:
-            run = self.store.get_run(self.run_id)
-            track = self.store.get_track(self.run_id, self.track_id)
-            foreign = next((item for item in self.store.records(self.run_id, kind)
-                            if item["id"] == record_id), None)
-            if foreign is not None and track.get("role") == "main":
-                # 首轮提案也对协调者保持隔离；共同任务与证据必须先确定，
-                # 防止主智能体根据先到的候选想法继续引导尚未提交的候选。
-                if (not self.autonomous or run.get("final_report_phase")
-                        or self.store.autonomy_state(self.run_id)["sharing_ready"]):
-                    return foreign
-            messages = [m for m in self.store.records(self.run_id, "messages")
-                        if m.get("from") == "main" and m.get("to") in {self.track_id, "all"}
-                        and record_id in (m.get("evidence_ids") or [])]
-            if foreign is not None and foreign.get("track_id") == "main" and any(
-                    m.get("initial_task") is True for m in messages):
-                # 初始共同证据与后期跨候选分享不同；只有服务标明初始任务、
-                # 且主智能体本身登记的显式引用能在独立模式/首轮使用。
-                return foreign
-            # 自主研究按已完成的研究阶段开放分享，不能用对话次数绕过首轮隔离。
-            sharing_ready = (self.store.autonomy_state(self.run_id)["sharing_ready"]
-                             if self.autonomous else int(track.get("turns", 0)) >= 2)
-            if self.autonomous and track.get("role") == "candidate":
-                # 失败候选曾被阶段屏障豁免，恢复后仍须先完成自己的独立首轮。
-                # 全队已经进入 sharing 不能替代当前候选的首次提案/实验。
-                proposals = {p["id"] for p in self._records("proposals")
-                             if p.get("status") == "committed"}
-                independent_done = any(j.get("proposal_id") in proposals and j.get("status") in {
-                    "completed", "failed", "cancelled", "interrupted"} for j in self._records("jobs"))
-                sharing_ready = sharing_ready and independent_done
-            if run["config"]["strategy"] != "independent" and sharing_ready:
-                if messages and foreign is not None:
-                    return foreign
-        raise ValueError(f"{kind} 引用不存在或不属于当前轨迹: {record_id}")
+        return authorized_record(self.store, self.run_id, self.track_id, kind, record_id,
+                                 allow_shared=allow_shared)
 
     def _refs(self, kind: str, values: Any, *, allow_shared: bool = False) -> list[str]:
         if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
@@ -412,9 +381,11 @@ class ResearchTools:
             ("research_experiment_run", "预留预算并运行自己的模型实验，重复幂等键不会再次训练；只返回验证反馈。", {
                 "idea_id": _STRING, "model": ModelSpec.model_json_schema(),
                 "proposal_id": _STRING, "idempotency_key": _STRING}, ["idea_id", "model", "idempotency_key"]),
-            ("research_history", "读取当前轨迹来源、想法、实验反馈、发现与报告；不读取其他候选或最终留出。", {
-                "kind": {"enum": ["sources", "ideas", "proposals", "jobs", "findings", "reports", "stops"]},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, []),
+            ("research_history", "默认紧凑读取本轨迹证据，按创建顺序分页；next_cursor用于继续读新增记录。记录更新按ID重读。record_ids按需读取自己或已授权共享证据，compact=false返回完整允许字段；长文本可单字段加offset分页，文献正文用source_excerpt。", {
+                "kind": {"enum": ["sources", "ideas", "proposals", "jobs", "findings", "reports", "stops", "decisions"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "cursor": _STRING, "fields": _STRINGS, "record_ids": _STRINGS,
+                "compact": {"type": "boolean"}, "offset": {"type": "integer", "minimum": 0}}, []),
             ("research_finding_create", "根据自己的实验登记发现、解释和局限，也记录失败原因。", {
                 "statement": _STRING, "interpretation": _STRING, "limitations": _STRING,
                 "job_ids": _STRINGS, "idea_ids": _STRINGS,
@@ -688,7 +659,8 @@ class ResearchTools:
 
     @staticmethod
     def _job_response(job: Mapping[str, Any]) -> dict[str, Any]:
-        response = {"id": job["id"], "status": job["status"], "result": job.get("result")}
+        response = {"id": job["id"], "status": job["status"],
+                    "result": safe_feedback(job["result"]) if isinstance(job.get("result"), Mapping) else None}
         if "executed" in job:
             response["executed"] = job["executed"]
         if job.get("reused_from_job_id"):
@@ -751,9 +723,10 @@ class ResearchTools:
                                             timeout_seconds=timeout)
                 surface = (env.get("summary", {}).get("surfaces") or {}).get("validate") or {}
                 feedback = {"experiment_id": exp_id, "protocol_fingerprint": p["fingerprint"],
-                            "feedback_surface": "validate", "metrics": surface.get("metrics") or {},
+                            "feedback_surface": "validate", "metrics": numeric_metrics(surface.get("metrics")),
                             "n_samples": surface.get("n_samples"), "model": {"spec": request["model"]},
-                            "duration_seconds": env.get("summary", {}).get("duration_seconds")}
+                            "duration_seconds": env.get("summary", {}).get("duration_seconds"),
+                            "diagnostics": research_diagnostics(env.get("summary") or {})}
                 if spec.category == "lab":
                     name, version = parse_lab_ref(str(spec.hyperparameters["lab"]))
                     lab = self.ctx.lab_store.get(name, version)
@@ -769,15 +742,83 @@ class ResearchTools:
                 settled = self.store.settle_job(job["id"], "failed", feedback)
         return self._job_response(settled)
 
-    def _history(self, kind: str = "jobs", limit: int = 20) -> dict[str, Any]:
-        if kind not in {"sources", "ideas", "proposals", "jobs", "findings", "reports", "stops"}:
+    def _history(self, kind: str = "jobs", limit: int = 20, cursor: str | None = None,
+                 fields: list[str] | None = None, record_ids: list[str] | None = None,
+                 compact: bool = True, offset: int | None = None) -> dict[str, Any]:
+        if kind not in {"sources", "ideas", "proposals", "jobs", "findings", "reports", "stops", "decisions"}:
             raise ValueError("不允许读取该类记录")
-        records = self._records(kind)[-max(1, min(50, int(limit))):]
-        if kind == "sources":
-            records = [{**r, "content": (r.get("content") or "")[:SOURCE_EXCERPT_CHARS],
-                        "delivered_scope": "excerpt" if len(r.get("content") or "") > SOURCE_EXCERPT_CHARS
-                        else r.get("read_scope")} for r in records]
-        return {"kind": kind, "records": records}
+        if not isinstance(compact, bool):
+            raise ValueError("compact 必须为布尔值")
+        project_record(kind, {}, fields)  # Empty histories still validate projections.
+        limit = max(1, min(50, int(limit)))
+        scope = _digest([self.run_id, self.track_id, kind])
+
+        def encode_cursor(after: str | None) -> str:
+            return base64.urlsafe_b64encode(json.dumps({"v": 1, "scope": scope, "after": after},
+                separators=(",", ":")).encode()).decode()
+
+        after = None
+        if cursor is not None:
+            try:
+                if not isinstance(cursor, str) or len(cursor) > 2000:
+                    raise ValueError()
+                doc = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+                if (doc.get("v") != 1 or doc.get("scope") != scope or set(doc) != {"v", "scope", "after"}
+                        or doc["after"] is not None and not isinstance(doc["after"], str)):
+                    raise ValueError()
+                after = doc["after"]
+            except (ValueError, TypeError, AttributeError):
+                raise ValueError("cursor 无效或不属于当前轨迹和记录类型") from None
+        if record_ids is not None:
+            if cursor is not None:
+                raise ValueError("按 ID 读取不能同时传入 cursor")
+            if not isinstance(record_ids, list) or not record_ids or len(record_ids) > 50:
+                raise ValueError("record_ids 必须为 1–50 个 ID")
+            ids = self._refs(kind, record_ids, allow_shared=True)
+            records = [self._record(kind, value, allow_shared=True) for value in ids]
+        else:
+            records = self._records(kind)
+            if after is not None:
+                index = next((i for i, record in enumerate(records) if record["id"] == after), None)
+                if index is None:
+                    raise ValueError("cursor 的记录锚点不存在或不可见")
+                records = records[index + 1:]
+        if offset is not None and (compact or record_ids is None or len(record_ids) != 1
+                                   or not fields or len(fields) != 1
+                                   or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0):
+            raise ValueError("offset 需 compact=false、单个 record_ids 和单个文本 fields")
+        delivered: list[dict[str, Any]] = []
+        budget = 24 * 1024  # Leave room for envelope/cursors without lossy fallback.
+        for record in records[:limit]:
+            value = compact_record(kind, record, fields) if compact else project_record(kind, record, fields)
+            if offset is not None:
+                field = fields[0]
+                body = value.get(field)
+                if field not in {"title", "summary", "body", "reason", "statement", "prediction", "falsification",
+                                 "interpretation", "limitations", "expected_cost"} or not isinstance(body, str):
+                    raise ValueError("offset 仅用于允许读取的文本字段")
+                start = min(offset, len(body))
+                value[field] = body[start:start + 6000]
+                end = start + len(value[field])
+                value["text_page"] = {"field": field, "offset": start, "next_offset": end,
+                                      "has_more": end < len(body), "total_chars": len(body)}
+            size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+            if delivered and size > budget:
+                break
+            if size > budget:
+                # One oversized record is still explicitly delivered, retaining its
+                # ID so callers can read each full text field with offset safely.
+                value = compact_record(kind, record, fields)
+                size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+            delivered.append(value)
+            budget -= size
+        response: dict[str, Any] = {"kind": kind, "records": delivered,
+                                    "has_more": len(delivered) < len(records), "compact": compact}
+        if record_ids is None:
+            response["next_cursor"] = encode_cursor(delivered[-1]["id"] if delivered else after)
+        elif len(delivered) < len(records):
+            response["remaining_record_ids"] = [record["id"] for record in records[len(delivered):]]
+        return response
 
     def _finding_create(self, statement: str, interpretation: str, limitations: str,
                         job_ids: list[str], idea_ids: list[str] | None = None,
