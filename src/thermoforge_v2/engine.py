@@ -16,18 +16,23 @@ from .research_tools import ResearchTools
 from .store import RunStore
 from .strategy import strategy_advice
 from .usage import begin_process, merge_usage
+from .evidence_projection import compact_record
+from .turn_context import acknowledge_context, build_turn_context, read_message_page, build_team_page
 
 
 RESEARCH_INSTRUCTIONS = """你是 ThermoForge 中一个独立的 Codex 研究智能体。
 使用提供的研究工具连续完成资料、假设、实现、实验、反馈和报告。
 研究对象是暖通设备模型，不是训练或更改 Codex 的模型权重。
-首次获取 research_protocol，后续沿用冻结协议并按需读取 history/messages 增量；
+每轮已投递冻结协议摘要、未读消息和新反馈，不必再次轮询相同内容。
+首次实现模型前按需获取完整 research_protocol，后续沿用冻结协议；
 恢复会话保留上下文时不必每轮重复读取不变协议。遵守冻结数据/白名单/评价协议。工具返回 ok=false
 必须阅读错误并修复。所有想法在实验前登记来源、理由、预测和反证条件；
 首次自主猜想可直接调用 research_idea_create(origin="conjecture")，无需先登记或编造来源。
 后续基于实验结果的想法用 origin="history" 和真实 parent_job_ids 即可，
 不必再重复登记一份 history source。不虚构文献阅读。每次实验后记录发现与失败原因，
-据真实反馈决定下一步。模型源码通过 research_lab_submit 提交，并可自主修复。
+据真实反馈决定下一步，每次分析后保存简短的研究报告，逐步累积结果与限制。
+优先依据 objective_contract 判断达标、优化或探索是否有继续价值；实验成功不等于目标达成。
+模型源码通过 research_lab_submit 提交，并可自主修复。
 不得寻找原始数据文件、最终留出答案、其他候选私有文件或绕过工具运行训练。
 只经 ThermoForge 传递消息和分享证据，不创建原生子智能体。
 结束前以工具提交有来源、实验关联、失败分析与限制的报告；一段自然语言答复
@@ -76,6 +81,7 @@ class ResearchEngine:
                 state = {"pausing": "paused", "cancelling": "cancelled"}.get(state, "queued")
                 self.store.update_run(rid, {"status": state})
                 self.store.event(rid, "service.recovered", {"status": state})
+                await asyncio.to_thread(self.store.save_checkpoint, rid, "service.recovered")
                 if state == "queued":
                     self.launch(rid)
 
@@ -83,10 +89,15 @@ class ResearchEngine:
         return self.store.records(rid, kind, track_id=tid)
 
     def _specs(self, role):
-        result = [spec("research_messages", "读取软件投递给自己的任务与已发布发现。")]
+        result = [spec("research_messages", "分页读取未完整处理的消息；任意旧消息可通过 record_ids 和 offset 重读。全部正文投递且回合成功后才确认处理。",
+                       {"include_read": {"type": "boolean"},
+                        "record_ids": {"type": "array", "items": {"type": "string"}},
+                        "offset": {"type": "integer", "minimum": 0},
+                        "evidence_offset": {"type": "integer", "minimum": 0}})]
         if role == "main":
             result += [
-                spec("research_team", "读取六条轨迹的安全反馈、候选报告及策略建议，最终留出不可见。"),
+                spec("research_team", "分页读取六条轨迹的安全反馈、候选报告及策略建议，最终留出不可见；has_more时用next_offset继续。",
+                     {"offset": {"type": "integer", "minimum": 0}}),
                 spec("research_send_message", "通过软件向候选投递任务。首轮可分发共同任务，后续按研究策略分享。",
                      {"to": {"type": "string"}, "text": {"type": "string"},
                       "evidence_ids": {"type": "array", "items": {"type": "string"}}}, ["to", "text"]),
@@ -109,23 +120,13 @@ class ResearchEngine:
     def _mediator(self, rid, tid, name, args):
         run = self.store.get_run(rid)
         if name == "research_messages":
-            messages = [m for m in self.store.records(rid, "messages") if m["to"] in {tid, "all"}]
             own = self.store.get_track(rid, tid)
-            autonomous = run["config"].get("research_mode", "acceptance") == "autonomous"
-            sharing = self.store.autonomy_state(rid)["sharing_ready"] if autonomous else own["turns"] >= 2
-            if autonomous and tid != "main":
-                sharing = sharing and bool(self._track_records(rid, "proposals", tid)) and any(
-                    j["status"] in {"completed", "failed", "cancelled", "interrupted"} for j in self._track_records(rid, "jobs", tid))
-            if tid != "main" and (not sharing or run["config"]["strategy"] == "independent"):
-                messages = [m for m in messages if m.get("initial_task") is True]
-            processed = set(own.get("processed_message_ids") or [])
-            unread = [m for m in messages if m["id"] not in processed]
-            delivered = unread[:30] if unread else messages[-30:]
-            self.store.update_track(rid, tid, {"delivered_message_ids": list(dict.fromkeys(
-                (own.get("delivered_message_ids") or []) + [m["id"] for m in delivered]))})
-            return {"ok": True, "messages": delivered,
-                    "new_message_ids": [m["id"] for m in delivered if m["id"] not in processed],
-                    "guidance": run["config"]["guidance"]}
+            try:
+                response, receipt = read_message_page(self.store, run, own, args)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            self.store.update_track(rid, tid, receipt)
+            return response
         if tid != "main":
             return {"ok": False, "error": "仅主智能体可执行协调动作"}
         if name == "research_team":
@@ -136,17 +137,10 @@ class ResearchEngine:
                         "ideas": [], "proposals": [], "jobs": [], "sources": [], "findings": [], "reports": [],
                         "decisions": [], "stops": [], "research_stage": state["stage"],
                         "note": "独立研究阶段只查看状态；开放共享或最终结题后才汇总候选证据。"}
-            return {"ok": True, "tracks": [{k: t.get(k) for k in (
-                "track_id", "status", "phase", "turns", "usage", "error")} for t in tracks],
-                "jobs": self.store.records(rid, "jobs"), "findings": self.store.records(rid, "findings"),
-                "ideas": self.store.records(rid, "ideas"),
-                "sources": [{k: v for k, v in source.items() if k not in {"text", "content", "path", "artifact"}}
-                            for source in self.store.records(rid, "sources")],
-                "reports": self.store.records(rid, "reports"), "decisions": self.store.records(rid, "decisions"),
-                "proposals": self.store.records(rid, "proposals"), "stops": self.store.records(rid, "stops"),
-                "research_closure": self.store.get_run(rid).get("research_closure"),
-                "research_stage": self.store.autonomy_state(rid)["stage"],
-                "strategy": strategy_advice(self.store.records(rid, "jobs"), run["config"], run["protocol"]["fingerprint"])}
+            try:
+                return build_team_page(self.store, run, tracks, args)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
         evidence = self._evidence(rid)
         refs = args.get("evidence_ids") or []
         if not isinstance(refs, list) or any(not isinstance(i, str) or i not in evidence for i in refs):
@@ -192,7 +186,9 @@ class ResearchEngine:
                 "final_report_epoch": run.get("final_report_epoch") if run.get("final_report_phase") else None}, track_id=tid)
         else:
             return {"ok": False, "error": "未知协调工具"}
-        return {"ok": True, "id": record["id"], "summary": record}
+        kind = {"research_send_message": "messages", "research_decision": "decisions",
+                "research_team_report": "reports"}[name]
+        return {"ok": True, "id": record["id"], "summary": compact_record(kind, record)}
 
     async def _make_session(self, run, track):
         rid, tid = run["run_id"], track["track_id"]
@@ -210,6 +206,7 @@ class ResearchEngine:
             self.active_tools[rid, tid] = self.active_tools.get((rid, tid), 0) + 1
             self.store.update_track(rid, tid, {"phase": "tool", "active_tool": name})
             self.store.event(rid, "tool.started", {"name": name}, tid)
+            started_at = time.perf_counter()
             try:
                 if name in extra_names:
                     result = self._mediator(rid, tid, name, args)
@@ -224,10 +221,16 @@ class ResearchEngine:
                             result = await task
                     finally:
                         self.pending_tools.discard(task)
-                self.store.event(rid, "tool.completed", {"name": name, "ok": result.get("ok"), "id": result.get("id")}, tid)
+                self.store.event(rid, "tool.completed", {"name": name, "ok": result.get("ok"), "id": result.get("id"),
+                    "response_bytes": len(json.dumps(result, ensure_ascii=False, default=str).encode()),
+                    "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
+                    "error_code": result.get("code") or (result.get("error", {}).get("code")
+                        if isinstance(result.get("error"), dict) else None)}, tid)
                 return result
             except Exception as exc:
-                self.store.event(rid, "tool.failed", {"name": name, "error": str(exc)[:2000]}, tid)
+                self.store.event(rid, "tool.failed", {"name": name, "error": str(exc)[:2000],
+                    "error_code": getattr(exc, "code", type(exc).__name__),
+                    "duration_ms": round((time.perf_counter() - started_at) * 1000, 3)}, tid)
                 return {"ok": False, "error": str(exc)[:2000]}
             finally:
                 self.active_tools[rid, tid] -= 1
@@ -269,31 +272,49 @@ class ResearchEngine:
                    ((totals.get("inputTokens") or 0) + (totals.get("outputTokens") or 0)))
 
     def _record_usage(self, rid, tid, raw, generation):
-        patch = merge_usage(self.store.get_track(rid, tid), raw, generation)
+        before = self.store.get_track(rid, tid)
+        patch = merge_usage(before, raw, generation)
         if patch is not None:
             self.store.update_track(rid, tid, patch)
             total = sum(self._tokens(t.get("usage")) for t in self.store.list_tracks(rid))
             self.store.update_run(rid, {"tokens_used": total})
+            previous = (before.get("usage") or {}).get("total") or {}
+            delta = {k: max(0, v - previous.get(k, 0)) for k, v in patch["usage"]["total"].items()}
+            if any(delta.values()):
+                self.store.event(rid, "model.usage_increment", {"usage_generation": generation,
+                    "research_turn": before["turns"], "delta": delta,
+                    "last": raw.get("last"),
+                    "note": "累计计数的去重增量；缓存输入包含在input中，推理输出包含在output中，不代表费用。"}, tid)
 
     async def _turn(self, rid, tid, prompt):
         current = self.store.get_track(rid, tid)
         guidance = self.store.get_run(rid)["config"].get("guidance", "")
         prompt += f"\n当前用户指导：{guidance}"
+        context, delivered = build_turn_context(self.store, rid, tid)
+        prompt += "\n软件投递的研究状态（按权限过滤的增量事实）：\n" + json.dumps(context, ensure_ascii=False)
         self.store.update_track(rid, tid, {"status": "running", "phase": "reasoning",
-            "turns": current["turns"] + 1, "delivered_message_ids": []})
+            "turns": current["turns"] + 1, "delivered_message_ids": [],
+            "delivered_message_ranges": delivered.get("message_ranges") or {}})
         self.store.event(rid, "task.delivered", {"prompt": prompt}, tid)
-        result = await self.sessions[rid, tid].turn(prompt)
-        self.store.event(rid, "turn.result", {"status": result.status, "text": result.text,
-                                              "error": result.error}, tid)
-        if result.usage:
-            self._record_usage(rid, tid, result.usage, current.get("usage_generation"))
-        if result.status == "failed":
-            raise RuntimeError(str(result.error or "Codex 回合失败"))
-        if result.status == "completed":
-            latest = self.store.get_track(rid, tid)
-            self.store.update_track(rid, tid, {"processed_message_ids": list(dict.fromkeys(
-                (latest.get("processed_message_ids") or []) + (latest.get("delivered_message_ids") or [])))})
-        return result
+        started_at, status = time.perf_counter(), "interrupted_or_failed"
+        try:
+            result = await self.sessions[rid, tid].turn(prompt)
+            status = result.status
+            self.store.event(rid, "turn.result", {"status": result.status, "text": result.text,
+                                                  "error": result.error}, tid)
+            if result.usage:
+                self._record_usage(rid, tid, result.usage, current.get("usage_generation"))
+            if result.status == "failed":
+                raise RuntimeError(str(result.error or "Codex 回合失败"))
+            if result.status == "completed":
+                latest = self.store.get_track(rid, tid)
+                self.store.update_track(rid, tid, acknowledge_context(latest, delivered))
+            return result
+        finally:
+            self.store.event(rid, "turn.observed", {"research_turn": current["turns"] + 1,
+                "status": status, "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
+                "prompt_bytes": len(prompt.encode()), "delivered_evidence_count": len(delivered["records"]),
+                "delivered_message_count": len(delivered["message_ids"])}, tid)
 
     def _can_continue(self, rid, tid):
         run, track = self.store.get_run(rid), self.store.get_track(rid, tid)
@@ -486,7 +507,7 @@ class ResearchEngine:
                 self.store.event(rid, "strategy.observed", advice, "main")
                 self.store.update_run(rid, {"coordination_in_progress": True})
                 try:
-                    result = await self._turn(rid, "main", "调用 research_team 查看最新反馈，记录保留/淘汰与下一步理由。"
+                    result = await self._turn(rid, "main", "先分析软件投递的新反馈，缺少证据时按需分页 research_team，记录保留/淘汰与下一步理由。"
                         "在配置允许共享时经消息工具分发有依据的继续、探索或组合任务。"
                         "候选尚在运行，本轮处理现有证据后结束回复，软件会投递新进展。")
                     if result.status == "completed":
@@ -572,7 +593,8 @@ class ResearchEngine:
                 initial_published = any(m.get("from") == "main" and m.get("initial_task") is True
                                         for m in self.store.records(rid, "messages"))
                 if not initial_published and self._can_continue(rid, "main"):
-                    autonomous_hint = ("统一的是研究问题、允许的数据、评价口径和预算。不要替候选指定模型、参数、研究路线或预写实验步骤；"
+                    autonomous_hint = ("统一的是研究问题、允许的数据、评价口径和预算。除契约已预先冻结的共同基线之外，"
+                        "不要替候选指定模型、参数、研究路线或预写实验步骤；"
                         "候选可以自主检索资料、提交模型源码和选择方法。先冻结各自首提案再实验，软件控制共享阶段。"
                         if config.get("research_mode", "acceptance") == "autonomous" else "")
                     await self._turn(rid, "main", "你是研究主智能体。读取 research_protocol，准备统一研究任务，"
@@ -592,7 +614,7 @@ class ResearchEngine:
                         "final_report_epoch": uuid.uuid4().hex, "final_report_started_at": time.time()})
                     try:
                         while self._can_continue(rid, "main") and not self._current_team_report(rid):
-                            await self._turn(rid, "main", "候选本阶段已经结束。读取 research_team，比较各候选已保存的"
+                            await self._turn(rid, "main", "候选本阶段已经结束。先使用已知和本轮投递的证据，缺项按需分页 research_team，比较各候选已保存的"
                                 "想法、实验、发现和报告，记录选择与淘汰依据，用 research_team_report 保存最终综合报告。"
                                 "evidence_ids 必须覆盖当前全部已结算 jobs，可直接引用 job IDs 或覆盖它们的最新轨迹报告。"
                                 "旧阶段综合报告不等于结题报告；明确缺失实验、失败、预算限制与未参与搜索的最终留出，"
@@ -648,6 +670,7 @@ class ResearchEngine:
                     self.store.update_track(rid, key[1], patch)
                     del self.sessions[key]
             self.store.release_lease(rid, self.owner)
+            await asyncio.to_thread(self.store.save_checkpoint, rid, "run.exit")
 
     async def close(self):
         self._closing = True

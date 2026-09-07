@@ -113,6 +113,22 @@ class FakeSession:
                 "service_tier": "default",
                 "server": {"version": "fake-codex"}}
 
+    async def read_team(self):
+        combined, offset = None, 0
+        for _ in range(1000):
+            page = await self.handler("research_team", {"offset": offset})
+            assert page["ok"], page
+            if combined is None:
+                combined = page
+            else:
+                for kind in ("jobs", "findings", "ideas", "sources", "reports", "decisions", "proposals", "stops"):
+                    combined[kind].extend(page[kind])
+            if not page.get("has_more"):
+                return combined
+            assert page["next_offset"] > offset
+            offset = page["next_offset"]
+        raise AssertionError("团队分页未结束")
+
     async def turn(self, prompt):
         if self.closed or self.state == "failed":
             raise CodexError("测试实例已断开，必须重建进程")
@@ -141,12 +157,12 @@ class FakeSession:
                     await self.interrupted.wait()
                     return TurnResult("interrupted", "", self.thread_id, str(self.turns), usage)
                 if self.scenario.stage_team_report:
-                    team = await self.handler("research_team", {})
+                    team = await self.read_team()
                     await self.handler("research_team_report", {
                         "title": "阶段综合", "summary": "尚未结束", "body": "阶段反馈",
                         "evidence_ids": [j["id"] for j in team["jobs"]], "limitations": "候选仍在研究"})
                 if self.scenario.send_refine and not self.scenario.refine_sent:
-                    team = await self.handler("research_team", {})
+                    team = await self.read_team()
                     refs = [j["id"] for j in team["jobs"] if j["track_id"] == "candidate-1"]
                     if len(refs) >= 2:
                         sent = await self.handler("research_send_message", {
@@ -158,7 +174,7 @@ class FakeSession:
                             await asyncio.wait_for(self.scenario.refine_executed.wait(), 5)
                 await asyncio.sleep(0.02)
             elif "比较各候选" in prompt:
-                team = await self.handler("research_team", {})
+                team = await self.read_team()
                 refs = [j["id"] for j in team["jobs"]]
                 if refs and self.scenario.final_team_report:
                     await self.handler("research_team_report", {
