@@ -1,6 +1,8 @@
 """V2 报告必须保留证据边界、负结果和真实用量，不能用排名伪造结论。"""
 
 from copy import deepcopy
+import json
+import re
 
 import pytest
 
@@ -133,6 +135,34 @@ def test_html_escapes_untrusted_research_text(snapshot):
     assert "<script>" not in html
     assert "javascript:" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_flow_payload_cannot_terminate_script_or_run_source_markup(snapshot):
+    text = '</script><img src=x onerror="alert(1)"><script>'
+    snapshot["ideas"][0]["statement"] = text
+    snapshot["sources"][0]["url"] = "javascript:alert(1)"
+    html = render_html(build_report(snapshot))
+    payload = re.search(r'<script type="application/json" id="tf-flow-data">(.*?)</script>',
+                        html, re.DOTALL).group(1)
+    assert "<" not in payload
+    decoded = json.loads(payload)
+    idea = next(node for node in decoded["nodes"] if node["id"] == "IDEA-1")
+    assert idea["detail"]["statement"] == text
+    assert "javascript:" not in html
+    assert '<img src=x onerror=' not in html
+
+
+def test_html_flow_preserves_text_report_and_legacy_reports_still_render(snapshot):
+    report = build_report(snapshot)
+    html = render_html(report)
+    assert 'aria-label="研究流程追踪"' in html
+    assert 'aria-label="直接查看登记记录"' in html
+    assert "完整文字报告与证据记录" in html
+    assert "下一步消融。" in html
+    report.pop("flow")
+    legacy = render_html(report)
+    assert "下一步消融。" in legacy
+    assert "tf-flow-data" not in legacy
 
 
 def test_existing_document_export_adapter_uses_same_facts(snapshot):

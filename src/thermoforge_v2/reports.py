@@ -15,6 +15,9 @@ import math
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from .report_flow import build_flow
+from .report_flow_html import render_flow_html
+
 
 _DIRECTIONS = {"CVRMSE": "min", "RMSE": "min", "MAE": "min", "MAPE": "min",
                "R2": "max", "R²": "max", "physics_violation_rate": "min"}
@@ -317,6 +320,7 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
               "tracks": tracks, "comparability": comparison, "usage": usage,
               "negative_results": negatives,
               "final_evaluation": final_evaluation,
+              "flow": build_flow(snapshot, track_id=track_id),
               "lineage": {"nodes": nodes, "edges": edges, "missing_references": missing}}
     return report
 
@@ -347,6 +351,9 @@ def render_html(report: Mapping[str, Any]) -> str:
     """轻量自包含 HTML。所有研究文本转义，不执行模型/资料中的 HTML。"""
     body = [f"<h1>{escape(_text(report.get('title')))}</h1>",
             f"<p>运行：{escape(_text(report.get('run_id')))} · {escape(_text(report.get('generated_at')))}</p>"]
+    flow_html = render_flow_html(report.get("flow"))
+    if flow_html:
+        body.extend([flow_html, "<details class='full-report'><summary>完整文字报告与证据记录</summary>"])
     for section in report.get("sections") or []:
         body.append(f"<section><h2>{escape(str(section['title']))}</h2>")
         body.extend(f"<p>{escape(str(p))}</p>" for p in section.get("paragraphs") or [])
@@ -366,15 +373,20 @@ def render_html(report: Mapping[str, Any]) -> str:
                 body.append("<tr>" + "".join(cells) + "</tr>")
             body.append("</tbody></table></div>")
         body.append("</section>")
+    if flow_html:
+        body.append("</details>")
     return ("<!doctype html><html lang='zh-CN'><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>{escape(_text(report.get('title')))}</title><style>"
-            "body{max-width:1100px;margin:40px auto;padding:0 24px;font:16px/1.7 system-ui;"
+            "body{max-width:1540px;margin:32px auto;padding:0 24px;font:16px/1.7 system-ui;"
             "color:#202832;background:#fff}h1{font-size:28px}h2{font-size:21px;margin-top:36px;"
             "border-top:1px solid #dce2e8;padding-top:20px}p{white-space:pre-wrap;overflow-wrap:anywhere}"
             ".table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}"
             "th,td{border:1px solid #dce2e8;padding:8px;text-align:left;vertical-align:top;"
-            "overflow-wrap:anywhere}th{background:#f4f6f8}</style><body>" + "".join(body) + "</body></html>")
+            "overflow-wrap:anywhere}th{background:#f4f6f8}"
+            ".full-report>summary{cursor:pointer;font-size:17px;padding:12px 0;color:#285e4c}"
+            "@media(max-width:600px){body{padding:0 12px;margin:20px auto}h1{font-size:23px}}"
+            "</style><body>" + "".join(body) + "</body></html>")
 
 
 def to_document(report: Mapping[str, Any]):
