@@ -129,3 +129,62 @@ def test_last_finishing_failure_counts_as_no_progress_after_earlier_good_result(
     assert advice["stagnant"] is True
     assert advice["suggested_action"] == "explore"
     assert "idea-slow-failure" not in advice["parents"]
+
+
+def test_exact_duplicate_experiments_under_different_ideas_use_one_route_slot():
+    jobs = [job("best", .1) | {"experiment_fingerprint": "same-experiment"},
+            job("duplicate", .1) | {"experiment_fingerprint": "same-experiment"},
+            job("different", .2) | {"experiment_fingerprint": "different-experiment"}]
+    advice = strategy_advice(jobs, {"strategy": "top_k", "top_k": 2}, "protocol")
+    assert [row["job_id"] for row in advice["comparison"]["ranked"]] == ["best", "duplicate", "different"]
+    assert [row["job_id"] for row in advice["selected_routes"]] == ["best", "different"]
+    assert advice["parents"] == ["idea-best", "idea-different"]
+    assert advice["duplicate_experiment_count"] == 1
+    assert advice["duplicate_experiments"] == [{
+        "experiment_fingerprint": "same-experiment", "representative_job_id": "best",
+        "job_ids": ["best", "duplicate"], "idea_ids": ["idea-best", "idea-duplicate"],
+        "track_ids": ["track-best", "track-duplicate"], "duplicate_count": 1}]
+    assert advice["advice_scope"] == "coordination"
+
+
+def test_distinct_exact_experiments_with_same_idea_remain_distinct_routes():
+    jobs = [job("first", .1) | {"experiment_fingerprint": "model-alpha-1"},
+            job("second", .2) | {"experiment_fingerprint": "model-alpha-2", "idea_id": "idea-first"}]
+    advice = strategy_advice(jobs, {"strategy": "top_k", "top_k": 2}, "protocol")
+    assert [row["job_id"] for row in advice["selected_routes"]] == ["first", "second"]
+    assert advice["parents"] == ["idea-first"]
+    assert advice["duplicate_experiments"] == []
+
+
+def test_duplicate_audit_covers_all_validated_jobs_even_outside_retained_top_k():
+    jobs = [job("best", .1),
+            job("worse", .2) | {"experiment_fingerprint": "repeated"},
+            job("worst", .3) | {"experiment_fingerprint": "repeated"},
+            job("heldout", .0001, surface="A") | {"experiment_fingerprint": "repeated"},
+            job("failed", .0001, status="failed") | {"experiment_fingerprint": "repeated"}]
+    advice = strategy_advice(jobs, {"strategy": "top_k", "top_k": 1}, "protocol")
+    assert [row["job_id"] for row in advice["selected_routes"]] == ["best"]
+    assert advice["duplicate_experiments"][0]["job_ids"] == ["worse", "worst"]
+    assert advice["duplicate_experiment_count"] == 1
+
+
+def test_independent_mode_audits_duplicate_results_without_suggesting_shared_parents():
+    jobs = [job("a", .1) | {"experiment_fingerprint": "same"},
+            job("b", .1) | {"experiment_fingerprint": "same"}]
+    before = deepcopy(jobs)
+    advice = strategy_advice(jobs, {"strategy": "independent"}, "protocol")
+    assert advice["suggested_action"] == "independent"
+    assert advice["advice_scope"] == "retrospective"
+    assert advice["parents"] == []
+    assert advice["duplicate_experiment_count"] == 1
+    assert jobs == before
+
+
+def test_identity_does_not_guess_equivalence_for_legacy_or_similar_model_jobs():
+    jobs = [job("legacy", .1),
+            job("legacy-again", .11) | {"idea_id": "idea-legacy"},
+            job("modern", .2) | {"experiment_fingerprint": "identity-a"},
+            job("similar", .3) | {"experiment_fingerprint": "identity-b"}]
+    advice = strategy_advice(jobs, {"strategy": "top_k", "top_k": 5}, "protocol")
+    assert [row["job_id"] for row in advice["selected_routes"]] == ["legacy", "modern", "similar"]
+    assert advice["duplicate_experiment_count"] == 0

@@ -17,8 +17,12 @@ def compare_jobs(jobs: list[dict], fingerprint: str, top_k: int = 2) -> dict:
                 or not math.isfinite(value)):
             excluded.append(job["id"])
             continue
-        ranked.append({"job_id": job["id"], "track_id": job["track_id"],
-                       "idea_id": job["idea_id"], "CVRMSE": value})
+        row = {"job_id": job["id"], "track_id": job["track_id"],
+               "idea_id": job["idea_id"], "CVRMSE": value}
+        identity = job.get("experiment_fingerprint")
+        if isinstance(identity, str) and identity:
+            row["experiment_fingerprint"] = identity
+        ranked.append(row)
     ranked.sort(key=lambda row: (row["CVRMSE"], row["job_id"]))
     return {"metric": "CVRMSE", "surface": "validate", "lower_is_better": True,
             "ranked": ranked, "top_k": ranked[:top_k], "excluded": excluded,
@@ -49,21 +53,38 @@ def strategy_advice(jobs: list[dict], config: dict, fingerprint: str) -> dict:
     selected = "independent" if policy == "independent" else "refine"
     if policy == "adaptive" and stagnant:
         selected = "explore" if len(completed) // window % 2 else "recombine"
-    # 最终选型仍可比较全部实验；搜索阶段保留的是不同想法的路线。
-    # 同一想法反复调参产生多个优胜实验，不应占满所有后续父路线槽。
-    seen_ideas, selected_routes = set(), []
+    # 实验排行榜保留所有实测结果。新记录按完整实验身份识别重复路线，
+    # 避免不同想法 ID 包装的同一实验占满父路线；旧记录保留想法去重。
+    # 只识别精确身份，不能把同类算法、不同参数或源码当成同一实验。
+    seen_routes, selected_routes, identity_groups = set(), [], {}
     for row in comparison["ranked"]:
-        if row["idea_id"] in seen_ideas:
+        identity = row.get("experiment_fingerprint")
+        if identity:
+            identity_groups.setdefault(identity, []).append(row)
+        route = ("experiment", identity) if identity else ("idea", row["idea_id"])
+        if route in seen_routes:
             continue
-        seen_ideas.add(row["idea_id"])
-        selected_routes.append(row)
-        if len(selected_routes) >= config.get("top_k", 2):
-            break
+        seen_routes.add(route)
+        if len(selected_routes) < config.get("top_k", 2):
+            selected_routes.append(row)
+    duplicates = [{"experiment_fingerprint": identity,
+                   "representative_job_id": rows[0]["job_id"],
+                   "job_ids": [r["job_id"] for r in rows],
+                   "idea_ids": list(dict.fromkeys(r["idea_id"] for r in rows)),
+                   "track_ids": list(dict.fromkeys(r["track_id"] for r in rows)),
+                   "duplicate_count": len(rows) - 1}
+                  for identity, rows in identity_groups.items() if len(rows) > 1]
+    independent = policy == "independent"
+    reason = ("独立模式仅回顾验证结果和精确重复，不向候选分发其他路线反馈。" if independent
+              else "验证进展停滞，建议扩展结构或组合已有思路。" if stagnant
+              else "依据有效验证结果保留路线；缺少证据时继续独立探索。")
     return {"configured_strategy": policy, "suggested_action": selected,
             "stagnant": stagnant, "comparison": comparison,
-            "parents": [r["idea_id"] for r in selected_routes],
+            "parents": [] if independent else list(dict.fromkeys(r["idea_id"] for r in selected_routes)),
             "selected_routes": selected_routes,
+            "duplicate_experiments": duplicates,
+            "duplicate_experiment_count": sum(g["duplicate_count"] for g in duplicates),
+            "advice_scope": "retrospective" if independent else "coordination",
             "recent_feedback_job_ids": [j["id"] for j in completed[-window:]],
-            "reason": "验证进展停滞，建议扩展结构或组合已有思路。" if stagnant
-            else "依据有效验证结果保留路线；缺少证据时继续独立探索。",
+            "reason": reason,
             "requires_scientific_decision": True}
