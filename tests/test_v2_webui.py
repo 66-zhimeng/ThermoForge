@@ -88,6 +88,9 @@ def test_create_uses_actual_discovery_and_six_codex_configuration(monkeypatch):
     assert config["model"] == CODEX_MODEL == "gpt-6-astra"
     assert config["reasoning_effort"] == CODEX_EFFORT == "ultra"
     assert config["research_mode"] == "autonomous"
+    assert config["objective_mode"] is None and config["objective_metric"] is None
+    assert config["baseline_model"] is None
+    assert config["min_improvement"] == 0.01 and config["review_required"] is True
     assert config["reuse_experiments"] is False
     assert config["max_turns"] >= 3
     assert config["experiment_workers"] == 1
@@ -263,3 +266,54 @@ def test_uncertain_start_reuses_idempotency_key(monkeypatch):
     assert not app.exception
     assert len(client.started) == 2
     assert client.started[0][1] == client.started[1][1]
+
+
+def test_optimize_form_normalizes_baseline_and_percentage_without_executing_it(monkeypatch):
+    client = FakeClient(with_run=False)
+    app = run_page(monkeypatch, client)
+    next(w for w in app.selectbox if w.label == "研究目标模式").set_value("optimize").run()
+    next(w for w in app.selectbox if w.label == "预定共同基线方案").set_value("ridge").run()
+    assert any("尚未执行基线实验" in caption.value for caption in app.caption)
+    next(w for w in app.selectbox if w.label == "研究主指标").set_value("R2")
+    next(w for w in app.number_input if w.label == "最小有意义改善（%）").set_value(2.5)
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert not app.exception
+    config = client.started[0][0]
+    assert config["objective_mode"] == "optimize" and config["objective_metric"] == "R2"
+    assert config["min_improvement"] == 0.025
+    assert config["baseline_model"]["estimator"] == "ridge"
+    assert config["baseline_model"]["hyperparameters"] == {"alpha": 1}
+    assert config["review_required"] is True
+    assert not client.snapshot["jobs"]
+    next(w for w in app.selectbox if w.label == "研究目标模式").set_value("target").run()
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert client.started[-1][0]["objective_mode"] == "target"
+    assert client.started[-1][0]["baseline_model"] is None
+
+
+def test_invalid_advanced_baseline_json_does_not_start_a_run(monkeypatch):
+    client = FakeClient(with_run=False)
+    app = run_page(monkeypatch, client)
+    next(w for w in app.selectbox if w.label == "研究目标模式").set_value("optimize").run()
+    next(w for w in app.selectbox if w.label == "预定共同基线方案").set_value("custom").run()
+    next(w for w in app.text_area if w.label == "共同基线 ModelSpec JSON").set_value('{"category": "unknown"}')
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert not app.exception and not client.started
+    assert any("共同基线方案无效" in error.value for error in app.error)
+    next(w for w in app.text_area if w.label == "共同基线 ModelSpec JSON").set_value('{"category":"data","estimator":"linear"}')
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert not app.exception
+    assert client.started[0][0]["baseline_model"]["estimator"] == "linear"
+
+
+def test_monitor_explains_frozen_objective_and_evidence_review(monkeypatch):
+    from thermoforge_v2.objectives import build_objective_contract
+    client = FakeClient()
+    client.snapshot["run"]["objective_contract"] = build_objective_contract(
+        {"objective_mode": "optimize", "min_improvement": 0.01, "review_required": True},
+        client.snapshot["run"]["protocol"])
+    app = run_page(monkeypatch, client)
+    assert not app.exception
+    assert any("最小有意义改善：1%" in text.value for text in app.markdown)
+    assert any("审阅解释与限制，不是独立复验" in caption.value for caption in app.caption)
+    assert any("未指定共同基线" in caption.value for caption in app.caption)

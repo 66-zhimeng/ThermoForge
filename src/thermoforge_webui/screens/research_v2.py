@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import streamlit as st
 
+from thermoforge_core.contracts.experiment import ModelSpec
+from thermoforge_v2.contracts import validate_baseline_model
 from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 from thermoforge_v2.reports import build_report, render_html, render_markdown
 from thermoforge_webui.context import tool_context
@@ -17,6 +19,7 @@ from thermoforge_webui.ui import copilot_banner
 
 
 _RUN_KEY = "v2_run_id"
+_OBJECTIVE_LABELS = {None: "自动（按目标验收条件确定）", "target": "达标", "optimize": "优化", "explore": "探索"}
 _LABELS = {"created": "已创建", "queued": "排队中", "pending": "待启动", "starting": "启动中",
            "running": "执行中", "paused": "已暂停", "pausing": "暂停中",
            "waiting": "等待反馈", "waiting_experiment": "等待实验", "idle": "空闲",
@@ -119,6 +122,20 @@ def _create(client, preparation: dict[str, Any]) -> None:
         return
     defaults = preparation.get("defaults") or {}
     st.caption("自主研究：统一目标与预算，由各候选独立选择方法。先提交方案，再实验、分析反馈并修订。")
+    objective_mode = st.selectbox("研究目标模式", list(_OBJECTIVE_LABELS),
+                                  format_func=_OBJECTIVE_LABELS.get, key="v2_create_objective_mode")
+    st.caption({None: "有验收阈值或约束时使用达标模式，否则使用探索模式；启动后冻结目标契约。",
+                "target": "检查目标规定的阈值与约束；validate 达标不代替 A、C 或 auto 面的最终验收。",
+                "optimize": "对比预先指定的共同基线，报告达到的改善或未改善证据。",
+                "explore": "围绕具体假设收集支持、反例或不足证据；得分上升本身不能证明假设。"}[objective_mode])
+    baseline_choice = "unconfigured"
+    if objective_mode == "optimize":
+        baseline_choice = st.selectbox("预定共同基线方案", ["unconfigured", "ridge", "linear", "custom"],
+            format_func=lambda value: {"unconfigured": "暂不指定", "ridge": "岭回归（α=1）",
+                "linear": "线性回归", "custom": "高级：ModelSpec JSON"}[value], key="v2_create_baseline")
+        st.caption("这里只冻结基线方案，尚未执行基线实验。当前需要在研究中安排其真实执行；"
+                   "没有可见的同协议精确匹配结果时，改善状态保持未确认。")
+        st.caption("共同基线暂不支持 lab 模型；不同轨迹的同名版本可能对应不同源码。")
     strategy = st.selectbox("研究策略", ["independent", "top_k", "adaptive"],
                             key="v2_create_strategy",
                             format_func=lambda s: {"independent": "独立探索", "top_k": "保留优质路线", "adaptive": "根据进展调整策略"}[s])
@@ -141,6 +158,19 @@ def _create(client, preparation: dict[str, Any]) -> None:
         right.caption("主智能体与所有候选统一使用 GPT-6 Astra、最高思考强度；每轮使用普通速度，关闭 Fast。")
         candidates = left.selectbox("研究配置", [5, 0], index=0,
                                     format_func=lambda n: "主 Codex ＋ 5 个候选" if n else "单 Codex 对照基线")
+        objective_metric = left.selectbox("研究主指标", [None, "CVRMSE", "RMSE", "MAE", "MAPE", "NMBE", "R2"],
+            format_func=lambda value: value or "自动（优先目标验收指标）", key="v2_create_objective_metric")
+        min_improvement = right.number_input("最小有意义改善（%）", min_value=0.0, max_value=100.0,
+            value=100.0 * float(defaults.get("min_improvement", 0.01)), step=0.1,
+            help="相对改善比例：1% 保存为 0.01；也用于判断进展停滞。R² 越高越好，其余主指标越低越好，NMBE 按绝对值比较。")
+        review_required = left.checkbox("需要证据审阅", value=bool(defaults.get("review_required", True)),
+            help="所选实验需登记解释与限制。这是证据审阅，不是独立复验或统计保证。")
+        left.caption("证据审阅要求保留发现的解释与限制，不等同独立复验。")
+        baseline_json = ""
+        if objective_mode == "optimize" and baseline_choice == "custom":
+            baseline_json = st.text_area("共同基线 ModelSpec JSON", value=json.dumps(
+                defaults.get("baseline_model") or {"category": "data", "estimator": "ridge", "hyperparameters": {"alpha": 1}},
+                ensure_ascii=False, indent=2), key="v2_create_baseline_json")
         max_experiments = left.number_input("全局实验上限", min_value=1, value=int(defaults.get("max_experiments", 20)), step=1)
         per_track = right.number_input("每条轨迹实验上限", min_value=1, value=int(defaults.get("max_experiments_per_track", 4)), step=1)
         max_turns = left.number_input("每条轨迹最多执行片段", min_value=3, value=max(3, int(defaults.get("max_turns", 8))), step=1,
@@ -155,8 +185,21 @@ def _create(client, preparation: dict[str, Any]) -> None:
         submitted = st.form_submit_button("启动后台研究", type="primary", disabled=not available)
     if not submitted:
         return
+    baseline_model = None
+    if objective_mode == "optimize" and baseline_choice != "unconfigured":
+        try:
+            raw_baseline = json.loads(baseline_json) if baseline_choice == "custom" else {
+                "category": "data", "estimator": baseline_choice,
+                "hyperparameters": {"alpha": 1} if baseline_choice == "ridge" else {}}
+            baseline_model = validate_baseline_model(ModelSpec.model_validate(raw_baseline)).model_dump(mode="json")
+        except (ValueError, TypeError) as exc:
+            st.error(f"共同基线方案无效，请修正后启动：{exc}")
+            return
     config = {"goal_id": goal_id, "dataset_ref": dataset_ref, "candidates": candidates,
               "research_mode": "autonomous", "reuse_experiments": bool(reuse and strategy != "independent"),
+              "objective_mode": objective_mode, "objective_metric": objective_metric,
+              "baseline_model": baseline_model, "min_improvement": float(min_improvement) / 100.0,
+              "review_required": bool(review_required),
               "model": model, "reasoning_effort": reasoning,
               "max_experiments": int(max_experiments),
               "max_experiments_per_track": int(per_track), "max_turns": int(max_turns),
@@ -214,6 +257,21 @@ def _monitor(client, run_id: str) -> None:
     else:
         st.caption("这是功能验收运行，按其原有流程展示；新建研究使用自主探索。")
     st.caption(f"运行 {run_id} · 版本 {run.get('version', '不可得')} · 最近更新 {_timestamp(run.get('updated_at'))}")
+    contract = run.get("objective_contract")
+    if isinstance(contract, dict):
+        with st.expander("已冻结的研究目标"):
+            metric = contract.get("primary_metric") or {}
+            st.write(f"模式：{_OBJECTIVE_LABELS.get(contract.get('objective_mode'), '未记录')}；"
+                     f"主指标：{metric.get('name', '未记录')}；最小有意义改善：{100 * contract.get('min_improvement', 0):g}%。")
+            st.caption(f"搜索反馈面：validate；最终验收面：{contract.get('acceptance_surface', '未记录')}。"
+                       "缺测约束保持未确认，validate 结果不代替外部验收。")
+            st.caption("需要证据审阅；审阅解释与限制，不是独立复验。" if contract.get("review_required")
+                       else "本契约未要求额外证据审阅，研究报告仍需保留真实依据。")
+            if contract.get("baseline_model"):
+                st.write("预定共同基线方案（实际执行及比较状态见事实报告）：")
+                st.json(contract["baseline_model"])
+            elif contract.get("objective_mode") == "optimize":
+                st.caption("未指定共同基线模型，不能追认当前最好结果为基线。")
     if run.get("error"):
         st.error(_display(run["error"]))
     controls = st.columns(3)
