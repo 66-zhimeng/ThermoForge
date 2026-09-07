@@ -15,7 +15,7 @@ import math
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from .report_flow import build_flow
+from .report_flow import build_flow, execution_label
 from .report_flow_html import render_flow_html
 
 
@@ -26,6 +26,9 @@ _ORIGINS = {"literature": "文献启发", "history": "历史结果", "conjecture
 _FAILURES = {"hypothesis": "假说未获支持", "implementation": "实现失败",
              "data": "数据不足", "budget": "预算不足", "cancelled": "取消",
              "timeout": "超时"}
+_STAGES = {"independent_proposals": "独立提案冻结", "independent_experiments": "独立实验",
+           "sharing": "证据共享"}
+_PURPOSES = {"explore": "探索", "refine": "修订", "replicate": "复现检验"}
 
 
 def _records(value: Any) -> list[dict[str, Any]]:
@@ -94,6 +97,8 @@ def _comparison(jobs: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[st
         groups[str(fingerprint)].append({"job_id": job.get("id"),
                                          "track_id": job.get("track_id"),
                                          "experiment_id": result.get("experiment_id"),
+                                         "execution": execution_label(job),
+                                         "reused_from_job_id": job.get("reused_from_job_id"),
                                          "metrics": metrics})
     compared = []
     for fingerprint, rows in groups.items():
@@ -110,7 +115,8 @@ def _comparison(jobs: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[st
                          "best_per_metric": best})
     return {"groups": compared, "excluded": excluded,
             "note": "只比较相同协议指纹下的实测 validate 指标。单指标最优不等于验收通过或路线保留；"
-                    "失败、未完成和口径不明的实验不按零分参与排名。留出结果不用于搜索反馈。"}
+                    "失败、未完成和口径不明的实验不按零分参与排名。复用请求引用原实验指标，"
+                    "不构成新增实测或独立复现。留出结果不用于搜索反馈。"}
 
 
 def _usage(tracks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -147,7 +153,7 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
             raise ValueError(f"没有这条研究轨迹：{track_id}")
     selected = {t.get("track_id") for t in tracks}
     records = {}
-    for name in ("ideas", "jobs", "findings", "decisions", "reports"):
+    for name in ("ideas", "proposals", "jobs", "findings", "stops", "decisions", "reports"):
         rows = _records(snapshot.get(name))
         records[name] = [r for r in rows if track_id is None or r.get("track_id") in selected]
     sources = _records(snapshot.get("sources"))
@@ -163,12 +169,19 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
     known = {str(node["id"]) for node in nodes}
     links = {"source_ids": "source", "parent_idea_ids": "parent_idea",
              "parent_job_ids": "parent_experiment", "idea_ids": "idea",
-             "job_ids": "experiment", "finding_ids": "finding", "evidence_ids": "evidence"}
+             "job_ids": "experiment", "finding_ids": "finding", "evidence_ids": "evidence",
+             "proposal_ids": "proposal", "reused_job_ids": "result_reuse",
+             "duplicate_job_ids": "duplicate_configuration"}
     for name, rows in records.items():
         for row in rows:
             refs = {field: _ids(row, field) for field in links}
             if row.get("idea_id"):
                 refs["idea_ids"].append(str(row["idea_id"]))
+            for field, refs_field in (("proposal_id", "proposal_ids"),
+                                      ("reused_from_job_id", "reused_job_ids"),
+                                      ("duplicate_of_job_id", "duplicate_job_ids")):
+                if row.get(field):
+                    refs[refs_field].append(str(row[field]))
             for field, ids in refs.items():
                 for ref in ids:
                     edges.append({"from": ref, "to": row.get("id"), "relation": links[field]})
@@ -200,6 +213,20 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
         f"{len(records['jobs'])} 个实验请求、{len(sources)} 项来源。",
         "研究理由来自实验前登记的想法记录；观察来自实验结果；解释与路线决策保留各自作者和依据。",
     ])]
+    if run.get("research_stage") or records["proposals"]:
+        sections.append(_section("自主研究阶段与实验执行", [
+            "当前阶段：" + _STAGES.get(run.get("research_stage"), _text(run.get("research_stage"))) + "。",
+            "首轮提案独立冻结；修订提案保留版本和父实验。跨候选影响只依据已登记的证据引用，"
+            "不能从相同结果推断发生过讨论。",
+            f"已登记 {len(records['proposals'])} 份提案、{len(records['stops'])} 次停止决定；"
+            f"实验请求 {len(records['jobs'])} 个，其中明确实际执行 "
+            f"{sum(j.get('executed') is True and not j.get('reused_from_job_id') for j in records['jobs'])} 个，"
+            f"结果复用 {sum(bool(j.get('reused_from_job_id')) for j in records['jobs'])} 个。",
+            "相同配置标记用于回顾重复实验，不代表启发关系；复用已有指标不构成独立复现。",
+        ], [{"请求": j.get("id"), "提案": j.get("proposal_id"), "执行方式": execution_label(j),
+             "实验配置指纹": j.get("experiment_fingerprint"),
+             "相同配置的既有请求": j.get("duplicate_of_job_id"),
+             "复用来源": j.get("reused_from_job_id")} for j in records["jobs"]]))
     sections.append(_section("评价口径与可比较性", [comparison["note"],
         f"协议指纹：{_text(protocol.get('fingerprint'))}",
         f"数据修订：{_text(protocol.get('dataset_ref'))}；"
@@ -213,7 +240,8 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
             f"协议：{group['protocol_fingerprint']}；评价面：validate。",
             "逐指标最好值：" + _text(group["best_per_metric"]),
         ], [{"轨迹": row["track_id"], "请求": row["job_id"],
-             "实验": row["experiment_id"], "指标": _text(row["metrics"])} for row in group["rows"]]))
+             "实验": row["experiment_id"], "执行方式": row["execution"],
+             "复用来源": row["reused_from_job_id"], "指标": _text(row["metrics"])} for row in group["rows"]]))
 
     if final_evaluation:
         if final_evaluation.get("status") == "evaluated":
@@ -265,10 +293,27 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
                              "状态": job.get("status"), "实际模型": _text(result.get("model") or
                                  (job.get("request") or {}).get("model")),
                              "实测指标": _text(result.get("metrics")),
+                             "执行方式": execution_label(job),
                              "错误": _text(result.get("error") or job.get("error"))})
             if not related:
                 paragraphs.append("尚无关联实验，预测未经实验验证。")
             sections.append(_section(f"想法与实验 {iid}", paragraphs, rows))
+        for proposal in records["proposals"]:
+            if proposal.get("track_id") != tid:
+                continue
+            stage = "首轮独立冻结提案" if proposal.get("version") == 1 else "修订提案"
+            if proposal.get("status") != "committed":
+                stage = "待冻结提案"
+            sections.append(_section(f"{stage} {proposal.get('id')}", [
+                f"版本：{_text(proposal.get('version'))}；状态：{_text(proposal.get('status'))}；"
+                f"用途：{_PURPOSES.get(proposal.get('purpose'), _text(proposal.get('purpose')))}。",
+                "检验的想法：" + _text(proposal.get("idea_id")),
+                "冻结模型方案：" + _text(proposal.get("model")),
+                "依据的历史实验：" + _text(proposal.get("parent_job_ids")),
+                "实验配置指纹：" + _text(proposal.get("experiment_fingerprint")),
+                "预期成本：" + _text(proposal.get("expected_cost")),
+            ], [{"实验请求": j.get("id"), "执行方式": execution_label(j), "状态": j.get("status")}
+                for j in records["jobs"] if j.get("proposal_id") == proposal.get("id")]))
         for finding in records["findings"]:
             if finding.get("track_id") != tid:
                 continue
@@ -277,6 +322,15 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
                 "研究解释：" + _text(finding.get("interpretation")),
                 "依据实验：" + "、".join(_ids(finding, "job_ids")),
                 "适用条件与限制：" + _text(finding.get("limitations")),
+            ]))
+        for stop in records["stops"]:
+            if stop.get("track_id") != tid:
+                continue
+            sections.append(_section(f"停止研究决定 {stop.get('id')}", [
+                "停止理由：" + _text(stop.get("reason")),
+                "依据证据：" + _text(stop.get("evidence_ids")),
+                "已覆盖实验：" + _text(stop.get("job_ids")),
+                "停止是研究过程决定，不自动表示目标已经达到或方案获得验证。",
             ]))
 
     sections.append(_section("路线保留与淘汰", [
@@ -312,10 +366,12 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
 
     report = {"schema_version": "thermoforge.research-report.v2", "run_id": run.get("run_id"),
               "track_id": track_id, "status": run.get("status"),
+              "research_stage": run.get("research_stage"),
               "title": f"ThermoForge V2 {'轨迹' if track_id else '综合'}研究报告",
               "generated_at": datetime.now(timezone.utc).isoformat(), "protocol": protocol,
               "summary": {"tracks": len(tracks), "ideas": len(records["ideas"]),
-                          "jobs": len(records["jobs"]), "sources": len(sources)},
+                          "jobs": len(records["jobs"]), "sources": len(sources),
+                          "proposals": len(records["proposals"]), "stops": len(records["stops"])},
               "sections": sections, "sources": sources, **records,
               "tracks": tracks, "comparability": comparison, "usage": usage,
               "negative_results": negatives,

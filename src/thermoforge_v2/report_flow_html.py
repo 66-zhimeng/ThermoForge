@@ -105,9 +105,11 @@ _JS = r"""
 const root = document.getElementById('tf-flow');
 const flow = JSON.parse(document.getElementById('tf-flow-data').textContent);
 const nodes = new Map(flow.nodes.map(n => [n.id,n]));
-const kinds = {track:'研究实例',message:'任务消息',source:'来源',idea:'想法',job:'实验',finding:'发现',decision:'路线决定',report:'研究报告',final_evaluation:'外部留出评价',missing:'缺失引用',external_reference:'外部引用'};
+const kinds = {track:'研究实例',message:'任务消息',source:'来源',idea:'想法',proposal:'实验提案',job:'实验请求',finding:'发现',stop:'停止研究',decision:'路线决定',report:'研究报告',final_evaluation:'外部留出评价',missing:'缺失引用',external_reference:'外部引用'};
 const origins = {conjecture:'自主假说',history:'历史结果',literature:'文献启发',mixed:'多来源'};
-const statuses = {completed:'已完成',succeeded:'已完成',failed:'失败',cancelled:'已取消',running:'执行中',reserved:'已预留',pending:'待执行',waiting:'等待',evaluated:'已评价',missing:'记录缺失'};
+const purposes = {explore:'探索',refine:'修订',replicate:'复现检验'};
+const stages = {independent_proposals:'独立提案冻结',independent_experiments:'独立实验',sharing:'证据共享'};
+const statuses = {completed:'已完成',succeeded:'已完成',failed:'失败',cancelled:'已取消',running:'执行中',reserved:'已预留',pending:'待执行',waiting:'等待',evaluated:'已评价',missing:'记录缺失',committed:'已冻结'};
 const lanes = root.querySelector('.tf-lanes'), detail = root.querySelector('.tf-detail');
 const svg = root.querySelector('.tf-edges'), map = root.querySelector('.tf-map');
 const select = root.querySelector('.tf-track');
@@ -122,7 +124,7 @@ function modelLabel(n){const d=record(n),m=d.result?.model?.spec||d.result?.mode
 function isMain(n){return (flow.lanes||[]).some(l=>l.track_id===n.track_id&&l.role==='main')||record(n).role==='main'||(record(nodes.get('track:'+n.track_id)||{}).context_only&&n.track_id==='main');}
 function latestReports(items){let reports=items.filter(n=>n.kind==='report');const finals=reports.filter(n=>record(n).report_stage==='final');if(finals.length)reports=finals;return reports.length ? [reports.reduce((a,b)=>(record(a).created_at||0)>(record(b).created_at||0)?a:b)] : [];}
 function parentChanges(n){
-  const d=record(n),idea=nodes.get(d.idea_id),parents=record(idea||{}).parent_job_ids||[],changes=[];
+  const d=record(n),idea=nodes.get(d.idea_id),proposal=nodes.get(d.proposal_id),parents=[...new Set([...(record(idea||{}).parent_job_ids||[]),...(record(proposal||{}).parent_job_ids||[])])],changes=[];
   for(const id of parents){const p=nodes.get(id);if(!p)continue;const pd=record(p),fp=d.result?.protocol_fingerprint,pfp=pd.result?.protocol_fingerprint,old=metrics(p).CVRMSE,now=metrics(n).CVRMSE;
     if(d.comparable&&pd.comparable&&fp&&fp===pfp&&Number.isFinite(old)&&old>0&&Number.isFinite(now))changes.push({id,label:pd.result?.experiment_id||id,percent:((now-old)/old*100).toFixed(2)});
   }return changes;
@@ -143,7 +145,10 @@ function card(n){
     const m=metrics(n);b.append(el('span','tf-metric',Number.isFinite(m.CVRMSE)?'CVRMSE '+pct(m.CVRMSE):'无可用验证指标'));
     const changes=parentChanges(n);
     b.append(el('span','tf-node-summary',Number.isFinite(m.CVRMSE)?'validate'+(changes.length===1?' · 较父实验 '+changes[0].percent+'%':''):statuses[n.status]||n.status||'未记录'));
+    if(d.execution_label&&d.execution_label!=='执行方式未记录')b.append(el('span','tf-node-summary',d.execution_label));
   }else if(n.kind==='idea')b.append(el('span','tf-node-summary',origins[d.origin]||d.origin||'来源未记录'));
+  else if(n.kind==='proposal')b.append(el('span','tf-node-summary',[purposes[d.purpose]||d.purpose,modelLabel(n)].filter(Boolean).join(' · ')));
+  else if(n.kind==='stop')b.append(el('span','tf-node-summary','点击查看停止依据 · 不等于研究成功'));
   else if(n.kind==='final_evaluation'){
     const surfaces=d.surfaces||{};
     for(const [name,s] of Object.entries(surfaces))if(Number.isFinite(s.metrics?.CVRMSE))b.append(el('span','tf-metric',name+' · CVRMSE '+pct(s.metrics.CVRMSE)));
@@ -168,10 +173,10 @@ function render(){
   for(const l of flow.lanes||[]){
     if(l.role==='main'||(filter!=='all'&&l.track_id!==filter))continue;
     const owned=all.filter(n=>n.track_id===l.track_id),chosenReports=latestReports(owned);
-    const backbone=owned.filter(n=>['idea','job','message'].includes(n.kind)).sort((a,b)=>(record(a).created_at||0)-(record(b).created_at||0));
+    const backbone=owned.filter(n=>['idea','proposal','job','stop','message'].includes(n.kind)).sort((a,b)=>(record(a).created_at||0)-(record(b).created_at||0));
     lane(l.label||l.track_id,statuses[l.status]||l.status||'独立研究轨迹',[...backbone,...chosenReports],'',owned.find(n=>n.kind==='track'));
   }
-  const mainWork=mainRecords.filter(n=>['idea','job','decision'].includes(n.kind));
+  const mainWork=mainRecords.filter(n=>['idea','proposal','job','stop','decision'].includes(n.kind));
   const summaries=latestReports(mainRecords);
   if(mainWork.length||summaries.length)lane('主智能体','比较与综合',[...mainWork,...summaries],'tf-main',mainInputs.length?null:mainTrack);
   const external=all.filter(n=>n.kind==='final_evaluation'&&(filter==='all'||record(n).track_id_selected===filter));
@@ -204,7 +209,7 @@ function drawEdges(){
     }
     const active=edge.from===selected||edge.to===selected;
     const path=make('path',{d,fill:'none',stroke:active?'#176553':'#aabbb5','stroke-width':active?1.8:1,'marker-end':'url(#tf-arrow)',opacity:selected&&!active ? .35 : .8});
-    if(['membership','owns','author','recipient','sender','dispatch','message_recipient','message_sender','message_sent','message_to','track_record'].includes(edge.relation))path.setAttribute('stroke-dasharray','4 4');
+    if(['membership','owns','author','recipient','sender','dispatch','message_recipient','message_sender','message_sent','message_to','track_record','duplicate_configuration'].includes(edge.relation))path.setAttribute('stroke-dasharray','4 4');
     svg.append(path);
   }
 }
@@ -219,14 +224,25 @@ function choose(id,userAction=false){
   field('所属轨迹',n.track_id);if(n.status)field('状态',statuses[n.status]||n.status);
   field('想法 / 观察',d.statement);if(d.origin)field('想法来源',origins[d.origin]||d.origin);
   field('为什么从这里着手',d.reason);field('实验前预测',d.prediction);field('怎样证伪',d.falsification);
+  if(n.kind==='proposal'){
+    field('冻结版本',d.version);field('研究用途',purposes[d.purpose]||d.purpose);
+    field('冻结模型方案',d.model);field('预期成本',d.expected_cost);
+    field('依据的历史实验',d.parent_job_ids);field('实验配置指纹',d.experiment_fingerprint);
+    if(d.version===1&&d.status==='committed')field('提案阶段','首轮独立冻结；后续修订保留为新版本。');
+  }
+  if(n.kind==='stop'){field('停止依据',d.evidence_ids);field('已覆盖实验',d.job_ids);field('决定边界','停止是研究过程决定，不自动表示目标已达到或假说获得验证。');}
   if(n.kind==='job'){
-    field(d.result?.model?'实际模型':'请求模型（结果未登记实际模型）',modelLabel(n)||d.model||d.request?.model);metricTable(metrics(n),'验证集实测 · validate');
+    field('执行方式',d.execution_label);field('冻结提案',d.proposal_id);
+    field('复用来源（非独立复现）',d.reused_from_job_id);field('相同配置的既有请求（非启发关系）',d.duplicate_of_job_id);
+    field('实验配置指纹',d.experiment_fingerprint);
+    field(d.result?.model?'结果记录的模型':'请求模型（结果未登记实际模型）',modelLabel(n)||d.model||d.request?.model);metricTable(metrics(n),d.reused_from_job_id?'复用的验证指标 · validate':'验证集实测 · validate');
     if(!Object.keys(metrics(n)).length)field('指标状态','未获得可用于展示的验证指标；缺失或失败不按零分计算。');
     field('错误',d.error||d.result?.error);
     if(d.comparable===false)field('比较口径','此实验不满足当前冻结协议的可比条件；只保留其已登记事实。');
     for(const change of parentChanges(n))field('相对已登记父实验的 CVRMSE 变化',`${change.label} → 当前：${change.percent}%（负数表示误差降低；描述性比较）`);
   }
   field('任务内容',d.text);field('摘要',d.summary);field('报告正文',d.body);field('结果解释',d.interpretation);field('适用条件与局限',d.limitations);
+  field('登记时的研究阶段',stages[d.research_stage]||d.research_stage);
   field('报告阶段',d.report_stage);
   if(n.kind==='source'){field('来源类型',d.kind);field('实际阅读范围',d.read_scope);field('登记核验',d.verification);field('URL',d.url);field('DOI',d.doi);}
   if(n.kind==='final_evaluation'){
@@ -235,7 +251,7 @@ function choose(id,userAction=false){
     if(!Object.keys(d.surfaces||{}).length)field('留出状态','没有可用留出指标，不能判断最终泛化结果。');
   }
   const incoming=flow.edges.filter(e=>e.to===id),outgoing=flow.edges.filter(e=>e.from===id);
-  for(const [heading,list,direction] of [['它依据什么',incoming,'from'],['它影响了哪些记录',outgoing,'to']]){
+  for(const [heading,list,direction] of [['它依据什么',incoming,'from'],['哪些记录引用或关联它',outgoing,'to']]){
     if(!list.length)continue;detail.append(el('h4','',heading));
     for(const edge of list){const target=nodes.get(edge[direction]);if(!target)continue;const button=el('button','tf-ref',(edge.label||edge.relation)+' · '+target.label);button.type='button';button.addEventListener('click',()=>choose(target.id));detail.append(button);}
   }
@@ -246,7 +262,8 @@ function choose(id,userAction=false){
   requestAnimationFrame(drawEdges);
 }
 for(const laneData of flow.lanes||[]){const option=el('option','',laneData.label||laneData.track_id);option.value=laneData.track_id;select.append(option);}
-root.querySelector('.tf-summary').textContent=`${(flow.lanes||[]).length} 个实例 · ${flow.nodes.filter(n=>n.kind==='idea').length} 个想法 · ${flow.nodes.filter(n=>n.kind==='job').length} 次实验`;
+const jobs=flow.nodes.filter(n=>n.kind==='job'),reused=jobs.filter(n=>record(n).reused_from_job_id).length;
+root.querySelector('.tf-summary').textContent=`${(flow.lanes||[]).length} 个实例 · ${flow.nodes.filter(n=>n.kind==='idea').length} 个想法 · ${jobs.length} 个实验请求`+(reused?` · ${reused} 个复用`:'')+(flow.research_stage?' · '+(stages[flow.research_stage]||flow.research_stage):'');
 select.addEventListener('change',()=>{selected=null;render();const first=[...visible.keys()].find(id=>nodes.get(id)?.kind==='job')||[...visible.keys()][0];if(first)choose(first);else detail.replaceChildren(el('p','','当前范围尚无研究记录。'));});
 recordSelect.addEventListener('change',()=>{if(recordSelect.value)choose(recordSelect.value,true);});
 render();const final=flow.nodes.find(n=>n.kind==='final_evaluation');const initial=record(final||{}).job_id||flow.nodes.find(n=>n.kind==='job')?.id||flow.nodes[0]?.id;if(initial&&nodes.has(initial))choose(initial);

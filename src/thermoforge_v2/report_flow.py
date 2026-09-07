@@ -11,8 +11,9 @@ import math
 from typing import Any, Mapping
 
 
-_KINDS = {"sources": "source", "ideas": "idea", "jobs": "job", "findings": "finding",
-          "decisions": "decision", "reports": "report", "messages": "message"}
+_KINDS = {"sources": "source", "ideas": "idea", "proposals": "proposal", "jobs": "job",
+          "findings": "finding", "stops": "stop", "decisions": "decision",
+          "reports": "report", "messages": "message"}
 _REFERENCES = {"source_ids": ("source", "想法来源"),
                "parent_idea_ids": ("parent_idea", "承接想法"),
                "parent_job_ids": ("parent_experiment", "历史实验反馈"),
@@ -28,14 +29,18 @@ _FIELDS = {
                "content_sha256", "history_ids"),
     "idea": ("statement", "origin", "reason", "prediction", "falsification", "strategy",
              "source_ids", "parent_idea_ids", "parent_job_ids"),
+    "proposal": ("idea_id", "model", "version", "status", "purpose", "expected_cost",
+                 "experiment_fingerprint", "parent_job_ids", "research_stage", "finding_ids", "lab_content_hash"),
     "job": ("idea_id", "experiment_id", "status", "request", "started_at", "finished_at",
-            "error", "failure_category"),
+            "error", "failure_category", "proposal_id", "experiment_fingerprint",
+            "duplicate_of_job_id", "reused_from_job_id", "executed"),
+    "stop": ("reason", "evidence_ids", "job_ids", "research_stage"),
     "finding": ("statement", "interpretation", "limitations", "failure_category",
                 "idea_ids", "job_ids"),
     "decision": ("action", "reason", "evidence_ids", "parent_idea_ids", "finding_ids", "job_ids"),
     "report": ("kind", "title", "summary", "body", "limitations", "report_stage",
                "idea_ids", "job_ids", "finding_ids", "evidence_ids", "report_ids"),
-    "message": ("from", "to", "text", "initial_task", "evidence_ids"),
+    "message": ("from", "to", "text", "initial_task", "evidence_ids", "research_stage"),
 }
 
 
@@ -68,6 +73,17 @@ def _clean(value: Any) -> Any:
     return value
 
 
+def execution_label(job: Mapping[str, Any]) -> str:
+    """Describe recorded execution, without counting reused data as a new measurement."""
+    if job.get("reused_from_job_id"):
+        return "复用既有结果（非独立复现）"
+    if job.get("executed") is True:
+        return "重复配置，分别执行" if job.get("duplicate_of_job_id") else "实际执行"
+    if job.get("executed") is False:
+        return "未执行"
+    return "执行方式未记录"
+
+
 def _label(kind: str, row: dict[str, Any]) -> str:
     if kind == "job":
         result = _object(row.get("result"))
@@ -80,6 +96,13 @@ def _label(kind: str, row: dict[str, Any]) -> str:
             model.get("estimator")) if value)
     if kind == "message":
         return "共同研究任务" if row.get("initial_task") else "协调消息"
+    if kind == "proposal":
+        stage = "首轮独立冻结提案" if row.get("version") == 1 else "修订提案"
+        if row.get("status") != "committed":
+            stage = "待冻结提案"
+        return f"{stage} · v{row.get('version', '?')}"
+    if kind == "stop":
+        return "停止研究 · " + str(row.get("reason") or "未记录理由")
     if kind == "decision":
         return "路线决策 · " + str(row.get("action") or "未记录")
     return str(row.get("title") or row.get("statement") or row.get("summary") or row.get("id"))
@@ -159,6 +182,7 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
                     "label": _label(kind, row), "status": row.get("status") or
                     ("submitted" if kind == "report" else "registered"), "detail": detail}
             if kind == "job":
+                detail["execution_label"] = execution_label(row)
                 result = _object(row.get("result"))
                 detail["result"] = {key: result[key] for key in ("experiment_id", "protocol_fingerprint",
                     "feedback_surface", "n_samples", "duration_seconds", "failure_category", "error") if key in result}
@@ -192,6 +216,13 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
                     reference(ref, target, relation, label)
             if isinstance(row.get("idea_id"), str) and row["idea_id"]:
                 reference(row["idea_id"], target, "idea", "检验想法")
+            for field, relation, label in (
+                ("proposal_id", "proposal", "按冻结提案执行"),
+                ("reused_from_job_id", "result_reuse", "复用结果，非独立复现"),
+                ("duplicate_of_job_id", "duplicate_configuration", "相同配置登记，非启发关系"),
+            ):
+                if isinstance(row.get(field), str) and row[field]:
+                    reference(row[field], target, relation, label)
 
     for message in selected["messages"]:
         mid = str(message.get("id") or "")
@@ -230,6 +261,12 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
     notes = ["连线只表示已登记的引用或软件消息；空间顺序不证明因果，未记录的候选讨论不会被补画。",
              "想法显示已登记的研究理由、预测与反证条件；不依赖模型内部思维链。",
              "实验卡片只显示成功实验明确标记为 validate 的反馈；留出评价独立展示且没有回到研究的反馈边。"]
+    if selected["proposals"]:
+        notes.append("提案保留实验前冻结的模型和版本；历史实验到修订提案的连线来自明确登记的父实验引用。")
+    if any(row.get("reused_from_job_id") for row in selected["jobs"]):
+        notes.append("复用请求展示原实验的已有指标，不计为新增实测或独立复现；重复配置标记本身不表示候选互相启发。")
+    if run.get("research_stage"):
+        notes.append(f"已登记研究阶段：{run['research_stage']}。跨候选共享以软件登记的消息和证据引用为准。")
     if config.get("experiment_workers") == 1:
         notes.append("本次实验执行器并发数为 1：多个智能体可并行研究，训练任务按队列串行执行。")
     elif config.get("experiment_workers") is not None:
@@ -237,5 +274,6 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
     if config.get("strategy") == "independent":
         notes.append("本次采用 independent 策略；候选独立研究，主智能体汇总证据。")
     return _clean({"schema_version": "1.0", "run_id": run.get("run_id"), "track_id": track_id,
+                   "research_stage": run.get("research_stage"),
                    "lanes": lanes, "nodes": nodes, "edges": edges,
                    "missing_references": missing, "notes": notes})
