@@ -29,6 +29,9 @@ _FAILURES = {"hypothesis": "假说未获支持", "implementation": "实现失败
 _STAGES = {"independent_proposals": "独立提案冻结", "independent_experiments": "独立实验",
            "sharing": "证据共享"}
 _PURPOSES = {"explore": "探索", "refine": "修订", "replicate": "复现检验"}
+_STATUS = {"completed": "已完成", "budget_exhausted": "预算耗尽，研究未完整结题",
+           "cancelled": "已取消", "failed": "失败", "running": "执行中",
+           "paused": "已暂停", "interrupted": "已中断", "needs_input": "等待必要输入"}
 
 
 def _records(value: Any) -> list[dict[str, Any]]:
@@ -367,6 +370,7 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
     report = {"schema_version": "thermoforge.research-report.v2", "run_id": run.get("run_id"),
               "track_id": track_id, "status": run.get("status"),
               "research_stage": run.get("research_stage"),
+              "research_closure": deepcopy(run.get("research_closure")),
               "title": f"ThermoForge V2 {'轨迹' if track_id else '综合'}研究报告",
               "generated_at": datetime.now(timezone.utc).isoformat(), "protocol": protocol,
               "summary": {"tracks": len(tracks), "ideas": len(records["ideas"]),
@@ -407,6 +411,9 @@ def render_html(report: Mapping[str, Any]) -> str:
     """轻量自包含 HTML。所有研究文本转义，不执行模型/资料中的 HTML。"""
     body = [f"<h1>{escape(_text(report.get('title')))}</h1>",
             f"<p>运行：{escape(_text(report.get('run_id')))} · {escape(_text(report.get('generated_at')))}</p>"]
+    body.append("<p class='run-status'>运行状态：" + escape(_STATUS.get(report.get("status"), _text(report.get("status")))) + "</p>")
+    if report.get("research_closure"):
+        body.append("<p>已触发 token 报告预留收尾；预留量是估算，不保证所有结题调用完成。</p>")
     flow_html = render_flow_html(report.get("flow"))
     if flow_html:
         body.extend([flow_html, "<details class='full-report'><summary>完整文字报告与证据记录</summary>"])

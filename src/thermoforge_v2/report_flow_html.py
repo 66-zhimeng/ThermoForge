@@ -83,6 +83,7 @@ _CSS = """
 #tf-flow .tf-kind{font-size:10px;letter-spacing:.04em;color:var(--tf-muted)}#tf-flow .tf-node-title{font-size:13px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
 #tf-flow .tf-node-summary{font-size:11px;color:var(--tf-muted);line-height:1.55;overflow-wrap:anywhere}
 #tf-flow .tf-node-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#tf-flow .tf-node .tf-metric{font-size:13px;white-space:normal;line-height:1.45}
 #tf-flow .tf-metric{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 #tf-flow .tf-node-id{font-size:10px;color:var(--tf-muted);overflow-wrap:anywhere}#tf-flow .tf-empty{font-size:12px;color:var(--tf-muted);padding:14px 0}
 #tf-flow .tf-main .tf-node{max-width:360px;flex-basis:240px}#tf-flow .tf-external{padding-top:18px;border-top:1px dashed #bdc9ce}
@@ -109,7 +110,7 @@ const kinds = {track:'研究实例',message:'任务消息',source:'来源',idea:
 const origins = {conjecture:'自主假说',history:'历史结果',literature:'文献启发',mixed:'多来源'};
 const purposes = {explore:'探索',refine:'修订',replicate:'复现检验'};
 const stages = {independent_proposals:'独立提案冻结',independent_experiments:'独立实验',sharing:'证据共享'};
-const statuses = {completed:'已完成',succeeded:'已完成',failed:'失败',cancelled:'已取消',running:'执行中',reserved:'已预留',pending:'待执行',waiting:'等待',evaluated:'已评价',missing:'记录缺失',committed:'已冻结'};
+const statuses = {completed:'已完成',succeeded:'已完成',failed:'失败',cancelled:'已取消',running:'执行中',reserved:'已预留',pending:'待执行',waiting:'等待',evaluated:'已评价',missing:'记录缺失',committed:'已冻结',budget_exhausted:'预算耗尽',paused:'已暂停',interrupted:'已中断',needs_input:'等待必要输入'};
 const lanes = root.querySelector('.tf-lanes'), detail = root.querySelector('.tf-detail');
 const svg = root.querySelector('.tf-edges'), map = root.querySelector('.tf-map');
 const select = root.querySelector('.tf-track');
@@ -120,7 +121,7 @@ const el = (tag,cls,text) => {const e=document.createElement(tag);if(cls)e.class
 const pct = x => Number.isFinite(x) ? (x*100).toFixed(4)+'%' : '未记录';
 const record = n => n.detail || {};
 const metrics = n => n.metrics || {};
-function modelLabel(n){const d=record(n),m=d.result?.model?.spec||d.result?.model||d.model||d.request?.model;return m ? [m.estimator || m.name || m.category,m.hyperparameters?.alpha!=null?'α='+m.hyperparameters.alpha:''].filter(Boolean).join(' · ') : '';}
+function modelLabel(n){const d=record(n),m=d.result?.model?.spec||d.result?.model||d.model||d.request?.model;return m ? [m.hyperparameters?.lab || m.estimator || m.physics || m.name || m.category,m.hyperparameters?.alpha!=null?'α='+m.hyperparameters.alpha:''].filter(Boolean).join(' · ') : '';}
 function isMain(n){return (flow.lanes||[]).some(l=>l.track_id===n.track_id&&l.role==='main')||record(n).role==='main'||(record(nodes.get('track:'+n.track_id)||{}).context_only&&n.track_id==='main');}
 function latestReports(items){let reports=items.filter(n=>n.kind==='report');const finals=reports.filter(n=>record(n).report_stage==='final');if(finals.length)reports=finals;return reports.length ? [reports.reduce((a,b)=>(record(a).created_at||0)>(record(b).created_at||0)?a:b)] : [];}
 function parentChanges(n){
