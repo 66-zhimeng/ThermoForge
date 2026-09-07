@@ -301,3 +301,29 @@ def test_old_explicit_model_and_effort_remain_exact_on_retry(tmp_path, operation
 def test_old_implicit_model_request_accepts_equivalent_empty_values(tmp_path, value):
     store, request, original, _ = legacy_run(tmp_path, before_autonomy=False)
     assert store.find_request(request | {"model": value, "reasoning_effort": value}, "legacy-start") == original
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+def test_pre_objective_astra_run_retry_and_budget_update_do_not_freeze_a_new_goal(tmp_path, operation):
+    store, request, original, old_hash = legacy_run(tmp_path, before_autonomy=False,
+                                                   model=CODEX_MODEL, reasoning_effort=CODEX_EFFORT)
+    # The immediately preceding version already had the fixed Astra defaults.
+    omitted_profile = {k: v for k, v in request.items() if k not in {"model", "reasoning_effort"}}
+    assert retry_legacy(store, operation, omitted_profile) == original
+    assert "objective_contract" not in original
+    updated = store.control(original["run_id"], "update", changes={"token_budget": 2000000})
+    assert "objective_contract" not in updated
+    assert retry_legacy(store, operation, omitted_profile) == updated
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT request_hash FROM runs WHERE id=?", (original["run_id"],)).fetchone()[0] == old_hash
+
+
+@pytest.mark.parametrize("changes", [{"objective_mode": "target"}, {"objective_mode": "optimize"},
+                                     {"objective_metric": "R2"}, {"min_improvement": 0.1},
+                                     {"review_required": False},
+                                     {"baseline_model": {"category": "data", "estimator": "ridge"}}])
+def test_old_start_hash_never_discards_explicit_objective_changes(tmp_path, changes):
+    store, request, original, _ = legacy_run(tmp_path, before_autonomy=False)
+    with pytest.raises(V2Error, match="不同"):
+        store.find_request(request | changes, "legacy-start")
+    assert store.get_run(original["run_id"]) == original

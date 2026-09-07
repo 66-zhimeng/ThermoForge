@@ -14,8 +14,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from .contracts import MUTABLE_CONFIG, RunConfig, V2Error
+from .contracts import MUTABLE_CONFIG, OBJECTIVE_CONFIG_DEFAULTS, RunConfig, V2Error
 from .autonomy import AutonomyMixin
+from .objectives import build_objective_contract
 
 
 def now() -> float:
@@ -89,6 +90,7 @@ class RunStore(AutonomyMixin):
             return existing_request
         config = RunConfig.model_validate(config).model_dump(mode="json")
         request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
+        objective_contract = build_objective_contract(config, protocol)
         with self._db() as db:
             existing = db.execute("SELECT request_hash,data FROM runs WHERE idempotency_key=?",
                                   (idempotency_key,)).fetchone()
@@ -98,6 +100,7 @@ class RunStore(AutonomyMixin):
                 return json.loads(existing[1])
             run_id = identifier("RUN")
             doc = {"run_id": run_id, "config": config, "protocol": protocol,
+                   "objective_contract": objective_contract,
                    "status": "queued", "version": 1, "created_at": now(),
                    "updated_at": now(), "error": None, "experiments_reserved": 0,
                    "experiments_settled": 0, "tokens_used": 0}
@@ -105,7 +108,7 @@ class RunStore(AutonomyMixin):
                 doc["research_stage"] = "independent_proposals"
             db.execute("INSERT INTO runs VALUES(?,?,?,?)",
                        (run_id, idempotency_key, request_hash, encode(doc)))
-            self._event(db, run_id, "created", {"config": config})
+            self._event(db, run_id, "created", {"config": config, "objective_contract": objective_contract})
         return doc
 
     def get_run(self, run_id: str) -> dict:
@@ -125,15 +128,25 @@ class RunStore(AutonomyMixin):
             # 重建原请求，不能拿已被用户更新的运行配置来判断幂等。
             # 仅补省略字段；显式模型/强度必须保留，不能借兼容逻辑改换模型。
             previous_defaults = {"model": None, "reasoning_effort": None, **config}
+            allow_pre_objective = all(config.get(key, default) == default
+                                      for key, default in OBJECTIVE_CONFIG_DEFAULTS.items())
+
+            def matches(normalized):
+                variants = [normalized]
+                if allow_pre_objective:
+                    variants.append({k: v for k, v in normalized.items() if k not in OBJECTIVE_CONFIG_DEFAULTS})
+                return any(hashlib.sha256(encode(value).encode()).hexdigest() == row[0]
+                           for value in variants)
+
             if config.get("research_mode", "acceptance") == "acceptance" and not config.get("reuse_experiments", False):
                 legacy = RunConfig.model_validate(previous_defaults | {"research_mode": "acceptance"}).model_dump(mode="json")
                 legacy.pop("research_mode")
                 legacy.pop("reuse_experiments")
-                if hashlib.sha256(encode(legacy).encode()).hexdigest() == row[0]:
+                if matches(legacy):
                     return json.loads(row[1])
             for versioned_request in (previous_defaults, config):
                 normalized = RunConfig.model_validate(versioned_request).model_dump(mode="json")
-                if hashlib.sha256(encode(normalized).encode()).hexdigest() == row[0]:
+                if matches(normalized):
                     return json.loads(row[1])
             raise V2Error("TFV2-CONFLICT", "同一幂等键已用于不同的研究配置")
 
@@ -164,8 +177,8 @@ class RunStore(AutonomyMixin):
             doc = self._get(db, "runs", "id", run_id)
             if expected_version is not None and doc["version"] != expected_version:
                 raise V2Error("TFV2-CONFLICT", "研究状态已改变，请读取新版本后重试")
-            if set(patch) & {"run_id", "protocol", "created_at", "version"}:
-                raise V2Error("TFV2-IMMUTABLE", "研究身份与评价协议不可修改")
+            if set(patch) & {"run_id", "protocol", "objective_contract", "created_at", "version"}:
+                raise V2Error("TFV2-IMMUTABLE", "研究身份、目标契约与评价协议不可修改")
             doc.update(patch)
             self._write_run(db, doc)
             return doc
