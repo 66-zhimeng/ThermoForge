@@ -239,7 +239,8 @@ class ResearchEngine:
             if method == "thread/tokenUsage/updated":
                 usage = params.get("tokenUsage") or {}
                 self._record_usage(rid, tid, usage, generation)
-            if method in {"turn/started", "turn/completed", "thread/status/changed", "error", "session/needs_input"}:
+            if method in {"turn/started", "turn/completed", "thread/status/changed", "model/rerouted",
+                          "error", "session/needs_input"}:
                 self.store.event(rid, method, params, tid)
             if method == "session/needs_input":
                 self.store.update_run(rid, {"status": "pausing", "error": "Codex 需要用户输入，查看轨迹事件"})
@@ -557,13 +558,13 @@ class ResearchEngine:
             if self.store.get_track(rid, "main")["status"] == "failed":
                 raise RuntimeError("主 Codex 无法启动；查看 main 轨迹错误并修复认证/运行时后恢复")
             actual = [t.get("backend", {}) for t in self.store.list_tracks(rid) if t.get("backend")]
-            for key in ("model", "reasoning_effort"):
+            for key in ("model", "reasoning_effort", "service_tier"):
                 values = {b.get(key) for b in actual if b.get(key)}
                 if len(values) > 1:
                     raise RuntimeError(f"研究实例的实际 {key} 不一致，停止本次比较并保留诊断")
             if not run.get("effective_backend") and actual:
                 self.store.update_run(rid, {"effective_backend": {
-                    k: actual[0].get(k) for k in ("model", "reasoning_effort", "server")}})
+                    k: actual[0].get(k) for k in ("model", "reasoning_effort", "service_tier", "server")}})
             watcher = asyncio.create_task(self._watch_controls(rid))
             if config["candidates"] == 0:
                 await self._candidate(rid, "main")

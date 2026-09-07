@@ -169,7 +169,9 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
         detail = {key: track[key] for key in ("track_id", "role", "status", "phase", "turns", "error",
                                              "created_at", "updated_at") if key in track}
         backend = _object(track.get("backend"))
-        detail["backend"] = {key: backend[key] for key in ("model", "server", "native_subagents") if key in backend}
+        detail["backend"] = {key: backend[key] for key in (
+            "model", "reasoning_effort", "service_tier", "fast_mode", "server", "native_subagents")
+            if key in backend}
         add({"id": f"track:{tid}", "kind": "track", "track_id": tid, "label": label,
              "status": track.get("status", "unknown"), "detail": detail})
 

@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from thermoforge_v2.contracts import RunConfig, V2Error
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL, CODEX_SERVICE_TIER
 from thermoforge_v2.store import RunStore
 
 
@@ -111,6 +112,25 @@ def test_invalid_config_rejected():
         RunConfig(goal_id="RG-0001", dataset_ref="x", experiment_workers=2)
 
 
+def test_new_run_defaults_to_astra_ultra_without_changing_explicit_legacy_values(tmp_path):
+    store = RunStore(tmp_path / "state")
+    request = {"goal_id": "RG-0001", "dataset_ref": "D@rev_0001"}
+    run = store.create_run(request, {"fingerprint": "frozen"}, "astra-default")
+    assert CODEX_MODEL == run["config"]["model"] == "gpt-6-astra"
+    assert CODEX_EFFORT == run["config"]["reasoning_effort"] == "ultra"
+    assert CODEX_SERVICE_TIER == "default"
+    assert store.find_request(request, "astra-default") == run
+    assert store.find_request(request | {"model": CODEX_MODEL, "reasoning_effort": CODEX_EFFORT},
+                              "astra-default") == run
+    for value in (None, "", "  "):
+        parsed = RunConfig.model_validate(request | {"model": value, "reasoning_effort": value})
+        assert parsed.model is None and parsed.reasoning_effort is None
+    explicit = RunConfig.model_validate(request | {"model": " custom-model ", "reasoning_effort": " high "})
+    assert explicit.model == "custom-model" and explicit.reasoning_effort == "high"
+    with pytest.raises(V2Error, match="不同"):
+        store.find_request(request | {"model": None, "reasoning_effort": None}, "astra-default")
+
+
 def test_queued_pause_wins_over_delayed_scheduler(tmp_path):
     store = RunStore(tmp_path / "state")
     run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001", "research_mode": "acceptance"},
@@ -137,14 +157,25 @@ def test_reserved_job_does_not_start_after_pause(tmp_path):
     assert store.get_run(rid)["experiments_settled"] == 1
 
 
-def legacy_run(tmp_path, **overrides):
-    """写入旧版完整 config/hash，不通过当前 create_run 自动补新字段。"""
+def legacy_run(tmp_path, *, before_autonomy=True, **overrides):
+    """固定历史字段和值，避免用当前 RunConfig 默认值伪造旧哈希。"""
     store = RunStore(tmp_path / "legacy-state")
     request = {"goal_id": "RG-0001", "dataset_ref": "D@rev_0001",
                "guidance": "保留初始验收范围", **overrides}
-    config = RunConfig.model_validate(request | {"research_mode": "acceptance"}).model_dump(mode="json")
-    config.pop("research_mode")
-    config.pop("reuse_experiments")
+    config = {
+        "goal_id": "RG-0001", "dataset_ref": "D@rev_0001", "view_id": None,
+        "candidates": 5, "model": None, "reasoning_effort": None,
+        "max_experiments": 20, "max_experiments_per_track": 4, "max_turns": 8,
+        "token_budget": 1000000, "strategy": "independent", "top_k": 2,
+        "stagnation_rounds": 2, "experiment_workers": 1,
+        "experiment_timeout_seconds": 300.0, "turn_timeout_seconds": 900.0,
+        "max_failures": 3, "seed": 42, "guidance": "保留初始验收范围",
+        "validation": None, "purge_seconds": 2700.0, "embargo_seconds": 2700.0,
+        "y_floor": 1e-6,
+    }
+    if not before_autonomy:
+        config.update(research_mode="autonomous", reuse_experiments=False)
+    config.update(overrides)
 
     def encode_old(value):
         return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False,
@@ -215,3 +246,58 @@ def test_legacy_compatibility_does_not_accept_changed_start_request(tmp_path, op
         retry_legacy(store, operation, request | {"dataset_ref": "OTHER@rev_0001"})
     assert conflict.value.code == "TFV2-CONFLICT"
     assert store.get_run(original["run_id"]) == original
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+@pytest.mark.parametrize("mode", [None, "autonomous", "acceptance"])
+def test_previous_model_defaults_retry_preserves_full_run_and_original_hash(tmp_path, operation, mode):
+    options = {} if mode is None else {"research_mode": mode}
+    store, request, original, old_hash = legacy_run(tmp_path, before_autonomy=False, **options)
+    repeated = retry_legacy(store, operation, request)
+    assert repeated == original
+    assert repeated["config"]["model"] is None
+    assert repeated["config"]["reasoning_effort"] is None
+    assert repeated["config"]["research_mode"] == (mode or "autonomous")
+
+    updated = store.control(original["run_id"], "update", expected_version=original["version"],
+                            changes={"token_budget": 1500000, "guidance": "完成已有候选的结题"})
+    reopened = RunStore(store.root)
+    assert retry_legacy(reopened, operation, request) == updated
+    assert updated["config"]["model"] is None and updated["config"]["reasoning_effort"] is None
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT request_hash FROM runs WHERE id=?", (original["run_id"],)).fetchone()[0] == old_hash
+        assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+    with pytest.raises(V2Error, match="不同"):
+        retry_legacy(reopened, operation, request | {"token_budget": 1500000})
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+@pytest.mark.parametrize("before_autonomy", [True, False])
+@pytest.mark.parametrize("changed", [{"model": "gpt-6-astra"}, {"model": "another-model"},
+                                     {"reasoning_effort": "ultra"}, {"reasoning_effort": "high"}])
+def test_old_hash_compatibility_never_discards_explicit_model_or_effort(tmp_path, operation,
+                                                                    before_autonomy, changed):
+    store, request, original, _ = legacy_run(tmp_path, before_autonomy=before_autonomy)
+    with pytest.raises(V2Error, match="不同"):
+        retry_legacy(store, operation, request | changed)
+    assert store.get_run(original["run_id"]) == original
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+@pytest.mark.parametrize("before_autonomy", [True, False])
+def test_old_explicit_model_and_effort_remain_exact_on_retry(tmp_path, operation, before_autonomy):
+    store, request, original, _ = legacy_run(tmp_path, before_autonomy=before_autonomy,
+                                           model="custom-model", reasoning_effort="high")
+    assert retry_legacy(store, operation, request) == original
+    for changed in ({"model": "gpt-6-astra"}, {"reasoning_effort": "ultra"}):
+        with pytest.raises(V2Error, match="不同"):
+            retry_legacy(store, operation, request | changed)
+    without_model = {k: v for k, v in request.items() if k != "model"}
+    with pytest.raises(V2Error, match="不同"):
+        retry_legacy(store, operation, without_model)
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_old_implicit_model_request_accepts_equivalent_empty_values(tmp_path, value):
+    store, request, original, _ = legacy_run(tmp_path, before_autonomy=False)
+    assert store.find_request(request | {"model": value, "reasoning_effort": value}, "legacy-start") == original

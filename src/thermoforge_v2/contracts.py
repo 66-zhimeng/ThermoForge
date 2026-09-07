@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .profile import CODEX_EFFORT, CODEX_MODEL
+
 
 class V2Error(ValueError):
     """可通过 GUI/CLI/MCP 统一展示的领域错误。"""
@@ -23,8 +25,8 @@ class RunConfig(BaseModel):
     dataset_ref: str = Field(min_length=1)
     view_id: str | None = Field(default=None, pattern=r"^VIEW-[0-9]{4,}$")
     candidates: int = Field(default=5, ge=0, le=16)
-    model: str | None = None
-    reasoning_effort: str | None = None
+    model: str | None = CODEX_MODEL
+    reasoning_effort: str | None = CODEX_EFFORT
     max_experiments: int = Field(default=20, ge=1, le=10000)
     max_experiments_per_track: int = Field(default=4, ge=1, le=1000)
     max_turns: int = Field(default=8, ge=1, le=200)

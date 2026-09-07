@@ -11,6 +11,7 @@ from thermoforge_v2.codex import (
     CodexConfig, CodexError, CodexSession, DISABLED_FEATURES, PERMISSION_PROFILE,
     restricted_config,
 )
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 
 
 FAKE_SERVER = r'''
@@ -20,7 +21,8 @@ def event(m,p): out({'method':m,'params':p})
 def done(status='completed'):
  event('item/completed',{'threadId':thread,'item':{'type':'agentMessage','id':'reply','phase':'final_answer','text':'已完成研究'}})
  event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':status,'items':[],'error':None}})
-config={}
+# 模拟宿主配置为较低强度 + Fast，项目必须显式覆盖。
+config={'model':'inherited-model','model_reasoning_effort':'low','service_tier':'priority'}
 for i,a in enumerate(sys.argv):
  if a=='-c':
   import tomllib
@@ -40,18 +42,32 @@ for line in sys.stdin:
   assert p['config']['mcp_servers.inherited.enabled'] is False
   assert p['permissions']=='thermoforge_research'
   assert p['runtimeWorkspaceRoots']==[p['cwd']]
+  assert config['service_tier']=='default'
+  assert p['serviceTier']=='default'
+  assert p['config']['service_tier']=='default'
+  assert p['config']['model']==p['model']==config['model']
+  assert p['config']['model_reasoning_effort']==config['model_reasoning_effort']
   if method=='thread/resume':thread=p['threadId'];assert 'dynamicTools' not in p
   else:
    assert all(t['type']=='function' for t in p['dynamicTools'])
    assert p['allowProviderModelFallback'] is False
-  r={'thread':{'id':thread},'activePermissionProfile':{'id':'thermoforge_research'},'model':'configured-model','modelProvider':'openai'}
+  r={'thread':{'id':thread},'activePermissionProfile':{'id':'thermoforge_research'},'model':p['model'],'modelProvider':'openai','reasoningEffort':p['config']['model_reasoning_effort'],'serviceTier':p['serviceTier']}
+  mismatch=os.environ.get('FAKE_PROFILE_MISMATCH')
+  if mismatch:r[mismatch]='unexpected'
+  missing=os.environ.get('FAKE_PROFILE_MISSING')
+  if missing:r.pop(missing)
  elif method=='turn/start':
+  assert p['model']==config['model']
+  assert p['effort']==config['model_reasoning_effort']
+  assert p['serviceTier']==p['serviceTierForTurn']=='default'
   turn='turn-'+str(i);mode=p['input'][0]['text']
   if mode=='disconnect':sys.exit(3)
   event('turn/started',{'threadId':thread,'turn':{'id':turn,'status':'inProgress'}})
   out({'id':i,'result':{'turn':{'id':turn,'status':'inProgress'}}})
   event('thread/tokenUsage/updated',{'threadId':thread,'turnId':turn,'tokenUsage':{'total':{'totalTokens':42},'last':{'totalTokens':21}}})
   event('item/completed',{'threadId':thread,'item':{'type':'reasoning','id':'thought','summary':['摘要'],'content':['不持久化内部推理']}})
+  if mode=='reroute':
+   event('model/rerouted',{'threadId':thread,'turnId':turn,'fromModel':config['model'],'toModel':'smaller-model','reason':'test'});continue
   if mode=='wait':continue
   if mode in ('tool','duplicate','wrong-thread','tool-error'):
    pending=2 if mode=='duplicate' else 1
@@ -97,6 +113,8 @@ def test_independent_processes_tools_and_resume(config):
             assert len({s.pid for s in sessions}) == 6
             assert len({s.thread_id for s in sessions}) == 6
             assert all(i["native_subagents"] is False for i in infos)
+            assert all(i["model"] == CODEX_MODEL and i["reasoning_effort"] == CODEX_EFFORT
+                       and i["service_tier"] == "default" and i["fast_mode"] is False for i in infos)
             results = await asyncio.gather(*(s.turn("tool") for s in sessions))
             assert all(r.status == "completed" and r.text == "已完成研究" for r in results)
             assert all(r.usage["total"]["totalTokens"] == 42 for r in results)
@@ -107,6 +125,8 @@ def test_independent_processes_tools_and_resume(config):
         resumed = CodexSession(config, SPECS, echo)
         try:
             await resumed.start(thread)
+            assert resumed.info["requested_backend"] == {
+                "model": CODEX_MODEL, "reasoning_effort": CODEX_EFFORT, "service_tier": "default"}
             assert resumed.thread_id == thread and resumed.pid != old_pid
             assert (await resumed.turn("done")).status == "completed"
             assert (await resumed.turn("done")).status == "completed"
@@ -171,6 +191,17 @@ def test_disconnection_fails_turn_and_closes_process(config):
     asyncio.run(scenario())
 
 
+def test_backend_model_reroute_stops_generation(config):
+    async def scenario():
+        session = CodexSession(config, SPECS, echo)
+        await session.start()
+        with pytest.raises(CodexError, match="切换研究模型"):
+            await session.turn("reroute")
+        assert session.process.returncode is not None
+        assert session.state == "closed"
+    asyncio.run(scenario())
+
+
 def test_turn_timeout_really_interrupts_backend(config):
     async def scenario():
         session = CodexSession(replace(config, turn_timeout=0.1), SPECS, echo)
@@ -194,6 +225,26 @@ def test_preflight_fails_closed(config, change, match):
         assert session.process.returncode is not None
         assert session.state == "closed"
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("key", ["model", "reasoningEffort", "serviceTier"])
+@pytest.mark.parametrize("mode", ["FAKE_PROFILE_MISMATCH", "FAKE_PROFILE_MISSING"])
+@pytest.mark.parametrize("thread_id", [None, "existing-thread"])
+def test_unconfirmed_model_profile_fails_before_any_turn(config, key, mode, thread_id):
+    async def scenario():
+        session = CodexSession(replace(config, env={mode: key}), SPECS, echo)
+        with pytest.raises(CodexError, match=key):
+            await session.start(thread_id)
+        assert session.process.returncode is not None
+        assert session.state == "closed"
+        assert session.info == {}
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model,effort", [(None, None), ("", ""), ("  ", "  ")])
+def test_empty_profile_uses_project_defaults(config, model, effort):
+    selected = replace(config, model=model, effort=effort)
+    assert (selected.model, selected.effort) == (CODEX_MODEL, CODEX_EFFORT)
 
 
 def test_restricted_config_does_not_grant_root_or_spawn_agents():

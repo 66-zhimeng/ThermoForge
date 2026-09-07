@@ -121,19 +121,21 @@ class RunStore(AutonomyMixin):
                              (idempotency_key,)).fetchone()
             if row is None:
                 return None
-            # 原始请求哈希不随 guidance/预算更新改变。旧记录新增字段之前的
-            # 哈希也用原请求重建，不能拿已被用户更新的运行配置来判断幂等。
+            # 原始请求哈希不随 guidance/预算更新改变。用各版本的默认值
+            # 重建原请求，不能拿已被用户更新的运行配置来判断幂等。
+            # 仅补省略字段；显式模型/强度必须保留，不能借兼容逻辑改换模型。
+            previous_defaults = {"model": None, "reasoning_effort": None, **config}
             if config.get("research_mode", "acceptance") == "acceptance" and not config.get("reuse_experiments", False):
-                legacy = RunConfig.model_validate(config | {"research_mode": "acceptance"}).model_dump(mode="json")
+                legacy = RunConfig.model_validate(previous_defaults | {"research_mode": "acceptance"}).model_dump(mode="json")
                 legacy.pop("research_mode")
                 legacy.pop("reuse_experiments")
                 if hashlib.sha256(encode(legacy).encode()).hexdigest() == row[0]:
                     return json.loads(row[1])
-            config = RunConfig.model_validate(config).model_dump(mode="json")
-            request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
-            if row[0] != request_hash:
-                raise V2Error("TFV2-CONFLICT", "同一幂等键已用于不同的研究配置")
-            return json.loads(row[1])
+            for versioned_request in (previous_defaults, config):
+                normalized = RunConfig.model_validate(versioned_request).model_dump(mode="json")
+                if hashlib.sha256(encode(normalized).encode()).hexdigest() == row[0]:
+                    return json.loads(row[1])
+            raise V2Error("TFV2-CONFLICT", "同一幂等键已用于不同的研究配置")
 
     def begin_run(self, run_id: str) -> dict:
         """调度领取和用户暂停共用事务，已暂停的队列任务不得重新启动。"""

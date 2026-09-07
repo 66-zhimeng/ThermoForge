@@ -7,6 +7,7 @@ import pytest
 
 from thermoforge_v2.codex import CodexError, TurnResult
 from thermoforge_v2.engine import ResearchEngine
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 from thermoforge_v2.store import RunStore
 
 
@@ -109,6 +110,7 @@ class FakeSession:
         return {"pid": self.pid, "thread_id": self.thread_id,
                 "model": self.config.model or self.scenario.resolved_model,
                 "reasoning_effort": self.config.effort or self.scenario.resolved_effort,
+                "service_tier": "default",
                 "server": {"version": "fake-codex"}}
 
     async def turn(self, prompt):
@@ -267,7 +269,8 @@ def test_pause_then_resume_uses_same_thread_and_new_process(tmp_path):
         await asyncio.wait_for(scenario.entered.wait(), 3)
         saved_thread = store.get_track(rid, "main")["thread_id"]
         frozen = store.get_run(rid)["effective_backend"]
-        assert frozen["model"] == "test-codex-model" and frozen["reasoning_effort"] == "high"
+        assert frozen["model"] == CODEX_MODEL and frozen["reasoning_effort"] == CODEX_EFFORT
+        assert frozen["service_tier"] == "default"
         store.control(rid, "pause")
         await asyncio.wait_for(task, 3)
         assert store.get_run(rid)["status"] == "paused"

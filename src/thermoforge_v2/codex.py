@@ -19,6 +19,8 @@ import subprocess
 from typing import Any, Awaitable, Callable, Sequence
 import weakref
 
+from .profile import CODEX_EFFORT, CODEX_MODEL, CODEX_SERVICE_TIER
+
 Json = dict[str, Any]
 ToolHandler = Callable[[str, Json], Awaitable[Any]]
 EventHandler = Callable[[Json], Awaitable[None]]
@@ -55,8 +57,8 @@ class CodexError(RuntimeError):
 @dataclass(frozen=True)
 class CodexConfig:
     cwd: Path
-    model: str | None = None
-    effort: str | None = None
+    model: str | None = CODEX_MODEL
+    effort: str | None = CODEX_EFFORT
     command: Sequence[str] | None = None
     expected_version: str | None = VALIDATED_CODEX_VERSION
     request_timeout: float = 30.0
@@ -66,6 +68,11 @@ class CodexConfig:
     developer_instructions: str = ""
     # 仅传递启动所需环境，不将认证文件复制到候选工作区。
     env: dict[str, str] | None = field(default=None, repr=False)
+
+    def __post_init__(self):
+        # 旧配置和 CLI 的显式空值也使用项目默认，不继承桌面中的模型/强度。
+        object.__setattr__(self, "model", (self.model or "").strip() or CODEX_MODEL)
+        object.__setattr__(self, "effort", (self.effort or "").strip() or CODEX_EFFORT)
 
 
 @dataclass(frozen=True)
@@ -217,7 +224,9 @@ class CodexSession:
         cwd.mkdir(parents=True, exist_ok=True)
         command = list(self.config.command) if self.config.command else resolve_codex_command()
         command += ["app-server", "--stdio"]
-        for key, value in restricted_config().items():
+        model_config = {"model": self.config.model, "model_reasoning_effort": self.config.effort,
+                        "service_tier": CODEX_SERVICE_TIER}
+        for key, value in (restricted_config() | model_config).items():
             command += ["-c", f"{key}={_toml(value)}"]
         self.state = "starting"
         self._event_worker_task = asyncio.create_task(self._event_worker())
@@ -262,15 +271,14 @@ class CodexSession:
             server_names = list(cfg.get("mcp_servers", {}))
             if any(not re.fullmatch(r"[A-Za-z0-9_-]+", name) for name in server_names):
                 raise CodexError("存在不能可靠覆盖的 MCP 配置名称，拒绝继承外部工具。")
-            overrides = {f"mcp_servers.{name}.enabled": False for name in server_names}
+            overrides = model_config | {f"mcp_servers.{name}.enabled": False for name in server_names}
             params: Json = {
                 "cwd": str(cwd), "permissions": PERMISSION_PROFILE,
                 "runtimeWorkspaceRoots": [str(cwd)], "approvalPolicy": "never",
                 "config": overrides,
                 "developerInstructions": self.config.developer_instructions,
+                "model": self.config.model, "serviceTier": CODEX_SERVICE_TIER,
             }
-            if self.config.model:
-                params["model"] = self.config.model
             async with _initialization_lock():
                 if thread_id:
                     params["threadId"] = thread_id
@@ -285,11 +293,19 @@ class CodexSession:
             profile = result.get("activePermissionProfile")
             if not profile or profile.get("id") != PERMISSION_PROFILE:
                 raise CodexError("Codex 未启用研究专用读访问配置，拒绝继续。")
+            # 用运行时确认值核验，不能把请求值当成已经生效的结果写入报告。
+            for key, expected_value in (("model", self.config.model),
+                                        ("reasoningEffort", self.config.effort),
+                                        ("serviceTier", CODEX_SERVICE_TIER)):
+                if result.get(key) != expected_value:
+                    raise CodexError(f"Codex 未确认研究配置 {key}={expected_value}，拒绝继续。")
             self.state = "idle"
             self.info = {"pid": self.pid, "thread_id": self.thread_id, "state": self.state,
                          "model": result.get("model"), "model_provider": result.get("modelProvider"),
-                         "reasoning_effort": self.config.effort or result.get("reasoningEffort")
-                         or cfg.get("model_reasoning_effort"),
+                         "reasoning_effort": result["reasoningEffort"],
+                         "service_tier": result["serviceTier"], "fast_mode": False,
+                         "requested_backend": {"model": self.config.model,
+                             "reasoning_effort": self.config.effort, "service_tier": CODEX_SERVICE_TIER},
                          "server": agent, "permission_profile": profile,
                          "auth_type": (account.get("account") or {}).get("type"),
                          "dynamic_tools": sorted(self._tool_names),
@@ -313,9 +329,9 @@ class CodexSession:
             self.usage = None
             self._messages.clear()
             self._turn_done = asyncio.get_running_loop().create_future()
-            params: Json = {"threadId": self.thread_id, "input": [{"type": "text", "text": prompt}]}
-            if self.config.effort:
-                params["effort"] = self.config.effort
+            params: Json = {"threadId": self.thread_id, "input": [{"type": "text", "text": prompt}],
+                           "model": self.config.model, "effort": self.config.effort,
+                           "serviceTier": CODEX_SERVICE_TIER, "serviceTierForTurn": CODEX_SERVICE_TIER}
             try:
                 response = await self._request("turn/start", params)
                 self.turn_id = response["turn"]["id"]
@@ -450,6 +466,9 @@ class CodexSession:
     def _notification(self, method: str, params: Json) -> None:
         if self.thread_id and params.get("threadId") not in {None, self.thread_id}:
             return
+        if method == "model/rerouted" and params.get("toModel") != self.config.model:
+            self._emit(method, params)
+            raise CodexError("Codex 尝试切换研究模型，停止本轮以保留指定模型配置。")
         if method == "turn/started":
             self.turn_id = params.get("turn", {}).get("id", self.turn_id)
         if method == "thread/tokenUsage/updated":
