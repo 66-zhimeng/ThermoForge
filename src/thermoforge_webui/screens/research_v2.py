@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import streamlit as st
 
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 from thermoforge_v2.reports import build_report, render_html, render_markdown
 from thermoforge_webui.context import tool_context
 from thermoforge_webui.ui import copilot_banner
@@ -135,8 +136,9 @@ def _create(client, preparation: dict[str, Any]) -> None:
         goal_id = left.selectbox("研究目标", list(goals), format_func=goals.get, key="v2_create_goal")
         dataset_ref = right.selectbox("数据修订版", list(datasets), format_func=datasets.get, key="v2_create_dataset")
         view_id = left.text_input("数据视图 ID（可选）", value=str(defaults.get("view_id") or ""))
-        model = right.text_input("Codex 模型（留空使用运行时配置）", value=str(defaults.get("model") or ""))
-        reasoning = right.text_input("推理强度（留空使用运行时配置）", value=str(defaults.get("reasoning_effort") or ""))
+        model = right.text_input("Codex 模型", value=CODEX_MODEL, disabled=True)
+        reasoning = right.text_input("思考强度（最高）", value=CODEX_EFFORT, disabled=True)
+        right.caption("主智能体与所有候选统一使用 GPT-6 Astra、最高思考强度；每轮使用普通速度，关闭 Fast。")
         candidates = left.selectbox("研究配置", [5, 0], index=0,
                                     format_func=lambda n: "主 Codex ＋ 5 个候选" if n else "单 Codex 对照基线")
         max_experiments = left.number_input("全局实验上限", min_value=1, value=int(defaults.get("max_experiments", 20)), step=1)
@@ -155,7 +157,7 @@ def _create(client, preparation: dict[str, Any]) -> None:
         return
     config = {"goal_id": goal_id, "dataset_ref": dataset_ref, "candidates": candidates,
               "research_mode": "autonomous", "reuse_experiments": bool(reuse and strategy != "independent"),
-              "model": model.strip() or None, "reasoning_effort": reasoning.strip() or None,
+              "model": model, "reasoning_effort": reasoning,
               "max_experiments": int(max_experiments),
               "max_experiments_per_track": int(per_track), "max_turns": int(max_turns),
               "token_budget": int(token_budget), "strategy": strategy,

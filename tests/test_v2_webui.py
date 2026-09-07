@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from streamlit.testing.v1 import AppTest
 
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 from thermoforge_webui.screens import research_v2
 
 
@@ -84,6 +85,8 @@ def test_create_uses_actual_discovery_and_six_codex_configuration(monkeypatch):
     assert config["goal_id"] == "RG-0001"
     assert config["dataset_ref"] == "CHILLER@rev_0001"
     assert config["candidates"] == 5
+    assert config["model"] == CODEX_MODEL == "gpt-6-astra"
+    assert config["reasoning_effort"] == CODEX_EFFORT == "ultra"
     assert config["research_mode"] == "autonomous"
     assert config["reuse_experiments"] is False
     assert config["max_turns"] >= 3
@@ -92,6 +95,11 @@ def test_create_uses_actual_discovery_and_six_codex_configuration(monkeypatch):
     worker = next(w for w in app.number_input if w.label == "实验并发数（当前固定串行）")
     assert worker.value == 1 and worker.disabled
     assert next(w for w in app.number_input if w.label == "每条轨迹最多执行片段").proto.min == 3
+    model = next(w for w in app.text_input if w.label == "Codex 模型")
+    reasoning = next(w for w in app.text_input if w.label == "思考强度（最高）")
+    assert model.value == CODEX_MODEL and model.disabled
+    assert reasoning.value == CODEX_EFFORT and reasoning.disabled
+    assert any("每轮使用普通速度，关闭 Fast" in caption.value for caption in app.caption)
 
 
 def test_shared_reuse_is_opt_in_and_reset_when_returning_to_independent(monkeypatch):

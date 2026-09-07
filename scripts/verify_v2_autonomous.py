@@ -5,7 +5,8 @@ Prepare without starting a service or model:
 Execute the saved configuration (consumes real Codex usage):
   .venv/Scripts/python scripts/verify_v2_autonomous.py --config <configuration.json>
 
-No model family or parameter values are prescribed. Repeated independently
+Research agents default to GPT-6 Astra / ultra at standard speed (Fast disabled).
+No experimental model family or parameter values are prescribed. Repeated independently
 chosen experiments are recorded as observations, not failed diversity tests.
 This validates autonomous workflow behavior, not superiority over one agent.
 """
@@ -25,6 +26,7 @@ import time
 import uuid
 
 from thermoforge_v2.contracts import RunConfig
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL
 from thermoforge_v2.strategy import compare_jobs
 
 from verify_v2_research import (
@@ -165,7 +167,7 @@ def prepare(args):
                   "models_root": str(ctx.models_root)},
         "run_config": RunConfig.model_validate({
             "goal_id": goal["id"], "dataset_ref": ref, "research_mode": "autonomous", "candidates": 5,
-            "model": args.model, "reasoning_effort": args.reasoning_effort,
+            "model": args.model or CODEX_MODEL, "reasoning_effort": args.reasoning_effort or CODEX_EFFORT,
             "max_experiments": 15, "max_experiments_per_track": 3, "max_turns": 8,
             "token_budget": args.token_budget or TOKEN_CEILING, "turn_timeout_seconds": 300,
             "experiment_timeout_seconds": 180, "max_failures": 2,
@@ -390,7 +392,8 @@ def execute(configuration_path, args):
                 tid, kind, payload = event["track_id"], event["kind"], event["payload"]
                 if kind == "instance.started":
                     instance = {k: payload.get(k) for k in (
-                        "pid", "thread_id", "model", "reasoning_effort", "server", "permission_profile",
+                        "pid", "thread_id", "model", "reasoning_effort", "service_tier", "fast_mode",
+                        "requested_backend", "server", "permission_profile",
                         "native_shell", "native_subagents", "dynamic_tools", "isolation")}
                     instance["session_id"] = payload.get("session_id") or payload.get("thread_id")
                     proof["instances"].setdefault(tid, instance)
@@ -494,8 +497,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare-only", action="store_true", help="只生成合成数据和配置，不启动服务或模型")
     parser.add_argument("--config", type=Path, help="执行已保存的隔离配置；不覆盖配置或此前验收证据")
-    parser.add_argument("--model", help="新配置使用的 Codex 模型；省略则采用当前 Codex 配置")
-    parser.add_argument("--reasoning-effort", help="新配置使用的推理强度；省略则采用当前 Codex 配置")
+    parser.add_argument("--model", help=f"新配置使用的 Codex 模型；默认 {CODEX_MODEL}")
+    parser.add_argument("--reasoning-effort", help=f"新配置使用的思考强度；默认最高档 {CODEX_EFFORT}")
     parser.add_argument("--data-seed", type=int, help="独立合成数据的 seed，默认 2026090701；与模型训练 seed 分开")
     parser.add_argument("--token-budget", type=int, help="累计 token 上限，默认 3000000，最高 3000000")
     parser.add_argument("--timeout", type=float, default=1800, help="有界研究监控秒数，默认 1800，最高 3600")

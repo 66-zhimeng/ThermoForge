@@ -1,7 +1,7 @@
 """真实 Codex 六进程/两轮动态工具验收，会消耗当前账号的 Codex 用量。
 
 运行：.venv/Scripts/python scripts/verify_v2_codex.py
-默认保持本机 Codex 模型设置，再将首实例报告的模型固定给其余实例。
+默认统一使用 GPT-6 Astra、最高思考强度 ultra、普通速度（关闭 Fast）。
 仅交换随机协议探针，不读取或训练用户数据，也不是研究质量/效果基准。
 证据写入 gitignored research/v2_validation/；每轮最多 180 秒。
 """
@@ -20,6 +20,7 @@ import time
 import uuid
 
 from thermoforge_v2.codex import CodexConfig, CodexSession, VALIDATED_CODEX_VERSION
+from thermoforge_v2.profile import CODEX_EFFORT, CODEX_MODEL, CODEX_SERVICE_TIER
 
 
 TOOL_SPEC = {
@@ -65,7 +66,9 @@ async def verify(args) -> tuple[dict, Path]:
         "scientific_quality_benchmark": False,
         "scope": "六个独立隐藏 Codex 进程，各自两轮真实动态工具回传；不训练用户数据。",
         "codex_protocol_version": args.expected_version,
-        "requested_model": args.model, "model_selection": "explicit" if args.model else "local_codex_default",
+        "requested_model": args.model or CODEX_MODEL,
+        "requested_reasoning_effort": CODEX_EFFORT, "requested_service_tier": CODEX_SERVICE_TIER,
+        "model_selection": "explicit" if args.model else "thermoforge_default",
         "turn_timeout_seconds": args.turn_timeout, "peak_concurrent_turns": 0,
         "instances": [], "errors": [], "passed": False,
     }
@@ -100,7 +103,7 @@ async def verify(args) -> tuple[dict, Path]:
                 row["model_reroutes"].append({k: p.get(k) for k in ("fromModel", "toModel", "reason")})
 
         session = CodexSession(CodexConfig(
-            cwd=folder / "workspaces" / role, model=model,
+            cwd=folder / "workspaces" / role, model=model, effort=CODEX_EFFORT,
             expected_version=args.expected_version,
             turn_timeout=args.turn_timeout, tool_timeout=10,
             developer_instructions=(
@@ -116,7 +119,9 @@ async def verify(args) -> tuple[dict, Path]:
         session, row, _ = item
         try:
             info = await session.start()
-            row.update({k: info.get(k) for k in ("pid", "thread_id", "model", "model_provider")})
+            row.update({k: info.get(k) for k in (
+                "pid", "thread_id", "model", "model_provider", "reasoning_effort", "service_tier",
+                "fast_mode", "requested_backend")})
             row["permission_profile"] = info.get("permission_profile")
             print(json.dumps({"event": "instance_ready", "role": row["role"],
                               "pid": row["pid"], "thread_id": row["thread_id"], "model": row["model"]}), flush=True)
@@ -157,8 +162,8 @@ async def verify(args) -> tuple[dict, Path]:
             write_json(evidence_path, evidence)
 
     try:
-        # 不替用户选模型：读取主实例实际设置，再将同一模型固定给其余实例。
-        main = instance("main", args.model)
+        # 使用项目统一配置，并核对六个实例实际采用的模型和思考档位。
+        main = instance("main", args.model or CODEX_MODEL)
         await start(main)
         fixed_model = main[1]["model"]
         if not fixed_model:
@@ -170,6 +175,9 @@ async def verify(args) -> tuple[dict, Path]:
             await start(item)
         if any(row["model"] != fixed_model for _, row, _ in instances):
             raise RuntimeError("六实例模型标识不一致，拒绝继续验收。")
+        if any(row["reasoning_effort"] != CODEX_EFFORT or row["service_tier"] != CODEX_SERVICE_TIER
+               or row["fast_mode"] is not False for _, row, _ in instances):
+            raise RuntimeError("实例未采用最高思考强度与普通速度，拒绝继续验收。")
         for phase in (1, 2):
             await asyncio.gather(*(turn(item, phase) for item in instances))
             if any(row["errors"] or not any(p["phase"] == phase and p["valid"] for p in row["probe_calls"])
@@ -207,7 +215,7 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default=None, help="仅在明确指定时覆盖本机 Codex 模型；不会自动选择替代模型")
+    parser.add_argument("--model", default=None, help=f"默认 {CODEX_MODEL}；不会自动选择替代模型")
     parser.add_argument("--turn-timeout", type=float, default=180)
     parser.add_argument("--expected-version", default=VALIDATED_CODEX_VERSION,
                         help="明确指定待验证的 CLI 版本；不修改全局安装，也不跳过权限检查")
