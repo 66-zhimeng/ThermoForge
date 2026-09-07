@@ -15,6 +15,7 @@ import math
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from .evidence_projection import safe_feedback
 from .report_flow import build_flow, execution_label
 from .report_flow_html import render_flow_html
 
@@ -69,6 +70,32 @@ def _safe_url(value: Any) -> str:
 def _section(title: str, paragraphs: list[str] | None = None,
              rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {"title": title, "paragraphs": paragraphs or [], "rows": rows or []}
+
+
+def _objective_status(value: Any) -> str:
+    return {"pass": "已满足", "fail": "未满足", "unknown": "证据不足", "not_configured": "未配置",
+            "not_applicable": "不适用", "not_required": "无需"}.get(value, "未记录")
+
+
+def _checkpoint_best(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return "尚无符合对应条件的实测候选。"
+    metric = value.get("metric") or "指标"
+    measured = value.get("raw_value", value.get("value"))
+    rendered = (f"{measured:.4%}" if metric in {"CVRMSE", "MAPE", "NMBE"}
+                and _metric_value(measured) is not None else _text(measured))
+    return f"{_text(value.get('job_id'))}；轨迹 {_text(value.get('track_id'))}；{metric}={rendered}。"
+
+
+def _checkpoint_pending(item: Mapping[str, Any]) -> str:
+    missing = item.get("missing") or {}
+    messages = [label for field, label in (("agent_report", "缺少智能体报告"),
+        ("stop_decision", "缺少停止决定"), ("final_team_report", "缺少本轮最终综合报告"),
+        ("report_predates_latest_result", "报告早于最新实验结果")) if missing.get(field)]
+    messages.extend(label + "：" + "、".join(missing[field]) for field, label in (
+        ("unsettled_job_ids", "尚未结算的实验"), ("finding_job_ids", "尚无已登记发现的实验"),
+        ("report_job_ids", "报告未引用的实验")) if missing.get(field))
+    return "；".join(messages) if messages else "本简报未发现上述登记缺项；科学结题仍由研究流程判定。"
 
 
 def _comparison(jobs: list[dict[str, Any]], protocol: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +174,8 @@ def _usage(tracks: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict[str, Any]:
     """从单次一致性快照生成可追溯报告；不修改快照，也不启动外部请求。"""
+    from .checkpoints import build_checkpoint
+
     run = deepcopy(dict(snapshot.get("run") or {}))
     protocol = deepcopy(run.get("protocol") or {})
     tracks = _records(snapshot.get("tracks"))
@@ -154,6 +183,12 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
         tracks = [t for t in tracks if t.get("track_id") == track_id]
         if not tracks:
             raise ValueError(f"没有这条研究轨迹：{track_id}")
+    checkpoint = deepcopy(snapshot.get("checkpoint")) or build_checkpoint(snapshot)
+    if track_id is not None:
+        checkpoint["tracks"] = [t for t in checkpoint["tracks"] if t.get("track_id") == track_id]
+        checkpoint["objective"] = checkpoint["tracks"][0]["objective"] if checkpoint["tracks"] else {}
+        checkpoint["negative_results"] = [n for n in checkpoint["negative_results"] if n.get("track_id") == track_id]
+        checkpoint.pop("artifacts", None)
     selected = {t.get("track_id") for t in tracks}
     records = {}
     for name in ("ideas", "proposals", "jobs", "findings", "stops", "decisions", "reports"):
@@ -216,6 +251,34 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
         f"{len(records['jobs'])} 个实验请求、{len(sources)} 项来源。",
         "研究理由来自实验前登记的想法记录；观察来自实验结果；解释与路线决策保留各自作者和依据。",
     ])]
+    objective = checkpoint.get("objective") or {}
+    baseline = objective.get("baseline") or {}
+    mode = {"target": "达标", "optimize": "优化", "explore": "探索"}.get(objective.get("objective_mode"), "历史运行未冻结")
+    sections.append(_section("持续事实简报（系统自动汇总）", [
+        checkpoint["notice"],
+        f"目标模式：{mode}；验证阈值：{_objective_status(objective.get('threshold_status'))}；"
+        f"改善要求：{_objective_status(objective.get('improvement_status'))}；"
+        f"已登记证据审阅：{_objective_status(objective.get('review_status'))}；"
+        f"目标指定评价面的验收：{_objective_status(objective.get('acceptance_status'))}。",
+        "共同基线：" + (f"{baseline.get('job_id')}；指标值 {_text(baseline.get('value'))}。"
+                       if baseline.get("status") == "available" else _text(baseline.get("reason"))),
+        "当前观测最优：" + (_checkpoint_best(objective.get("best_observed")) if objective.get("contract_available")
+                          else "历史运行未冻结主指标，统一最优未判定；单指标实测比较见下方。"),
+        "当前满足验证证据要求的候选：" + (_checkpoint_best(objective.get("best_eligible")) if objective.get("contract_available")
+                                      else "历史运行未冻结目标契约，合格状态未判定。"),
+        "仍缺少的目标证据：" + ("；".join(objective.get("missing_evidence") or []) or "未记录额外缺项。"),
+        "证据审阅表示已登记研究解释与限制，不代表已经完成独立复现或统计检验。",
+        "达标、继续或停止建议来自冻结目标与已登记事实，不等于科学结题，也不表示最终留出通过。",
+    ], [{"轨迹": item.get("track_id"), "覆盖范围": "全队综合" if item.get("job_scope") == "team" else "本轨迹",
+         "已结算实验": len(item.get("settled_jobs") or []),
+         "最新智能体报告": (item.get("latest_agent_report") or {}).get("id"),
+         "待完成或补充": _checkpoint_pending(item)} for item in checkpoint["tracks"]]))
+    regressions = [n for n in checkpoint["negative_results"] if n.get("kind") == "metric_regression"]
+    if regressions:
+        sections.append(_section("修订实验的指标退化", [
+            "只比较明确引用的父实验与同协议 validate 结果；保留退化结果，不将它自动解释为假说被证伪。",
+        ], [{"实验": n["job_id"], "父实验": n["parent_job_id"], "指标": n["metric"],
+             "之前": n["before"], "之后": n["after"], "变化": n["delta"]} for n in regressions]))
     if run.get("research_stage") or records["proposals"]:
         sections.append(_section("自主研究阶段与实验执行", [
             "当前阶段：" + _STAGES.get(run.get("research_stage"), _text(run.get("research_stage"))) + "。",
@@ -296,6 +359,7 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
                              "状态": job.get("status"), "实际模型": _text(result.get("model") or
                                  (job.get("request") or {}).get("model")),
                              "实测指标": _text(result.get("metrics")),
+                             "训练与验证诊断": _text(safe_feedback(result).get("diagnostics")),
                              "执行方式": execution_label(job),
                              "错误": _text(result.get("error") or job.get("error"))})
             if not related:
@@ -379,8 +443,9 @@ def build_report(snapshot: Mapping[str, Any], track_id: str | None = None) -> di
               "sections": sections, "sources": sources, **records,
               "tracks": tracks, "comparability": comparison, "usage": usage,
               "negative_results": negatives,
+              "checkpoint": checkpoint,
               "final_evaluation": final_evaluation,
-              "flow": build_flow(snapshot, track_id=track_id),
+              "flow": build_flow({**snapshot, "checkpoint": checkpoint}, track_id=track_id),
               "lineage": {"nodes": nodes, "edges": edges, "missing_references": missing}}
     return report
 

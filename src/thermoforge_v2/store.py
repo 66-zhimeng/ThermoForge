@@ -219,7 +219,9 @@ class RunStore(AutonomyMixin):
             self._write_run(db, doc)
             self._event(db, run_id, "control", {"action": action, "changes": changes,
                                                 "status": doc["status"]})
-            return doc
+        if doc["status"] in {"paused", "cancelled"}:
+            self.save_checkpoint(run_id, f"control.{action}")
+        return doc
 
     def create_track(self, run_id: str, track_id: str, role: str, **fields) -> dict:
         with self._db() as db:
@@ -276,7 +278,9 @@ class RunStore(AutonomyMixin):
             except sqlite3.IntegrityError as exc:
                 raise V2Error("TFV2-IMMUTABLE", "证据 ID 已存在，不能覆盖") from exc
             self._event(db, run_id, f"{kind}.created", {"id": doc["id"]}, track_id)
-            return doc
+        if kind in {"findings", "reports"}:
+            self.save_checkpoint(run_id, f"{kind}.created")
+        return doc
 
     def records(self, run_id: str, kind: str, track_id=None) -> list[dict]:
         query, args = "SELECT data FROM records WHERE run_id=? AND kind=?", [run_id, kind]
@@ -374,9 +378,29 @@ class RunStore(AutonomyMixin):
             run["experiments_settled"] += 1
             self._write_run(db, run)
             self._event(db, doc["run_id"], "job.settled", {"id": job_id, "status": status}, doc["track_id"])
-            return doc
+        # 先提交科学事实，再导出派生产物；文件故障不得回滚或重复训练。
+        self.save_checkpoint(doc["run_id"], "job.settled")
+        return doc
+
+    def save_checkpoint(self, run_id: str, reason: str):
+        """成果导出不依赖下一轮模型；失败留下事件，可从数据库重新生成。"""
+        try:
+            from .checkpoints import export_checkpoint
+            result = export_checkpoint(self, run_id, reason)
+        except Exception as exc:
+            self.event(run_id, "checkpoint.failed", {"reason": reason, "error": str(exc)[:2000]})
+            return {"ok": False, "error": str(exc)[:2000]}
+        self.event(run_id, "checkpoint.saved", {"reason": reason,
+            "checkpoint_id": result.get("checkpoint_id"), "event_cursor": result.get("event_cursor")})
+        return {"ok": True, **result}
 
     def start_job(self, job_id: str) -> dict:
+        result = self._start_job(job_id)
+        if not result.get("started") and result.get("status") in {"completed", "cancelled"}:
+            self.save_checkpoint(result["run_id"], "job.reused" if result.get("reused") else "job.cancelled")
+        return result
+
+    def _start_job(self, job_id: str) -> dict:
         """拿到实验槽后原子检查控制状态，消除暂停与开始训练之间的竞态。"""
         with self._db() as db:
             doc = self._get(db, "records", "id", job_id)

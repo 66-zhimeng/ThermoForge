@@ -239,6 +239,7 @@ function choose(id,userAction=false){
     field(d.result?.model?'结果记录的模型':'请求模型（结果未登记实际模型）',modelLabel(n)||d.model||d.request?.model);metricTable(metrics(n),d.reused_from_job_id?'复用的验证指标 · validate':'验证集实测 · validate');
     if(!Object.keys(metrics(n)).length)field('指标状态','未获得可用于展示的验证指标；缺失或失败不按零分计算。');
     field('错误',d.error||d.result?.error);
+    field('训练与验证诊断',d.result?.diagnostics);
     if(d.comparable===false)field('比较口径','此实验不满足当前冻结协议的可比条件；只保留其已登记事实。');
     for(const change of parentChanges(n))field('相对已登记父实验的 CVRMSE 变化',`${change.label} → 当前：${change.percent}%（负数表示误差降低；描述性比较）`);
   }

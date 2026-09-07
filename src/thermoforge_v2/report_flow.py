@@ -10,6 +10,8 @@ from copy import deepcopy
 import math
 from typing import Any, Mapping
 
+from .evidence_projection import safe_feedback
+
 
 _KINDS = {"sources": "source", "ideas": "idea", "proposals": "proposal", "jobs": "job",
           "findings": "finding", "stops": "stop", "decisions": "decision",
@@ -197,6 +199,9 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
                 validated = result.get("feedback_surface") == "validate"
                 node["metrics"] = metrics if successful and validated else {}
                 detail["result"]["metrics"] = node["metrics"]
+                projected = safe_feedback(result)
+                if "diagnostics" in projected and validated:
+                    detail["result"]["diagnostics"] = projected["diagnostics"]
                 if not successful:
                     detail["metric_note"] = "实验未成功完成，不将缺失结果当成零分或假说证伪。"
                 elif not validated:
@@ -275,7 +280,20 @@ def build_flow(snapshot: Mapping[str, Any], track_id: str | None = None) -> dict
         notes.append(f"本次实验执行器并发上限为 {config['experiment_workers']}，不代表每项任务实际同时执行。")
     if config.get("strategy") == "independent":
         notes.append("本次采用 independent 策略；候选独立研究，主智能体汇总证据。")
+    checkpoint = _object(snapshot.get("checkpoint"))
+    progress = None
+    if checkpoint:
+        selected_progress = [t for t in checkpoint.get("tracks") or []
+                             if track_id is None or t.get("track_id") == track_id]
+        progress = {"checkpoint_id": checkpoint.get("checkpoint_id"), "generated_by": "system",
+                    "is_agent_report": False, "evidence_scope": "train_validate_only", "comparison_surface": "validate",
+                    "objective": checkpoint.get("objective"),
+                    "tracks": [{"track_id": t.get("track_id"), "missing": t.get("missing"),
+                                "latest_agent_report_id": _object(t.get("latest_agent_report")).get("id")}
+                               for t in selected_progress]}
+        notes.append("持续事实简报由系统自动保存，智能体解释仍以已登记的发现和报告为准；缺报告或停止决定不会被自动补成研究成功。")
     return _clean({"schema_version": "1.0", "run_id": run.get("run_id"), "track_id": track_id,
                    "research_stage": run.get("research_stage"),
+                   "checkpoint": progress,
                    "lanes": lanes, "nodes": nodes, "edges": edges,
                    "missing_references": missing, "notes": notes})

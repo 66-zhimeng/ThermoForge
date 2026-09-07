@@ -239,4 +239,5 @@ class AutonomyMixin:
                 "job_ids": sorted(required), "research_stage": run.get("research_stage"),
             })
             self._advance_autonomy(db, run)
-            return doc
+        self.save_checkpoint(run_id, "research.stopped")
+        return doc
