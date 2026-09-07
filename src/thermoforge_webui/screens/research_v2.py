@@ -206,6 +206,9 @@ def _monitor(client, run_id: str) -> None:
         progress[0].metric("研究阶段", stage)
         progress[1].metric("已冻结方案", len(proposals))
         progress[2].metric("已登记停止决定", len(stops))
+        if run.get("research_closure"):
+            st.info("已进入 token 预算收尾：暂停新增方案与实验，优先整理发现、报告和停止依据。"
+                    "预留量是估算，正在执行的请求仍可能超出；不会自动追加额度。")
     else:
         st.caption("这是功能验收运行，按其原有流程展示；新建研究使用自主探索。")
     st.caption(f"运行 {run_id} · 版本 {run.get('version', '不可得')} · 最近更新 {_timestamp(run.get('updated_at'))}")

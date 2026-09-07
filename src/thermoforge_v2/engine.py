@@ -144,6 +144,7 @@ class ResearchEngine:
                             for source in self.store.records(rid, "sources")],
                 "reports": self.store.records(rid, "reports"), "decisions": self.store.records(rid, "decisions"),
                 "proposals": self.store.records(rid, "proposals"), "stops": self.store.records(rid, "stops"),
+                "research_closure": self.store.get_run(rid).get("research_closure"),
                 "research_stage": self.store.autonomy_state(rid)["stage"],
                 "strategy": strategy_advice(self.store.records(rid, "jobs"), run["config"], run["protocol"]["fingerprint"])}
         evidence = self._evidence(rid)
@@ -371,6 +372,7 @@ class ResearchEngine:
         run = self.store.get_run(rid)
         return (main["status"] not in {"completed", "failed"}
                 and run.get("coordination_available", True)
+                and not self.store.autonomy_state(rid).get("closing_for_tokens", False)
                 and self._can_continue(rid, "main")
                 and main["turns"] < run["config"]["max_turns"] - 1)
 
@@ -593,7 +595,8 @@ class ResearchEngine:
                                 "想法、实验、发现和报告，记录选择与淘汰依据，用 research_team_report 保存最终综合报告。"
                                 "evidence_ids 必须覆盖当前全部已结算 jobs，可直接引用 job IDs 或覆盖它们的最新轨迹报告。"
                                 "旧阶段综合报告不等于结题报告；明确缺失实验、失败、预算限制与未参与搜索的最终留出，"
-                                "不宣称尚未验证的收益。")
+                                "不宣称尚未验证的收益。若运行显示 research_closure，说明因token预留提前收尾；"
+                                "优先用已知证据，报告保持简洁，避免重复读取完整历史。")
                     finally:
                         self.store.update_run(rid, {"final_report_phase": False})
                 if self._current_team_report(rid):
@@ -635,7 +638,13 @@ class ResearchEngine:
                         await backend.close()
                     except Exception as exc:
                         self.store.event(rid, "instance.close_failed", {"error": str(exc)[:2000]}, key[1])
-                    self.store.update_track(rid, key[1], {"pid": None})
+                    patch = {"pid": None}
+                    terminal = self.store.get_run(rid)["status"]
+                    latest = self.store.get_track(rid, key[1])
+                    if (terminal in {"paused", "cancelled", "interrupted", "budget_exhausted", "needs_input"}
+                            and latest["status"] not in {"completed", "failed", "cancelled", "budget_exhausted", "paused"}):
+                        patch.update(status=terminal, phase="stopped")
+                    self.store.update_track(rid, key[1], patch)
                     del self.sessions[key]
             self.store.release_lease(rid, self.owner)
 

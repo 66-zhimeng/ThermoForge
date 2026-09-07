@@ -303,8 +303,6 @@ class RunStore(AutonomyMixin):
                 raise V2Error("TFV2-NOT-FOUND", track_id)
             proposal = None
             if run["config"].get("research_mode", "acceptance") == "autonomous":
-                if not self._advance_autonomy(db, run)["proposal_barrier_open"]:
-                    raise V2Error("TFV2-PHASE", "首轮提案尚未齐备；结束当前回合，由软件等待并继续")
                 if db.execute("SELECT 1 FROM records WHERE run_id=? AND kind='stops' AND track_id=?",
                               (run_id, track_id)).fetchone():
                     raise V2Error("TFV2-STATE", "轨迹已有停止决定，不能继续实验")
@@ -323,6 +321,8 @@ class RunStore(AutonomyMixin):
                 if previous:
                     db.execute("INSERT INTO job_keys VALUES(?,?,?,?,?)", (run_id, track_id, idempotency_key, previous["id"], digest))
                     return previous | {"fresh": False}
+                if not self._require_research_budget(db, run)["proposal_barrier_open"]:
+                    raise V2Error("TFV2-PHASE", "首轮提案尚未齐备；结束当前回合，由软件等待并继续")
                 track = json.loads(db.execute("SELECT data FROM tracks WHERE run_id=? AND id=?", (run_id, track_id)).fetchone()[0])
                 if track.get("turns", 0) > 0 and any(json.loads(r[0]).get("research_turn") == track["turns"] for r in db.execute(
                         "SELECT data FROM records WHERE run_id=? AND track_id=? AND kind='jobs'", (run_id, track_id))):

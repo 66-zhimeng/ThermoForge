@@ -494,6 +494,8 @@ class ResearchTools:
             # 只返回阶段，不公开其他候选尚未共享的方案、结果及重复实验信息。
             response["research_stage"] = {key: state[key] for key in (
                 "stage", "proposal_barrier_open", "sharing_ready")}
+            response["research_budget"] = {key: state.get(key) for key in (
+                "closing_for_tokens", "report_token_reserve", "tokens_remaining")}
             response["research_workflow"] = (
                 "独立登记想法→research_proposal_commit 冻结方案→全部候选提交后运行实验"
                 "→登记实际反馈的 finding→引用自己的最新实验修订方案。"

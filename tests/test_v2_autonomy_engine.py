@@ -1,6 +1,7 @@
 """Autonomous lifecycle integration with real SQLite and deterministic fake sessions."""
 
 import asyncio
+from dataclasses import replace
 import json
 import time
 
@@ -275,6 +276,82 @@ def test_resume_clears_crashed_coordination_when_main_only_has_final_turn_left(t
         assert store.get_run(rid)["coordination_in_progress"] is False
         assert len(store.records(rid, "jobs", "candidate-1")) == 3
         assert store.get_track(rid, "main")["turns"] == 6
+        assert engine._current_team_report(rid) is not None
+        assert not any("候选尚在运行" in prompt for prompt in scenario.prompts["main"])
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("consume_hard_limit", [False, True], ids=["report-reserve", "hard-cap"])
+def test_token_closure_preserves_reports_when_possible_and_honors_hard_cap(tmp_path, consume_hard_limit):
+    class BudgetScenario(AutonomousScenario):
+        def __init__(self):
+            super().__init__()
+            self.emit_usage = False
+            self.injected = False
+            self.store = None
+            self.rid = None
+
+        def session(self, config, specs, handler, event_handler):
+            instance = BudgetSession(self, config, handler, event_handler)
+            self.instances.append(instance)
+            return instance
+
+    class BudgetSession(AutonomousSession):
+        total = 0
+
+        async def turn(self, prompt):
+            result = await super().turn(prompt)
+            previous = self.total
+            self.total += 100
+            scenario = self.scenario
+            if (self.tid == "candidate-1" and not scenario.injected
+                    and scenario.store.records(scenario.rid, "jobs", self.tid)):
+                state = scenario.store.autonomy_state(scenario.rid)
+                budget = scenario.store.get_run(scenario.rid)["config"]["token_budget"]
+                # The first completed experiment's Codex turn consumes the remaining
+                # exploration allowance. Report turns themselves remain under the cap.
+                other_tokens = sum((track.get("usage") or {}).get("total", {}).get("totalTokens", 0)
+                                   for track in scenario.store.list_tracks(scenario.rid)
+                                   if track["track_id"] != self.tid)
+                target = budget if consume_hard_limit else budget - state["report_token_reserve"] + 1
+                self.total = target - other_tokens
+                scenario.injected = True
+            usage = {"total": {"totalTokens": self.total},
+                     "last": {"totalTokens": self.total - previous}}
+            return replace(result, usage=usage)
+
+    async def run():
+        scenario = BudgetScenario()
+        store, rid, engine = make_engine(tmp_path, scenario, research_mode="autonomous",
+                                        candidates=1, strategy="top_k", max_turns=8,
+                                        max_experiments=4, max_experiments_per_track=4,
+                                        token_budget=200000)
+        scenario.store, scenario.rid = store, rid
+        await asyncio.wait_for(engine.launch(rid), 10)
+        assert scenario.injected is True
+        run_record = store.get_run(rid)
+        main = store.get_track(rid, "main")
+        assert main["pid"] is None
+        assert not engine.sessions and all(instance.closed for instance in scenario.instances)
+        if consume_hard_limit:
+            assert run_record["status"] == "budget_exhausted", run_record
+            assert run_record["tokens_used"] == run_record["config"]["token_budget"]
+            assert main["status"] == "budget_exhausted" and main["phase"] == "stopped"
+            assert len(scenario.prompts["main"]) == 1
+            assert len(store.records(rid, "jobs", "candidate-1")) == 1
+            assert engine._current_team_report(rid) is None
+            return
+        assert run_record["status"] == "completed", run_record
+        assert main["status"] == "completed"
+        assert run_record["research_closure"]
+        assert run_record["tokens_used"] < run_record["config"]["token_budget"]
+        assert len(store.records(rid, "jobs", "candidate-1")) == 1
+        assert len(store.records(rid, "proposals", "candidate-1")) == 1
+        assert len(store.records(rid, "stops", "candidate-1")) == 1
+        assert "结题阶段" in scenario.prompts["candidate-1"][-1]
+        assert store.get_track(rid, "candidate-1")["turns"] < run_record["config"]["max_turns"]
+        assert run_record["experiments_reserved"] < run_record["config"]["max_experiments"]
+        assert engine._current_track_report(rid, "candidate-1") is not None
         assert engine._current_team_report(rid) is not None
         assert not any("候选尚在运行" in prompt for prompt in scenario.prompts["main"])
     asyncio.run(run())

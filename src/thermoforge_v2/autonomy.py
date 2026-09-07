@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 import uuid
 
@@ -27,6 +28,86 @@ def _records(db, run_id, kind, track_id=None):
 
 
 class AutonomyMixin:
+    def _report_reserve(self, db, run, tracks):
+        """Estimate remaining report calls; usage.last is a measurement, not a cost guarantee."""
+        budget = int(run["config"]["token_budget"])
+        used = max(0, int(run.get("tokens_used") or 0))
+        remaining = max(0, budget - used)
+        stopped = {item["track_id"] for item in _records(db, run["run_id"], "stops")}
+
+        def measured_last(track):
+            last = (track.get("usage") or {}).get("last") or {}
+            if not isinstance(last, dict):
+                return 0
+
+            def counter(name):
+                value = last.get(name)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    return value
+                return int(value) if isinstance(value, float) and math.isfinite(value) and value >= 0 else 0
+
+            # Cached input is already included in inputTokens; never add it twice.
+            return max(counter("totalTokens"), counter("inputTokens") + counter("outputTokens"))
+
+        observed = {track["track_id"]: measured_last(track) for track in tracks}
+        candidates = [track for track in tracks if track.get("role") == "candidate"]
+        largest_context = max((observed[track["track_id"]] for track in candidates), default=0)
+        calls = {}
+        for track in tracks:
+            tid = track["track_id"]
+            if tid in stopped:
+                continue
+            estimate = observed[tid]
+            if track.get("role") == "main":
+                estimate = max(estimate, largest_context)
+            calls[tid] = estimate
+        floor = (budget + 3) // 4
+        usage_reserve = (sum(calls.values()) * 24 + 4) // 5  # ceil(4 calls × 1.2 margin)
+        reserve = max(floor, usage_reserve)
+        closure = run.get("research_closure") or {}
+        existing = closure.get("reason") == "token_report_reserve"
+        increased = existing and budget > int(closure.get("token_budget") or 0)
+        should_close = remaining <= reserve
+        eligible = run.get("status") not in {"completed", "cancelled"}
+        if eligible and ((not existing and should_close) or increased):
+            if increased and not should_close:
+                previous = closure
+                run.pop("research_closure", None)
+                self._write_run(db, run)
+                self._event(db, run["run_id"], "research.closure_released", {
+                    "reason": "token_budget_increased", "previous_token_budget": previous["token_budget"],
+                    "token_budget": budget, "tokens_used": used, "reserve_tokens": reserve})
+            else:
+                run["research_closure"] = {
+                    "reason": "token_report_reserve", "token_budget": budget, "tokens_used": used,
+                    "tokens_remaining": remaining, "reserve_tokens": reserve,
+                    "minimum_reserve_tokens": floor, "usage_reserve_tokens": usage_reserve,
+                    "estimated_calls_per_track": 4, "safety_multiplier": 1.2,
+                    "observed_last_call_tokens_by_track": observed,
+                    "estimated_call_tokens_by_track": calls,
+                    "estimation_method": "max(25% budget, 4 calls per unfinished track with 20% margin); main uses at least largest candidate context",
+                    "estimate_note": "报告额度为基于实际最后一次用量的保守估算，不保证足够；未知用量只使用预算比例。",
+                    "triggered_at": closure.get("triggered_at", time.time()),
+                    "evaluated_at": time.time(),
+                }
+                self._write_run(db, run)
+                self._event(db, run["run_id"], "research.closure_reassessed" if increased else "research.closure_started",
+                            run["research_closure"])
+        current = run.get("research_closure") or {}
+        closing = current.get("reason") == "token_report_reserve"
+        return {"closing_for_tokens": closing,
+                "report_token_reserve": max(reserve, int(current.get("reserve_tokens") or 0)) if closing else reserve,
+                "tokens_remaining": remaining}
+
+    def _require_research_budget(self, db, run):
+        state = self._advance_autonomy(db, run)
+        if state["closing_for_tokens"]:
+            # This guard precedes any new proposal/job write. Preserve the closure
+            # decision and event even though the caller receives a rejected request.
+            db.commit()
+            raise V2Error("TFV2-REPORT-RESERVE", "已为报告收尾预留 token；请保存发现、完整报告和停止依据，不再提交新方案或实验")
+        return state
+
     def _append_autonomy(self, db, run_id, track_id, kind, body):
         prefix = {"proposals": "PROPOSAL", "stops": "STOP"}[kind]
         doc = {**body, "id": prefix + "-" + uuid.uuid4().hex[:16], "run_id": run_id,
@@ -38,7 +119,8 @@ class AutonomyMixin:
     def _advance_autonomy(self, db, run):
         if run["config"].get("research_mode", "acceptance") != "autonomous":
             return {"enabled": False, "stage": "acceptance", "proposal_barrier_open": True,
-                    "sharing_ready": False}
+                    "sharing_ready": False, "closing_for_tokens": False, "report_token_reserve": 0,
+                    "tokens_remaining": max(0, int(run["config"]["token_budget"]) - int(run.get("tokens_used") or 0))}
         rid = run["run_id"]
         tracks = [json.loads(r[0]) for r in db.execute("SELECT data FROM tracks WHERE run_id=?", (rid,))]
         expected = ([f"candidate-{i}" for i in range(1, run["config"]["candidates"] + 1)]
@@ -60,7 +142,7 @@ class AutonomyMixin:
             self._write_run(db, run)
             self._event(db, rid, "research.stage_changed", {"stage": stage})
         return {"enabled": True, "stage": stage, "proposal_barrier_open": stage != "independent_proposals",
-                "sharing_ready": stage == "sharing"}
+                "sharing_ready": stage == "sharing", **self._report_reserve(db, run, tracks)}
 
     def autonomy_state(self, run_id):
         with self._db() as db:
@@ -84,6 +166,7 @@ class AutonomyMixin:
                 return existing | {"fresh": False}
             if run["status"] != "running" or _records(db, run_id, "stops", track_id):
                 raise V2Error("TFV2-STATE", "轨迹已停止或研究不接受提案")
+            self._require_research_budget(db, run)
             if not db.execute("SELECT 1 FROM tracks WHERE run_id=? AND id=?", (run_id, track_id)).fetchone():
                 raise V2Error("TFV2-NOT-FOUND", track_id)
             idea = next((i for i in _records(db, run_id, "ideas", track_id) if i["id"] == idea_id), None)

@@ -32,24 +32,27 @@ async def run_candidate(engine, rid, tid):
         if not engine._can_continue(rid, tid):
             break
         state = store.autonomy_state(rid)
-        if proposals and not state["proposal_barrier_open"]:
+        closing_for_tokens = state.get("closing_for_tokens", False)
+        if proposals and not state["proposal_barrier_open"] and not closing_for_tokens:
             store.update_track(rid, tid, {"status": "waiting", "phase": "awaiting_independent_proposals"})
             await asyncio.sleep(0.2)
             continue
         remaining_turns = run["config"]["max_turns"] - track["turns"]
-        if not proposals and budget_left and remaining_turns > 1:
+        if not proposals and budget_left and remaining_turns > 1 and not closing_for_tokens:
             prompt = (f"独立提案阶段，轨迹 {tid}。读取 research_protocol 和 research_messages，可自主检索/阅读资料，"
                       "在固定目标、输入白名单和评价口径内，自主决定模型与参数，也可经 research_lab_submit 实现模型。"
                       "不预设五个候选必须选择不同答案。先 research_idea_create 保存真实来源、理由、预测及反证条件，"
                       "再 research_proposal_commit 冻结一份可执行提案（含 idea_id、model、purpose、idempotency_key）。"
                       "本回合只完成首提案，不调用 research_experiment_run。提交后结束回复，软件等所有首提案齐备后继续。"
                       "没有论文依据可诚实登记 conjecture；检索无结果也需如实记录，不编造阅读。")
-        elif not budget_left or remaining_turns <= 1:
+        elif closing_for_tokens or not budget_left or remaining_turns <= 1:
             prompt = (f"轨迹 {tid} 进入结题阶段，本轮不新增实验或提案。实验请求额度剩余："
                       f"{max(0, min(run['config']['max_experiments_per_track']-len(jobs), run['config']['max_experiments']-run['experiments_reserved']))}。"
-                      "读取自己的 history，补齐发现并 research_report_submit 保存覆盖全部已结算请求的报告，"
+                      + (f"累计用量已进入报告预留区，剩余 {state.get('tokens_remaining')} tokens，"
+                         "这只是保守估算，不保证足够。立即收尾，不检索新资料、不提交模型或新增方案。" if closing_for_tokens else "") +
+                      "优先使用会话内已有证据，按需读取缺失历史；补齐发现并 research_report_submit 保存覆盖全部已结算请求的简洁报告，"
                       f"job_ids 至少包括 {json.dumps([j['id'] for j in jobs])}。"
-                      "然后 research_stop，理由说明实验额度或研究回合预算限制，引用真实证据；没有达到目标也需如实结题。")
+                      "然后 research_stop，理由说明实际实验额度、执行回合或token预留限制，引用真实证据；没有达到目标也需如实结题。")
         else:
             if state["sharing_ready"] and run["config"]["strategy"] != "independent" and jobs:
                 settled_ids = {j["id"] for j in jobs if j["status"] in {"completed", "failed", "cancelled", "interrupted"}}
