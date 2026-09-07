@@ -149,10 +149,10 @@ class ResearchService:
         return result
 
     def start_run(self, config, idempotency_key):
-        parsed = RunConfig.model_validate(config).model_dump(mode="json")
         with self._prepare_lock:
-            run = self.store.find_request(parsed, idempotency_key)
+            run = self.store.find_request(config, idempotency_key)
             if run is None:
+                parsed = RunConfig.model_validate(config).model_dump(mode="json")
                 protocol = prepare_protocol(self.fresh_context(), parsed)
                 run = self.store.create_run(parsed, protocol, idempotency_key)
         if run["status"] == "queued":
@@ -196,8 +196,15 @@ class ResearchService:
         if not ranked:
             return {"status": "unavailable", "reason": "没有可据验证指标选定的已完成实验"}
         selected = next(j for j in snapshot["jobs"] if j["id"] == ranked[0]["job_id"])
-        track = next(t for t in snapshot["tracks"] if t["track_id"] == selected["track_id"])
-        exp_id = selected.get("experiment_id") or (selected.get("result") or {}).get("experiment_id")
+        artifact_job = selected
+        if selected.get("reused_from_job_id"):
+            artifact_job = next((j for j in snapshot["jobs"] if j["id"] == selected["reused_from_job_id"]
+                                 and j.get("experiment_fingerprint") == selected.get("experiment_fingerprint")
+                                 and j.get("executed") is True and j.get("status") == "completed"), None)
+            if artifact_job is None:
+                return {"status": "unavailable", "reason": "复用实验缺少可核实的原始执行记录"}
+        track = next(t for t in snapshot["tracks"] if t["track_id"] == artifact_job["track_id"])
+        exp_id = artifact_job.get("experiment_id") or (artifact_job.get("result") or {}).get("experiment_id")
         if not exp_id or not exp_id.startswith("EXP-") or not exp_id[4:].isdigit():
             return {"status": "unavailable", "reason": "所选实验工件缺失"}
         path = Path(track["research_root"]) / "experiments" / exp_id / "report.json"
@@ -206,6 +213,7 @@ class ResearchService:
         full = json.loads(path.read_text(encoding="utf-8"))
         return self.store.add_record(rid, "finalizations", {
             "status": "evaluated", "job_id": selected["id"], "track_id_selected": selected["track_id"],
+            "artifact_job_id": artifact_job["id"], "artifact_track_id": artifact_job["track_id"],
             "experiment_id": exp_id, "selection_reason": "先按冻结协议的 validate CVRMSE 选定，再读取留出结果。",
             "selection_metric": ranked[0]["CVRMSE"], "protocol_fingerprint": snapshot["run"]["protocol"]["fingerprint"],
             "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

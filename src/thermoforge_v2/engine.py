@@ -103,7 +103,7 @@ class ResearchEngine:
         return result
 
     def _evidence(self, rid):
-        return {record["id"]: record for kind in ("sources", "ideas", "jobs", "findings", "reports")
+        return {record["id"]: record for kind in ("sources", "ideas", "jobs", "findings", "reports", "proposals", "stops")
                 for record in self.store.records(rid, kind)}
 
     def _mediator(self, rid, tid, name, args):
@@ -111,7 +111,12 @@ class ResearchEngine:
         if name == "research_messages":
             messages = [m for m in self.store.records(rid, "messages") if m["to"] in {tid, "all"}]
             own = self.store.get_track(rid, tid)
-            if tid != "main" and (own["turns"] < 2 or run["config"]["strategy"] == "independent"):
+            autonomous = run["config"].get("research_mode", "acceptance") == "autonomous"
+            sharing = self.store.autonomy_state(rid)["sharing_ready"] if autonomous else own["turns"] >= 2
+            if autonomous and tid != "main":
+                sharing = sharing and bool(self._track_records(rid, "proposals", tid)) and any(
+                    j["status"] in {"completed", "failed", "cancelled", "interrupted"} for j in self._track_records(rid, "jobs", tid))
+            if tid != "main" and (not sharing or run["config"]["strategy"] == "independent"):
                 messages = [m for m in messages if m.get("initial_task") is True]
             processed = set(own.get("processed_message_ids") or [])
             unread = [m for m in messages if m["id"] not in processed]
@@ -125,6 +130,12 @@ class ResearchEngine:
             return {"ok": False, "error": "仅主智能体可执行协调动作"}
         if name == "research_team":
             tracks = self.store.list_tracks(rid)
+            state = self.store.autonomy_state(rid)
+            if state["enabled"] and not state["sharing_ready"] and not run.get("final_report_phase"):
+                return {"ok": True, "tracks": [{k: t.get(k) for k in ("track_id", "status", "phase", "turns")} for t in tracks],
+                        "ideas": [], "proposals": [], "jobs": [], "sources": [], "findings": [], "reports": [],
+                        "decisions": [], "stops": [], "research_stage": state["stage"],
+                        "note": "独立研究阶段只查看状态；开放共享或最终结题后才汇总候选证据。"}
             return {"ok": True, "tracks": [{k: t.get(k) for k in (
                 "track_id", "status", "phase", "turns", "usage", "error")} for t in tracks],
                 "jobs": self.store.records(rid, "jobs"), "findings": self.store.records(rid, "findings"),
@@ -132,6 +143,8 @@ class ResearchEngine:
                 "sources": [{k: v for k, v in source.items() if k not in {"text", "content", "path", "artifact"}}
                             for source in self.store.records(rid, "sources")],
                 "reports": self.store.records(rid, "reports"), "decisions": self.store.records(rid, "decisions"),
+                "proposals": self.store.records(rid, "proposals"), "stops": self.store.records(rid, "stops"),
+                "research_stage": self.store.autonomy_state(rid)["stage"],
                 "strategy": strategy_advice(self.store.records(rid, "jobs"), run["config"], run["protocol"]["fingerprint"])}
         evidence = self._evidence(rid)
         refs = args.get("evidence_ids") or []
@@ -142,11 +155,19 @@ class ResearchEngine:
             targets = {t["track_id"] for t in self.store.list_tracks(rid)} - {"main"}
             if target not in targets | {"all"} or not text or len(text) > 16000:
                 return {"ok": False, "error": "无效收件轨迹或消息内容"}
+            if run["config"].get("research_mode", "acceptance") == "autonomous":
+                initial = (self.store.get_track(rid, "main")["turns"] <= 1
+                           and not self.store.records(rid, "proposals") and not self.store.records(rid, "jobs"))
+                if initial and target != "all":
+                    return {"ok": False, "error": "首轮统一问题与约束必须投递给 all，由候选独立选择方案"}
+                if not initial and not self.store.autonomy_state(rid)["sharing_ready"]:
+                    return {"ok": False, "error": "当前为独立研究阶段，尚不允许跨候选传递方案或反馈"}
             # 独立基线的首轮任务之后不共享其他候选发现，防止隐式变成辩论组。
             if run["config"]["strategy"] == "independent" and self.store.records(rid, "jobs"):
                 return {"ok": False, "error": "独立基线在实验开始后不分发跨候选反馈"}
             record = self.store.add_record(rid, "messages", {
                 "from": tid, "to": target, "text": text, "evidence_ids": refs,
+                "research_stage": self.store.autonomy_state(rid)["stage"],
                 "initial_task": (not self.store.records(rid, "jobs")
                                  and self.store.get_track(rid, "main")["turns"] <= 1),
                 "evidence": [evidence[i] for i in refs], "version": run["version"]}, track_id=tid)
@@ -311,10 +332,17 @@ class ResearchEngine:
 
     def _current_track_report(self, rid, tid):
         jobs = self._track_records(rid, "jobs", tid)
+        autonomous = self.store.get_run(rid)["config"].get("research_mode", "acceptance") == "autonomous"
+        findings = self._track_records(rid, "findings", tid) if autonomous else []
         return next((r for r in reversed(self._track_records(rid, "reports", tid))
-                     if r.get("kind") == "track" and self._report_is_current(r, jobs)), None)
+                     if r.get("kind") == "track" and self._report_is_current(r, jobs)
+                     and (not autonomous or ({j["idea_id"] for j in jobs}.issubset(r.get("idea_ids") or [])
+                         and all(any(f["id"] in (r.get("finding_ids") or []) and j["id"] in (f.get("job_ids") or [])
+                                     for f in findings) for j in jobs)))), None)
 
     def _track_research_complete(self, rid, tid):
+        if self.store.get_run(rid)["config"].get("research_mode", "acceptance") == "autonomous":
+            return bool(self._track_records(rid, "stops", tid)) and self._current_track_report(rid, tid) is not None
         required = min(2, self.store.get_run(rid)["config"]["max_experiments_per_track"])
         return (sum(j["status"] == "completed" for j in self._track_records(rid, "jobs", tid)) >= required
                 and self._current_track_report(rid, tid) is not None)
@@ -347,6 +375,9 @@ class ResearchEngine:
                 and main["turns"] < run["config"]["max_turns"] - 1)
 
     async def _candidate(self, rid, tid):
+        if self.store.get_run(rid)["config"].get("research_mode", "acceptance") == "autonomous":
+            from .autonomous_engine import run_candidate
+            return await run_candidate(self, rid, tid)
         while True:
             track, run = self.store.get_track(rid, tid), self.store.get_run(rid)
             own_jobs = self._track_records(rid, "jobs", tid)
@@ -426,6 +457,12 @@ class ResearchEngine:
     async def _review_candidates(self, rid, tasks):
         while any(not t.done() for t in tasks) and self._can_continue(rid, "main"):
             run = self.store.get_run(rid)
+            if run["config"].get("research_mode", "acceptance") == "autonomous":
+                if run["config"]["strategy"] == "independent":
+                    return  # 保留独立对照；主智能体在候选结束后统一总结。
+                if not self.store.autonomy_state(rid)["sharing_ready"]:
+                    await asyncio.sleep(0.2)
+                    continue
             active = [t for t in self.store.list_tracks(rid) if t["role"] == "candidate"
                       and t["status"] not in {"completed", "failed", "cancelled", "budget_exhausted", "paused"}]
             if (run["experiments_reserved"] >= run["config"]["max_experiments"] or
@@ -488,7 +525,11 @@ class ResearchEngine:
                 workspace.mkdir(parents=True, exist_ok=True)
                 self.store.create_track(rid, tid, "main" if tid == "main" else "candidate",
                                         workspace=str(workspace), research_root=str(root / "research"))
-            self.store.update_run(rid, {"final_report_phase": False})
+            # 已取得运行租约；上一个进程的协调调用不可能继续，不能让恢复后的
+            # 候选永久等待崩溃时留下的 in_progress 标志。
+            self.store.update_run(rid, {"final_report_phase": False,
+                                        "coordination_in_progress": False,
+                                        "coordination_available": False})
             # 旧版本可能仅凭任意阶段报告把轨迹标完成。恢复时重新核查事实覆盖，
             # 否则候选不会补报，主状态 completed 又没有创建会话却继续被 _turn。
             for track in self.store.list_tracks(rid):
@@ -528,8 +569,12 @@ class ResearchEngine:
                 initial_published = any(m.get("from") == "main" and m.get("initial_task") is True
                                         for m in self.store.records(rid, "messages"))
                 if not initial_published and self._can_continue(rid, "main"):
+                    autonomous_hint = ("统一的是研究问题、允许的数据、评价口径和预算。不要替候选指定模型、参数、研究路线或预写实验步骤；"
+                        "候选可以自主检索资料、提交模型源码和选择方法。先冻结各自首提案再实验，软件控制共享阶段。"
+                        if config.get("research_mode", "acceptance") == "autonomous" else "")
                     await self._turn(rid, "main", "你是研究主智能体。读取 research_protocol，准备统一研究任务，"
                         "通过 research_send_message 发给候选（to='all'），首轮任务与证据保持一致。"
+                        + autonomous_hint +
                         "候选将由程序独立启动并连续研究；此时不要等待不存在的结果，准备好后结束本轮。")
                 self.store.update_run(rid, {"coordination_available": True})
                 candidates = [asyncio.create_task(self._candidate(rid, t["track_id"]))

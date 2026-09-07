@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import MUTABLE_CONFIG, RunConfig, V2Error
+from .autonomy import AutonomyMixin
 
 
 def now() -> float:
@@ -30,7 +31,7 @@ def identifier(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:16]}"
 
 
-class RunStore:
+class RunStore(AutonomyMixin):
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,9 @@ class RunStore:
     def create_run(self, config: dict, protocol: dict, idempotency_key: str) -> dict:
         if not idempotency_key or len(idempotency_key) > 200:
             raise V2Error("TFV2-INPUT", "必须提供长度 1–200 的幂等键")
+        existing_request = self.find_request(config, idempotency_key)
+        if existing_request is not None:
+            return existing_request
         config = RunConfig.model_validate(config).model_dump(mode="json")
         request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
         with self._db() as db:
@@ -97,6 +101,8 @@ class RunStore:
                    "status": "queued", "version": 1, "created_at": now(),
                    "updated_at": now(), "error": None, "experiments_reserved": 0,
                    "experiments_settled": 0, "tokens_used": 0}
+            if config["research_mode"] == "autonomous":
+                doc["research_stage"] = "independent_proposals"
             db.execute("INSERT INTO runs VALUES(?,?,?,?)",
                        (run_id, idempotency_key, request_hash, encode(doc)))
             self._event(db, run_id, "created", {"config": config})
@@ -110,13 +116,21 @@ class RunStore:
         """重试直接返回原运行，不重新解释可能已经改变的环境或研究目标。"""
         if not idempotency_key or len(idempotency_key) > 200:
             raise V2Error("TFV2-INPUT", "必须提供长度 1–200 的幂等键")
-        config = RunConfig.model_validate(config).model_dump(mode="json")
-        request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
         with self._db() as db:
             row = db.execute("SELECT request_hash,data FROM runs WHERE idempotency_key=?",
                              (idempotency_key,)).fetchone()
             if row is None:
                 return None
+            # 原始请求哈希不随 guidance/预算更新改变。旧记录新增字段之前的
+            # 哈希也用原请求重建，不能拿已被用户更新的运行配置来判断幂等。
+            if config.get("research_mode", "acceptance") == "acceptance" and not config.get("reuse_experiments", False):
+                legacy = RunConfig.model_validate(config | {"research_mode": "acceptance"}).model_dump(mode="json")
+                legacy.pop("research_mode")
+                legacy.pop("reuse_experiments")
+                if hashlib.sha256(encode(legacy).encode()).hexdigest() == row[0]:
+                    return json.loads(row[1])
+            config = RunConfig.model_validate(config).model_dump(mode="json")
+            request_hash = hashlib.sha256(encode(config).encode()).hexdigest()
             if row[0] != request_hash:
                 raise V2Error("TFV2-CONFLICT", "同一幂等键已用于不同的研究配置")
             return json.loads(row[1])
@@ -181,7 +195,7 @@ class RunStore:
                     raise V2Error("TFV2-INPUT", "仅可调整指导与预算；评价协议和候选拓扑固定")
                 if state in {"completed", "cancelled"}:
                     raise V2Error("TFV2-STATE", "已结束研究不能修改")
-                config = RunConfig.model_validate(doc["config"] | changes).model_dump(mode="json")
+                config = RunConfig.model_validate({"research_mode": "acceptance", **doc["config"], **changes}).model_dump(mode="json")
                 if config["max_experiments"] < doc["experiments_reserved"]:
                     raise V2Error("TFV2-BUDGET", "实验上限不能低于已预留数量")
                 doc["config"] = config
@@ -287,6 +301,32 @@ class RunStore:
                 raise V2Error("TFV2-STATE", "研究当前不接受新实验")
             if not db.execute("SELECT 1 FROM tracks WHERE run_id=? AND id=?", (run_id, track_id)).fetchone():
                 raise V2Error("TFV2-NOT-FOUND", track_id)
+            proposal = None
+            if run["config"].get("research_mode", "acceptance") == "autonomous":
+                if not self._advance_autonomy(db, run)["proposal_barrier_open"]:
+                    raise V2Error("TFV2-PHASE", "首轮提案尚未齐备；结束当前回合，由软件等待并继续")
+                if db.execute("SELECT 1 FROM records WHERE run_id=? AND kind='stops' AND track_id=?",
+                              (run_id, track_id)).fetchone():
+                    raise V2Error("TFV2-STATE", "轨迹已有停止决定，不能继续实验")
+                row = db.execute("SELECT data FROM records WHERE id=? AND run_id=? AND track_id=? AND kind='proposals'",
+                                 (request.get("proposal_id"), run_id, track_id)).fetchone()
+                proposal = json.loads(row[0]) if row else None
+                if (not proposal or proposal["idea_id"] != idea_id or proposal["model"] != request.get("model")
+                        or proposal["experiment_fingerprint"] != request.get("experiment_fingerprint")
+                        or proposal.get("lab_content_hash") != request.get("lab_content_hash")
+                        or proposal["protocol_fingerprint"] != run["protocol"]["fingerprint"]
+                        or request.get("protocol_fingerprint") != run["protocol"]["fingerprint"]):
+                    raise V2Error("TFV2-PROPOSAL", "实验必须匹配本轨迹的冻结提案、模型与评价协议")
+                previous = next((json.loads(r[0]) for r in db.execute(
+                    "SELECT data FROM records WHERE run_id=? AND track_id=? AND kind='jobs'", (run_id, track_id))
+                    if json.loads(r[0]).get("proposal_id") == proposal["id"]), None)
+                if previous:
+                    db.execute("INSERT INTO job_keys VALUES(?,?,?,?,?)", (run_id, track_id, idempotency_key, previous["id"], digest))
+                    return previous | {"fresh": False}
+                track = json.loads(db.execute("SELECT data FROM tracks WHERE run_id=? AND id=?", (run_id, track_id)).fetchone()[0])
+                if track.get("turns", 0) > 0 and any(json.loads(r[0]).get("research_turn") == track["turns"] for r in db.execute(
+                        "SELECT data FROM records WHERE run_id=? AND track_id=? AND kind='jobs'", (run_id, track_id))):
+                    raise V2Error("TFV2-PHASE", "本回合已执行实验；保存发现并结束回合，软件随后推进下一实验")
             count = db.execute("SELECT COUNT(*) FROM records WHERE run_id=? AND kind='jobs' AND track_id=?",
                                (run_id, track_id)).fetchone()[0]
             if (run["experiments_reserved"] >= run["config"]["max_experiments"]
@@ -296,6 +336,9 @@ class RunStore:
                    "idea_id": idea_id, "request": request, "status": "reserved",
                    "created_at": now(), "result": None,
                    "protocol_fingerprint": run["protocol"]["fingerprint"]}
+            if proposal:
+                doc.update(proposal_id=proposal["id"], experiment_fingerprint=proposal["experiment_fingerprint"],
+                           purpose=proposal["purpose"], executed=False, research_turn=track.get("turns", 0))
             db.execute("INSERT INTO records VALUES(?,?,?,?,?)", (doc["id"], run_id, "jobs", track_id, encode(doc)))
             db.execute("INSERT INTO job_keys VALUES(?,?,?,?,?)", (run_id, track_id, idempotency_key, doc["id"], digest))
             run["experiments_reserved"] += 1
@@ -333,7 +376,30 @@ class RunStore:
                 self._write_run(db, run)
                 started = False
             else:
+                state = self._advance_autonomy(db, run)
+                own_feedback = any(json.loads(r[0]).get("status") in {"completed", "failed", "cancelled", "interrupted"}
+                    and json.loads(r[0]).get("proposal_id") for r in db.execute(
+                        "SELECT data FROM records WHERE run_id=? AND track_id=? AND kind='jobs'",
+                        (doc["run_id"], doc["track_id"])))
+                if (state["sharing_ready"] and run["config"].get("reuse_experiments")
+                        and own_feedback and doc.get("purpose") != "replicate" and doc.get("experiment_fingerprint")):
+                    other = next((json.loads(r[0]) for r in db.execute(
+                        "SELECT data FROM records WHERE run_id=? AND kind='jobs' ORDER BY rowid", (doc["run_id"],))
+                        if json.loads(r[0]).get("status") == "completed"
+                        and json.loads(r[0]).get("executed") is True
+                        and json.loads(r[0]).get("experiment_fingerprint") == doc["experiment_fingerprint"]), None)
+                    if other:
+                        doc.update(status="completed", finished_at=now(), executed=False,
+                                   reused_from_job_id=other["id"], result=other["result"],
+                                   experiment_id=other.get("experiment_id") or (other.get("result") or {}).get("experiment_id"))
+                        run["experiments_settled"] += 1
+                        self._write_run(db, run)
+                        db.execute("UPDATE records SET data=? WHERE id=?", (encode(doc), doc["id"]))
+                        self._event(db, doc["run_id"], "job.reused", {"id": doc["id"], "reused_from_job_id": other["id"]}, doc["track_id"])
+                        return doc | {"started": False, "reused": True}
                 doc.update(status="running", started_at=now())
+                if doc.get("proposal_id"):
+                    doc["executed"] = True
                 started = True
             db.execute("UPDATE records SET data=? WHERE id=?", (encode(doc), job_id))
             self._event(db, doc["run_id"], "job.started" if started else "job.cancelled",
@@ -378,9 +444,19 @@ class RunStore:
         with self._db() as db:
             result = {"run": self._get(db, "runs", "id", run_id), "tracks": [json.loads(row[0])
                 for row in db.execute("SELECT data FROM tracks WHERE run_id=? ORDER BY id", (run_id,))]}
-            for kind in ("sources", "ideas", "jobs", "findings", "decisions", "messages", "reports"):
+            for kind in ("sources", "ideas", "jobs", "findings", "decisions", "messages", "reports", "proposals", "stops"):
                 result[kind] = [json.loads(row[0]) for row in db.execute(
                     "SELECT data FROM records WHERE run_id=? AND kind=? ORDER BY rowid", (run_id, kind))]
+            # External snapshots may audit repeated work; internal history/team tools
+            # read records directly and do not reveal peers to independent candidates.
+            first = {}
+            for job in result["jobs"]:
+                identity = job.get("experiment_fingerprint")
+                if identity and job.get("status") == "completed":
+                    if identity in first:
+                        job["duplicate_of_job_id"] = first[identity]
+                    else:
+                        first[identity] = job["id"]
             rows = db.execute("SELECT seq,track_id,kind,payload,at FROM events WHERE run_id=? ORDER BY seq DESC LIMIT 1000",
                               (run_id,)).fetchall()
             result["events"] = [{"seq": row[0], "run_id": run_id, "track_id": row[1], "kind": row[2],

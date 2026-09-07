@@ -10,6 +10,7 @@ models/
 .pytest_basetemp/
 .pytest_basetemp_v2*/
 .pytest_v2*/
+.pytest_autonomy*/
 harness/agent.toml
 .mcp.json
 !plugins/thermoforge/.mcp.json

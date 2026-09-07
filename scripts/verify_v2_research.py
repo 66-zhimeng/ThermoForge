@@ -165,7 +165,7 @@ def run(args):
         raise RuntimeError(str(goal["summary"]))
     configuration = {
         "roots": {"research_root": str(ctx.research_root), "vault_root": str(ctx.vault_root), "models_root": str(ctx.models_root)},
-        "run_config": {"goal_id": goal["id"], "dataset_ref": ref, "candidates": 5,
+        "run_config": {"goal_id": goal["id"], "dataset_ref": ref, "research_mode": "acceptance", "candidates": 5,
                        "max_experiments": 10, "max_experiments_per_track": 2, "max_turns": 5,
                        "token_budget": args.token_budget, "turn_timeout_seconds": 180,
                        "experiment_timeout_seconds": 180, "max_failures": 1,

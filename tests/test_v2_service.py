@@ -51,7 +51,7 @@ def service_config(tmp_path, monkeypatch):
     service = ResearchService(ctx, engine_factory=FakeEngine)
     service.start()
     try:
-        yield service, {"goal_id": goal["id"], "dataset_ref": ref, "candidates": 5}
+        yield service, {"goal_id": goal["id"], "dataset_ref": ref, "research_mode": "acceptance", "candidates": 5}
     finally:
         service.close()
     assert service.engine.closed
@@ -177,6 +177,24 @@ def test_prepare_missing_codex_returns_unavailable_without_model_requests(servic
     assert result["available"] is False and result["ready"] is False
     assert any("Codex" in e for e in result["errors"])
     assert service.engine.launched == []
+
+
+def test_reused_winner_reads_original_artifact_without_pretending_local_execution(service_config):
+    service, config = service_config
+    rid = start(service, config)
+    source = completed_job(service, rid, score=.1, holdout=.3)
+    original_id = source["id"]
+    service.store.update_record(rid, "jobs", original_id, {"experiment_fingerprint": "identical", "executed": True})
+    service.store.create_track(rid, "candidate-reused", "candidate", research_root=str(service.store.root / "no-artifacts"))
+    service.store.add_record(rid, "jobs", {"idea_id": source["idea_id"], "status": "completed",
+        "result": source["result"], "reused_from_job_id": original_id, "executed": False,
+        "experiment_fingerprint": "identical"}, track_id="candidate-reused", record_id="JOB-000")
+    service.store.update_run(rid, {"status": "completed"})
+    final = service.get_report(rid)["final_evaluation"]
+    assert final["job_id"] == "JOB-000"
+    assert final["artifact_job_id"] == original_id
+    assert final["artifact_track_id"] == source["track_id"]
+    assert final["surfaces"]["A"]["metrics"]["CVRMSE"] == .3
 
 
 def test_report_and_dispatch_reject_nonexistent_track_or_operation(service_config):

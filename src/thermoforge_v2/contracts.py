@@ -30,6 +30,8 @@ class RunConfig(BaseModel):
     max_turns: int = Field(default=8, ge=1, le=200)
     token_budget: int = Field(default=1000000, ge=1000)
     strategy: Literal["independent", "top_k", "adaptive"] = "independent"
+    research_mode: Literal["autonomous", "acceptance"] = "autonomous"
+    reuse_experiments: bool = False
     top_k: int = Field(default=2, ge=1, le=16)
     stagnation_rounds: int = Field(default=2, ge=1, le=20)
     experiment_workers: int = Field(default=1, ge=1, le=1)
@@ -50,6 +52,10 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def finite_numbers(self):
+        if self.research_mode == "autonomous" and self.max_turns < 3:
+            raise ValueError("自主研究至少需要三次执行回合：冻结提案、实验、结题")
+        if self.reuse_experiments and self.strategy == "independent":
+            raise ValueError("独立对照不复用其他候选的实验；共享模式可显式开启复用")
         if self.candidates and self.max_turns < 2:
             raise ValueError("多候选研究至少需要两轮主智能体预算（准备与结题）")
         for name in ("experiment_timeout_seconds", "turn_timeout_seconds",

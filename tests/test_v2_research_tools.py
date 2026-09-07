@@ -22,7 +22,7 @@ def setup(tmp_path):
         "target": TARGET, "candidate_inputs": list(FEATURES), "acceptance": {"cvrmse_max": 0.5},
     })
     assert goal["ok"], goal
-    config = {"goal_id": goal["id"], "dataset_ref": ref, "candidates": 5,
+    config = {"goal_id": goal["id"], "dataset_ref": ref, "research_mode": "acceptance", "candidates": 5,
               "max_experiments": 8, "max_experiments_per_track": 4, "seed": 79,
               "purge_seconds": 0, "embargo_seconds": 2700}
     protocol = prepare_protocol(ctx, config)

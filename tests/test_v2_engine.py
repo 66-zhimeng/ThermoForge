@@ -211,7 +211,7 @@ class FakeSession:
 def make_engine(tmp_path, scenario, **config):
     store = RunStore(tmp_path / "state")
     run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "test@rev_0001",
-                            "candidates": 0, "max_turns": 4,
+                            "research_mode": "acceptance", "candidates": 0, "max_turns": 4,
                             "max_experiments_per_track": 4, **config},
                            {"fingerprint": "frozen"}, "test")
     engine = ResearchEngine(store, None, session_factory=scenario.session, tools_factory=scenario.tools)

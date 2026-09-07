@@ -29,6 +29,9 @@ from thermoforge_core.contracts.experiment import Experiment, ModelSpec
 from thermoforge_core.contracts.research_goal import ResearchGoal
 from thermoforge_core.timeutil import parse_time_resolution, parse_timestamp
 from thermoforge_data.views import materialize_view, validate_view_definition
+from thermoforge_research.model_catalog import (
+    DATA_ESTIMATORS, HYBRID_RESIDUALS, MODEL_CATALOG_HINT, PHYSICS_MODELS,
+)
 from thermoforge_research.model_lab import NAME_PATTERN, parse_lab_ref
 from thermoforge_research.modelability import build_modelability_report
 from thermoforge_research.runner import current_environment_lock
@@ -40,6 +43,7 @@ from thermoforge_research.tools import (
 from thermoforge_research.whitelist import (
     check_candidate_inputs, check_view_within_whitelist,
 )
+from thermoforge_v2.experiment_identity import experiment_fingerprint
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_SOURCE_CHARS = 120_000
@@ -319,6 +323,11 @@ class ResearchTools:
     def protocol(self) -> dict[str, Any]:
         return self.store.get_run(self.run_id)["protocol"]
 
+    @property
+    def autonomous(self) -> bool:
+        # 未记录该字段的旧运行保持原验收行为，不能在恢复时更换研究协议。
+        return self.store.get_run(self.run_id)["config"].get("research_mode", "acceptance") == "autonomous"
+
     def _records(self, kind: str) -> list[dict[str, Any]]:
         return self.store.records(self.run_id, kind, track_id=self.track_id)
 
@@ -332,9 +341,11 @@ class ResearchTools:
             foreign = next((item for item in self.store.records(self.run_id, kind)
                             if item["id"] == record_id), None)
             if foreign is not None and track.get("role") == "main":
-                # 协调者已可通过 research_team 读取本 run 的安全事实，应可据此
-                # 登记自己的新想法，无需为了自身引用而向候选广播资料。
-                return foreign
+                # 首轮提案也对协调者保持隔离；共同任务与证据必须先确定，
+                # 防止主智能体根据先到的候选想法继续引导尚未提交的候选。
+                if (not self.autonomous or run.get("final_report_phase")
+                        or self.store.autonomy_state(self.run_id)["sharing_ready"]):
+                    return foreign
             messages = [m for m in self.store.records(self.run_id, "messages")
                         if m.get("from") == "main" and m.get("to") in {self.track_id, "all"}
                         and record_id in (m.get("evidence_ids") or [])]
@@ -343,8 +354,18 @@ class ResearchTools:
                 # 初始共同证据与后期跨候选分享不同；只有服务标明初始任务、
                 # 且主智能体本身登记的显式引用能在独立模式/首轮使用。
                 return foreign
-            # 初轮保持独立；只有后续共享策略下主智能体经软件明确发布的 ID 可读。
-            if run["config"]["strategy"] != "independent" and int(track.get("turns", 0)) >= 2:
+            # 自主研究按已完成的研究阶段开放分享，不能用对话次数绕过首轮隔离。
+            sharing_ready = (self.store.autonomy_state(self.run_id)["sharing_ready"]
+                             if self.autonomous else int(track.get("turns", 0)) >= 2)
+            if self.autonomous and track.get("role") == "candidate":
+                # 失败候选曾被阶段屏障豁免，恢复后仍须先完成自己的独立首轮。
+                # 全队已经进入 sharing 不能替代当前候选的首次提案/实验。
+                proposals = {p["id"] for p in self._records("proposals")
+                             if p.get("status") == "committed"}
+                independent_done = any(j.get("proposal_id") in proposals and j.get("status") in {
+                    "completed", "failed", "cancelled", "interrupted"} for j in self._records("jobs"))
+                sharing_ready = sharing_ready and independent_done
+            if run["config"]["strategy"] != "independent" and sharing_ready:
                 if messages and foreign is not None:
                     return foreign
         raise ValueError(f"{kind} 引用不存在或不属于当前轨迹: {record_id}")
@@ -383,11 +404,16 @@ class ResearchTools:
              ["statement", "reason", "prediction", "falsification", "origin"]),
             ("research_lab_submit", "自治提交单文件模型源码，五连检通过返回固定 name@vN 引用，无需人工审批。", {
                 "name": _STRING, "source": _STRING, "description": _STRING}, ["name", "source"]),
+            ("research_proposal_commit", "自主研究在实验前冻结方案。首轮各候选分别提交后才开放实验；后续方案必须引用自己的真实实验反馈及分析发现。", {
+                "idea_id": _STRING, "model": ModelSpec.model_json_schema(),
+                "purpose": {"enum": ["explore", "refine", "replicate"]},
+                "expected_cost": _STRING, "idempotency_key": _STRING},
+             ["idea_id", "model", "purpose", "idempotency_key"]),
             ("research_experiment_run", "预留预算并运行自己的模型实验，重复幂等键不会再次训练；只返回验证反馈。", {
                 "idea_id": _STRING, "model": ModelSpec.model_json_schema(),
-                "idempotency_key": _STRING}, ["idea_id", "model", "idempotency_key"]),
+                "proposal_id": _STRING, "idempotency_key": _STRING}, ["idea_id", "model", "idempotency_key"]),
             ("research_history", "读取当前轨迹来源、想法、实验反馈、发现与报告；不读取其他候选或最终留出。", {
-                "kind": {"enum": ["sources", "ideas", "jobs", "findings", "reports"]},
+                "kind": {"enum": ["sources", "ideas", "proposals", "jobs", "findings", "reports", "stops"]},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, []),
             ("research_finding_create", "根据自己的实验登记发现、解释和局限，也记录失败原因。", {
                 "statement": _STRING, "interpretation": _STRING, "limitations": _STRING,
@@ -399,9 +425,12 @@ class ResearchTools:
                 "idea_ids": _STRINGS, "job_ids": _STRINGS, "finding_ids": _STRINGS,
                 "limitations": _STRING},
              ["title", "summary", "body", "idea_ids", "job_ids", "limitations"]),
+            ("research_stop", "有依据地结束自己的自主研究。必须先提交覆盖全部已结算实验的报告，引用停止依据，且没有执行中的实验。不会停止其他候选。", {
+                "reason": _STRING, "evidence_ids": _STRINGS}, ["reason", "evidence_ids"]),
         ]
         return [{"name": name, "description": description,
-                 "inputSchema": _schema(props, required)}
+                 "inputSchema": _schema(props, required + (["proposal_id"] if (
+                     name == "research_experiment_run" and self.autonomous) else []))}
                 for name, description, props, required in specs]
 
     def call(self, name: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -441,18 +470,36 @@ class ResearchTools:
 
     def _protocol(self) -> dict[str, Any]:
         p = self.protocol
-        return {"goal": p["goal_definition"], "view": p["view_definition"],
+        response = {"goal": p["goal_definition"], "view": p["view_definition"],
                 "validation": p["validation"], "metrics": p["metrics"],
                 "fingerprint": p["fingerprint"], "feedback_surface": "validate",
                 "random_seed": p["runtime"]["random_seed"],
                 "split_boundaries": p.get("split_boundaries"),
                 "evaluation_note": "最终留出 A/B/C、物理留出检查和完整原始制品不向研究会话反馈。",
+                "model_catalog": {
+                    "data_estimators": list(DATA_ESTIMATORS),
+                    "physics_models": list(PHYSICS_MODELS),
+                    "hybrid_residuals": list(HYBRID_RESIDUALS),
+                    "note": MODEL_CATALOG_HINT.replace("tf_lab_submit", "research_lab_submit"),
+                },
                 "model_interface": {
                     "module": "MODEL_FORMAT='thermoforge.lab.<name>.v1'; INPUT_ROLES=[] 或角色名列表; build_model(hyperparameters, seed); load_model(directory)",
                     "model": "fit(df,y)->self; predict(df)->数值序列; save(directory) 写 model.json，format=MODEL_FORMAT，禁止pickle",
                     "data": "df 只含冻结features和object_id/timestamp，目标不在df；五连检通用特征名f1..f4，勿硬编码真实列名。角色映射可用 hyperparameters.inputs='role=column;...'。",
                     "validation": "静态扫描+接口、fit/predict、保存、重载、同种子确定性五连检；无人工批准。",
                 }}
+        response["research_mode"] = "autonomous" if self.autonomous else "acceptance"
+        if self.autonomous:
+            state = self.store.autonomy_state(self.run_id)
+            # 只返回阶段，不公开其他候选尚未共享的方案、结果及重复实验信息。
+            response["research_stage"] = {key: state[key] for key in (
+                "stage", "proposal_barrier_open", "sharing_ready")}
+            response["research_workflow"] = (
+                "独立登记想法→research_proposal_commit 冻结方案→全部候选提交后运行实验"
+                "→登记实际反馈的 finding→引用自己的最新实验修订方案。"
+                "达到目标或有依据停止时先提交完整报告，再调用 research_stop。"
+                "不同候选可得到相同结论，不强迫制造差异。")
+        return response
 
     def _data_summary(self) -> dict[str, Any]:
         p = self.protocol
@@ -582,30 +629,91 @@ class ResearchTools:
             raise ValueError(json.dumps({"summary": env["summary"], "diagnostics": env["diagnostics"]}, ensure_ascii=False))
         return {"id": env["id"], **env["summary"]}
 
-    def _experiment_run(self, idea_id: str, model: Mapping[str, Any],
-                        idempotency_key: str) -> dict[str, Any]:
-        idea = self._record("ideas", idea_id)
+    def _model_request(self, model: Mapping[str, Any]) -> tuple[ModelSpec, dict[str, Any]]:
         p = self.protocol
-        if idea.get("protocol_fingerprint") != p["fingerprint"]:
-            raise ValueError("想法不属于当前冻结评价协议")
         spec = ModelSpec(**dict(model))
         if spec.category != "lab" and not p["goal_definition"]["model_types"].get(spec.category, False):
             raise ValueError("目标不允许该模型类别")
+        lab_hash = None
         if spec.category == "lab":
             name, version = parse_lab_ref(str(spec.hyperparameters["lab"]))
             if version is None:
                 raise ValueError("实验必须使用不可漂移的模型引用 name@vN")
             self.ctx.lab_store.require_runnable(name, version)
+            lab_hash = self.ctx.lab_store.get(name, version)["content_hash"]
         request = {"model": spec.model_dump(mode="json"), "protocol_fingerprint": p["fingerprint"]}
+        if self.autonomous:
+            request["experiment_fingerprint"] = experiment_fingerprint(
+                p["fingerprint"], request["model"], lab_content_hash=lab_hash)
+            if lab_hash is not None:
+                request["lab_content_hash"] = lab_hash
+        return spec, request
+
+    def _proposal_commit(self, idea_id: str, model: Mapping[str, Any], purpose: str,
+                         idempotency_key: str, expected_cost: str | None = None) -> dict[str, Any]:
+        if not self.autonomous:
+            raise ValueError("只有自主研究模式需要提交冻结方案")
+        if purpose not in {"explore", "refine", "replicate"}:
+            raise ValueError("方案目的必须为 explore、refine 或 replicate")
+        idea = self._record("ideas", idea_id)
+        if idea.get("protocol_fingerprint") != self.protocol["fingerprint"]:
+            raise ValueError("想法不属于当前冻结评价协议")
+        # 重新验证引用的可见性，避免把未获共享授权的跨轨迹证据写入冻结方案。
+        self._refs("sources", idea.get("source_ids") or [], allow_shared=True)
+        self._refs("ideas", idea.get("parent_idea_ids") or [], allow_shared=True)
+        parents = self._refs("jobs", idea.get("parent_job_ids") or [], allow_shared=True)
+        _, request = self._model_request(model)
+        findings = [finding["id"] for finding in self._records("findings")
+                    if set(finding.get("job_ids") or []) & set(parents)]
+        details = {"purpose": purpose,
+                   "expected_cost": _text(expected_cost, "expected_cost", 2000) if expected_cost is not None else None,
+                   "parent_job_ids": parents, "finding_ids": findings,
+                   "experiment_fingerprint": request["experiment_fingerprint"],
+                   "lab_content_hash": request.get("lab_content_hash")}
+        return self.store.commit_proposal(
+            self.run_id, self.track_id, idea_id, request["model"], details,
+            _text(idempotency_key, "idempotency_key", 200))
+
+    def _stop(self, reason: str, evidence_ids: list[str]) -> dict[str, Any]:
+        if not self.autonomous:
+            raise ValueError("只有自主研究模式支持有依据的研究停止请求")
+        if not isinstance(evidence_ids, list) or not evidence_ids or any(
+                not isinstance(value, str) or not value.strip() for value in evidence_ids):
+            raise ValueError("停止请求必须引用非空证据 ID 列表")
+        return self.store.request_research_stop(
+            self.run_id, self.track_id, _text(reason, "reason"),
+            list(dict.fromkeys(evidence_ids)))
+
+    @staticmethod
+    def _job_response(job: Mapping[str, Any]) -> dict[str, Any]:
+        response = {"id": job["id"], "status": job["status"], "result": job.get("result")}
+        if "executed" in job:
+            response["executed"] = job["executed"]
+        if job.get("reused_from_job_id"):
+            response.update(reused=True, reused_from_job_id=job["reused_from_job_id"],
+                            reuse_note="复用已共享阶段的同协议、同模型既有结果；本作业未重新训练。")
+        return response
+
+    def _experiment_run(self, idea_id: str, model: Mapping[str, Any],
+                        idempotency_key: str, proposal_id: str | None = None) -> dict[str, Any]:
+        idea = self._record("ideas", idea_id)
+        p = self.protocol
+        if idea.get("protocol_fingerprint") != p["fingerprint"]:
+            raise ValueError("想法不属于当前冻结评价协议")
+        spec, request = self._model_request(model)
+        if self.autonomous:
+            # store 在预算预留事务内核验方案/模型/协议及首轮提交屏障。
+            request["proposal_id"] = _text(proposal_id, "proposal_id", 200)
+        elif proposal_id is not None:
+            raise ValueError("验收模式不接受自主研究方案引用")
         job = self.store.reserve_job(self.run_id, self.track_id, idea_id, request,
                                      _text(idempotency_key, "idempotency_key", 200))
         if not job.get("fresh", False):
-            return {"id": job["id"], "status": job["status"], "result": job.get("result"),
-                    "duplicate": True}
+            return self._job_response(job) | {"duplicate": True}
         with self.experiment_semaphore if self.experiment_semaphore is not None else nullcontext():
             started = self.store.start_job(job["id"])
             if not started.get("started"):
-                return {"id": job["id"], "status": started["status"], "result": started.get("result")}
+                return self._job_response(started)
             run = self.store.get_run(self.run_id)
             try:
                 with self.lock:
@@ -645,6 +753,7 @@ class ResearchTools:
                             "n_samples": surface.get("n_samples"), "model": {"spec": request["model"]},
                             "duration_seconds": env.get("summary", {}).get("duration_seconds")}
                 if spec.category == "lab":
+                    name, version = parse_lab_ref(str(spec.hyperparameters["lab"]))
                     lab = self.ctx.lab_store.get(name, version)
                     feedback["model"].update(lab_ref=spec.hyperparameters["lab"], content_hash=lab["content_hash"])
                 success = bool(env["ok"])
@@ -656,10 +765,10 @@ class ResearchTools:
                 feedback = {"protocol_fingerprint": p["fingerprint"], "error": str(exc)[:1500],
                             "failure_category": "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "implementation"}
                 settled = self.store.settle_job(job["id"], "failed", feedback)
-        return {"id": job["id"], "status": settled["status"], "result": settled.get("result", feedback)}
+        return self._job_response(settled)
 
     def _history(self, kind: str = "jobs", limit: int = 20) -> dict[str, Any]:
-        if kind not in {"sources", "ideas", "jobs", "findings", "reports"}:
+        if kind not in {"sources", "ideas", "proposals", "jobs", "findings", "reports", "stops"}:
             raise ValueError("不允许读取该类记录")
         records = self._records(kind)[-max(1, min(50, int(limit))):]
         if kind == "sources":
@@ -672,7 +781,7 @@ class ResearchTools:
                         job_ids: list[str], idea_ids: list[str] | None = None,
                         failure_category: str = "none") -> dict[str, Any]:
         jobs = self._refs("jobs", job_ids)
-        if not jobs or any(self._record("jobs", j)["status"] not in {"completed", "failed", "cancelled"} for j in jobs):
+        if not jobs or any(self._record("jobs", j)["status"] not in {"completed", "failed", "cancelled", "interrupted"} for j in jobs):
             raise ValueError("发现必须引用已结束的实验作业")
         if failure_category not in {"hypothesis", "implementation", "data", "budget", "none"}:
             raise ValueError("无效失败分类")

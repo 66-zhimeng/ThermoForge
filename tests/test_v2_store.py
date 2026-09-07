@@ -1,6 +1,9 @@
 """V2 状态恢复、幂等提交、并发预算和不可变证据。"""
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
+import sqlite3
 
 import pytest
 
@@ -10,7 +13,7 @@ from thermoforge_v2.store import RunStore
 
 def setup_run(tmp_path, **config):
     store = RunStore(tmp_path / "state")
-    run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001", **config},
+    run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001", "research_mode": "acceptance", **config},
                            {"fingerprint": "frozen"}, "start-one")
     store.update_run(run["run_id"], {"status": "running"})
     for i in range(6):
@@ -20,7 +23,7 @@ def setup_run(tmp_path, **config):
 
 def test_idempotent_start_and_durable_state(tmp_path):
     store, rid = setup_run(tmp_path)
-    same = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001"},
+    same = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001", "research_mode": "acceptance"},
                             {"fingerprint": "frozen"}, "start-one")
     assert same["run_id"] == rid
     assert RunStore(store.root).get_run(rid)["status"] == "running"
@@ -110,7 +113,7 @@ def test_invalid_config_rejected():
 
 def test_queued_pause_wins_over_delayed_scheduler(tmp_path):
     store = RunStore(tmp_path / "state")
-    run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001"},
+    run = store.create_run({"goal_id": "RG-0001", "dataset_ref": "D@rev_0001", "research_mode": "acceptance"},
                            {"fingerprint": "frozen"}, "one")
     rid = run["run_id"]
     store.control(rid, "pause")
@@ -132,3 +135,83 @@ def test_reserved_job_does_not_start_after_pause(tmp_path):
     assert store.get_run(rid)["experiments_settled"] == 1
     assert not store.start_job(job["id"])["started"]
     assert store.get_run(rid)["experiments_settled"] == 1
+
+
+def legacy_run(tmp_path, **overrides):
+    """写入旧版完整 config/hash，不通过当前 create_run 自动补新字段。"""
+    store = RunStore(tmp_path / "legacy-state")
+    request = {"goal_id": "RG-0001", "dataset_ref": "D@rev_0001",
+               "guidance": "保留初始验收范围", **overrides}
+    config = RunConfig.model_validate(request | {"research_mode": "acceptance"}).model_dump(mode="json")
+    config.pop("research_mode")
+    config.pop("reuse_experiments")
+
+    def encode_old(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False,
+                          separators=(",", ":"))
+
+    request_hash = hashlib.sha256(encode_old(config).encode()).hexdigest()
+    run = {"run_id": "RUN-legacy", "config": config, "protocol": {"fingerprint": "legacy-frozen"},
+           "status": "running", "version": 3, "created_at": 1.0, "updated_at": 1.0,
+           "error": None, "experiments_reserved": 0, "experiments_settled": 0, "tokens_used": 0}
+    with sqlite3.connect(store.path) as db:
+        db.execute("INSERT INTO runs VALUES(?,?,?,?)",
+                   (run["run_id"], "legacy-start", request_hash, encode_old(run)))
+    return RunStore(store.root), request, run, request_hash
+
+
+def retry_legacy(store, operation, request):
+    if operation == "find_request":
+        return store.find_request(request, "legacy-start")
+    return store.create_run(request, {"fingerprint": "new-environment-must-not-replace-old"}, "legacy-start")
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+def test_legacy_start_retry_uses_old_hash_without_migrating_research_mode(tmp_path, operation):
+    store, request, original, old_hash = legacy_run(tmp_path)
+    repeated = retry_legacy(store, operation, request)
+    assert repeated == original
+    assert "research_mode" not in repeated["config"]
+    assert "reuse_experiments" not in repeated["config"]
+    assert repeated["protocol"]["fingerprint"] == "legacy-frozen"
+    assert store.autonomy_state(repeated["run_id"])["enabled"] is False
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT request_hash FROM runs WHERE id=?", (original["run_id"],)).fetchone()[0] == old_hash
+        assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+def test_legacy_guidance_update_keeps_acceptance_and_original_start_retry(tmp_path, operation):
+    # 旧验收允许两回合；重新套用自主默认值会拒绝这份原本有效的运行。
+    store, request, original, old_hash = legacy_run(tmp_path, max_turns=2)
+    updated = store.control(original["run_id"], "update", expected_version=original["version"],
+                            changes={"guidance": "补充已有实验的失败分析"})
+    assert updated["config"]["research_mode"] == "acceptance"
+    assert updated["config"]["reuse_experiments"] is False
+    assert updated["config"]["max_turns"] == 2
+    assert updated["config"]["guidance"] == "补充已有实验的失败分析"
+    assert store.autonomy_state(original["run_id"])["enabled"] is False
+    reopened = RunStore(store.root)
+    repeated = retry_legacy(reopened, operation, request)
+    assert repeated == updated
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT request_hash FROM runs WHERE id=?", (original["run_id"],)).fetchone()[0] == old_hash
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+@pytest.mark.parametrize("new_options", [{"research_mode": "autonomous"}, {"reuse_experiments": True}])
+def test_explicit_autonomy_or_reuse_cannot_reuse_legacy_start_key(tmp_path, operation, new_options):
+    store, request, original, _ = legacy_run(tmp_path, strategy="top_k")
+    with pytest.raises(V2Error) as conflict:
+        retry_legacy(store, operation, request | new_options)
+    assert conflict.value.code == "TFV2-CONFLICT"
+    assert store.get_run(original["run_id"]) == original
+
+
+@pytest.mark.parametrize("operation", ["find_request", "create_run"])
+def test_legacy_compatibility_does_not_accept_changed_start_request(tmp_path, operation):
+    store, request, original, _ = legacy_run(tmp_path)
+    with pytest.raises(V2Error) as conflict:
+        retry_legacy(store, operation, request | {"dataset_ref": "OTHER@rev_0001"})
+    assert conflict.value.code == "TFV2-CONFLICT"
+    assert store.get_run(original["run_id"]) == original
