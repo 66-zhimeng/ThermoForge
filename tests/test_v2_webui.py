@@ -84,10 +84,61 @@ def test_create_uses_actual_discovery_and_six_codex_configuration(monkeypatch):
     assert config["goal_id"] == "RG-0001"
     assert config["dataset_ref"] == "CHILLER@rev_0001"
     assert config["candidates"] == 5
+    assert config["research_mode"] == "autonomous"
+    assert config["reuse_experiments"] is False
+    assert config["max_turns"] >= 3
     assert config["experiment_workers"] == 1
     assert key
     worker = next(w for w in app.number_input if w.label == "实验并发数（当前固定串行）")
     assert worker.value == 1 and worker.disabled
+    assert next(w for w in app.number_input if w.label == "每条轨迹最多执行片段").proto.min == 3
+
+
+def test_shared_reuse_is_opt_in_and_reset_when_returning_to_independent(monkeypatch):
+    client = FakeClient(with_run=False)
+    app = run_page(monkeypatch, client)
+    reuse = next(w for w in app.checkbox if w.label == "共享后复用相同实验结果")
+    assert reuse.disabled and not reuse.value
+    next(w for w in app.selectbox if w.label == "研究策略").set_value("top_k").run()
+    reuse = next(w for w in app.checkbox if w.label == "共享后复用相同实验结果")
+    assert not reuse.disabled and not reuse.value
+    reuse.check().run()
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert not app.exception
+    assert client.started[0][0]["strategy"] == "top_k"
+    assert client.started[0][0]["reuse_experiments"] is True
+    next(w for w in app.selectbox if w.label == "研究策略").set_value("independent").run()
+    reuse = next(w for w in app.checkbox if w.label == "共享后复用相同实验结果")
+    assert reuse.disabled and not reuse.value
+    next(b for b in app.button if b.label == "启动后台研究").click().run()
+    assert not app.exception
+    assert client.started[-1][0]["strategy"] == "independent"
+    assert client.started[-1][0]["reuse_experiments"] is False
+
+
+def test_monitor_traces_proposals_stops_and_reused_results(monkeypatch):
+    client = FakeClient()
+    client.snapshot["run"].update(research_stage="sharing")
+    client.snapshot["run"]["config"].update(research_mode="autonomous", strategy="top_k")
+    client.snapshot["proposals"] = [{
+        "id": "PROPOSAL-1", "track_id": "candidate-1", "idea_id": "IDEA-1", "version": 2,
+        "status": "committed", "purpose": "refine", "parent_job_ids": ["JOB-1"],
+        "model": {"category": "data", "estimator": "ridge"}}]
+    client.snapshot["stops"] = [{
+        "id": "STOP-1", "track_id": "candidate-1", "reason": "预算内已完成预期假说检验",
+        "evidence_ids": ["FINDING-1", "REPORT-1"], "created_at": 1}]
+    client.snapshot["jobs"] = [{
+        "id": "JOB-2", "track_id": "candidate-1", "proposal_id": "PROPOSAL-1", "idea_id": "IDEA-1",
+        "status": "completed", "executed": False, "reused_from_job_id": "JOB-1",
+        "result": {"experiment_id": "EXP-0001", "metrics": {"CVRMSE": .12}}}]
+    app = run_page(monkeypatch, client)
+    assert not app.exception
+    assert next(m for m in app.metric if m.label == "研究阶段").value == "共享证据与调整"
+    assert next(m for m in app.metric if m.label == "已冻结方案").value == "1"
+    assert next(m for m in app.metric if m.label == "已登记停止决定").value == "1"
+    tables = " ".join(frame.value.to_json(force_ascii=False) for frame in app.dataframe)
+    assert "PROPOSAL-1" in tables and "预算内已完成预期假说检验" in tables
+    assert "复用既有结果" in tables and "FINDING-1" in tables
 
 
 def test_unavailable_runtime_disables_start_but_keeps_monitor(monkeypatch):

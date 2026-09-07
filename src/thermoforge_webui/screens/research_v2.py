@@ -21,7 +21,14 @@ _LABELS = {"created": "已创建", "queued": "排队中", "pending": "待启动"
            "waiting": "等待反馈", "waiting_experiment": "等待实验", "idle": "空闲",
            "disconnected": "连接中断", "interrupted": "已中断", "failed": "失败",
            "completed": "已完成", "cancelled": "已取消", "cancelling": "取消中",
-           "budget_exhausted": "预算耗尽", "needs_input": "等待必要输入"}
+           "budget_exhausted": "预算耗尽", "needs_input": "等待必要输入",
+           "committed": "已冻结", "independent_proposals": "独立提交方案",
+           "independent_experiments": "独立实验与反馈", "sharing": "共享证据与调整",
+           "connect": "连接实例", "reasoning": "研究中", "tool": "调用研究工具",
+           "awaiting_independent_proposals": "等待首轮方案齐备",
+           "awaiting_coordination": "等待主智能体比较", "research_stopped": "已说明停止依据",
+           "reported": "已提交报告", "reported_with_limits": "已报告预算限制",
+           "report_due": "待补齐报告", "final_report_due": "待生成综合报告", "stopped": "已停止"}
 
 
 def _client():
@@ -110,6 +117,19 @@ def _create(client, preparation: dict[str, Any]) -> None:
         st.info("需要已有研究目标与数据修订版。请先在「AI 研究」和「数据」页准备，或让副驾驶完成准备。")
         return
     defaults = preparation.get("defaults") or {}
+    st.caption("自主研究：统一目标与预算，由各候选独立选择方法。先提交方案，再实验、分析反馈并修订。")
+    strategy = st.selectbox("研究策略", ["independent", "top_k", "adaptive"],
+                            key="v2_create_strategy",
+                            format_func=lambda s: {"independent": "独立探索", "top_k": "保留优质路线", "adaptive": "根据进展调整策略"}[s])
+    if strategy == "independent" and st.session_state.get("v2_create_reuse"):
+        st.session_state["v2_create_reuse"] = False
+    reuse = st.checkbox("共享后复用相同实验结果", key="v2_create_reuse",
+                        disabled=strategy == "independent",
+                        help="仅共享策略可用。首轮仍各自执行；复用结果会明确标注，不计为独立复现。")
+    if strategy == "independent":
+        st.caption("独立探索全程保留各自的研究路线，结题后统一比较。")
+    else:
+        st.caption("先独立完成首轮方案和实验反馈，再由主智能体分享有依据的结果。")
     with st.form("v2_create_run"):
         left, right = st.columns(2)
         goal_id = left.selectbox("研究目标", list(goals), format_func=goals.get, key="v2_create_goal")
@@ -119,11 +139,10 @@ def _create(client, preparation: dict[str, Any]) -> None:
         reasoning = right.text_input("推理强度（留空使用运行时配置）", value=str(defaults.get("reasoning_effort") or ""))
         candidates = left.selectbox("研究配置", [5, 0], index=0,
                                     format_func=lambda n: "主 Codex ＋ 5 个候选" if n else "单 Codex 对照基线")
-        strategy = right.selectbox("研究策略", ["independent", "top_k", "adaptive"],
-                                   format_func=lambda s: {"independent": "独立探索", "top_k": "保留优质路线", "adaptive": "根据进展调整策略"}[s])
         max_experiments = left.number_input("全局实验上限", min_value=1, value=int(defaults.get("max_experiments", 20)), step=1)
         per_track = right.number_input("每条轨迹实验上限", min_value=1, value=int(defaults.get("max_experiments_per_track", 4)), step=1)
-        max_turns = left.number_input("每条轨迹最多执行片段", min_value=1, value=int(defaults.get("max_turns", 8)), step=1)
+        max_turns = left.number_input("每条轨迹最多执行片段", min_value=3, value=max(3, int(defaults.get("max_turns", 8))), step=1,
+                                     help="至少保留方案、实验与结题三个执行片段。")
         token_budget = right.number_input("全局 token 预算", min_value=1000, value=int(defaults.get("token_budget", 1000000)), step=1000)
         workers = left.number_input("实验并发数（当前固定串行）", min_value=1, max_value=1, value=1, step=1, disabled=True)
         timeout = right.number_input("单次实验超时（秒）", min_value=10, max_value=7200, value=int(defaults.get("experiment_timeout_seconds", 300)), step=30)
@@ -135,6 +154,7 @@ def _create(client, preparation: dict[str, Any]) -> None:
     if not submitted:
         return
     config = {"goal_id": goal_id, "dataset_ref": dataset_ref, "candidates": candidates,
+              "research_mode": "autonomous", "reuse_experiments": bool(reuse and strategy != "independent"),
               "model": model.strip() or None, "reasoning_effort": reasoning.strip() or None,
               "max_experiments": int(max_experiments),
               "max_experiments_per_track": int(per_track), "max_turns": int(max_turns),
@@ -171,12 +191,23 @@ def _monitor(client, run_id: str) -> None:
     run = snapshot.get("run") or {}
     tracks = snapshot.get("tracks") or []
     jobs = snapshot.get("jobs") or []
+    proposals = snapshot.get("proposals") or []
+    stops = snapshot.get("stops") or []
+    autonomous = (run.get("config") or {}).get("research_mode", "acceptance") == "autonomous"
     status = run.get("status")
     columns = st.columns(4)
     columns[0].metric("运行状态", _label(status))
     columns[1].metric("实例记录", len(tracks))
     columns[2].metric("执行中的轨迹", sum(t.get("status") == "running" for t in tracks))
     columns[3].metric("实验请求", len(jobs))
+    if autonomous:
+        progress = st.columns(3)
+        stage = "生成综合报告" if run.get("final_report_phase") else _label(run.get("research_stage"))
+        progress[0].metric("研究阶段", stage)
+        progress[1].metric("已冻结方案", len(proposals))
+        progress[2].metric("已登记停止决定", len(stops))
+    else:
+        st.caption("这是功能验收运行，按其原有流程展示；新建研究使用自主探索。")
     st.caption(f"运行 {run_id} · 版本 {run.get('version', '不可得')} · 最近更新 {_timestamp(run.get('updated_at'))}")
     if run.get("error"):
         st.error(_display(run["error"]))
@@ -192,18 +223,40 @@ def _monitor(client, run_id: str) -> None:
     st.markdown("#### 后台实例与研究轨迹")
     st.caption("进程 ID 仅用于核对实例；是否推进研究以阶段、最近事件和实验反馈为准。页面每 3 秒刷新。")
     if tracks:
+        latest_proposals = {p.get("track_id"): p for p in proposals}
+        latest_stops = {s.get("track_id"): s for s in stops}
         st.dataframe([{"轨迹": t.get("track_id"), "角色": "主智能体" if t.get("role") == "main" else t.get("role"),
-                       "状态": _label(t.get("status")), "阶段": t.get("phase"), "进程 ID": t.get("pid"),
+                       "状态": _label(t.get("status")), "阶段": _label(t.get("phase")), "进程 ID": t.get("pid"),
+                       "方案版本": latest_proposals.get(t.get("track_id"), {}).get("version"),
+                       "停止依据": latest_stops.get(t.get("track_id"), {}).get("reason"),
                        "实例": t.get("instance_id"), "会话": t.get("session_id") or t.get("thread_id"),
                        "执行片段": t.get("turns"), "最近事件": _timestamp(t.get("last_event_at") or t.get("updated_at")),
                        "用量": _display(t.get("usage")), "错误": _display(t.get("error"))}
                       for t in tracks], hide_index=True, width="stretch")
     else:
         st.info("服务尚未登记研究实例。")
+    if autonomous or proposals or stops:
+        with st.expander("研究方案与停止依据", expanded=bool(proposals or stops)):
+            if proposals:
+                st.dataframe([{"方案": p.get("id"), "轨迹": p.get("track_id"), "版本": p.get("version"),
+                               "状态": _label(p.get("status")), "想法": p.get("idea_id"),
+                               "目的": {"explore": "探索", "refine": "根据反馈修订", "replicate": "复现"}.get(p.get("purpose"), p.get("purpose")),
+                               "模型": _display(p.get("model")), "依据实验": _display(p.get("parent_job_ids") or [])}
+                              for p in proposals], hide_index=True, width="stretch")
+            else:
+                st.caption("各候选正在独立准备首轮方案。方案齐备后，软件继续调度实验。")
+            if stops:
+                st.dataframe([{"轨迹": s.get("track_id"), "停止理由": s.get("reason"),
+                               "依据": _display(s.get("evidence_ids") or []), "时间": _timestamp(s.get("created_at"))}
+                              for s in stops], hide_index=True, width="stretch")
+            else:
+                st.caption("尚无研究停止决定。预算限制或中断状态仍以运行与轨迹记录为准。")
     with st.expander("实验队列", expanded=bool(jobs)):
         if jobs:
             st.dataframe([{"请求": j.get("id"), "轨迹": j.get("track_id"), "想法": j.get("idea_id"),
+                           "方案": j.get("proposal_id"),
                            "状态": _label(j.get("status")), "实验": (j.get("result") or {}).get("experiment_id"),
+                           "执行方式": "复用既有结果" if j.get("reused_from_job_id") else "已执行" if j.get("executed") is True else "未记录" if "executed" not in j else "尚未执行",
                            "指标": _display((j.get("result") or {}).get("metrics")),
                            "错误": _display((j.get("result") or {}).get("error") or j.get("error"))}
                           for j in jobs], hide_index=True, width="stretch")
